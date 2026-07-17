@@ -1,0 +1,121 @@
+[
+  {
+    "id": "133a01ae60dd",
+    "name": "travel planner Agent",
+    "url": "http://localhost:10001",
+    "description": "travel planner",
+    "provider": null,
+    "capabilities": {
+      "extensions": null,
+      "pushNotifications": null,
+      "stateTransitionHistory": null,
+      "streaming": true
+    },
+    "inputModes": [
+      "text"
+    ],
+    "outputModes": [
+      "text"
+    ],
+    "skills": [
+      {
+        "description": "travel planner",
+        "examples": [
+          "hello",
+          "nice to meet you!"
+        ],
+        "id": "travel_planner",
+        "inputModes": null,
+        "name": "travel planner agent",
+        "outputModes": null,
+        "security": null,
+        "tags": [
+          "travel planner"
+        ]
+      }
+    ],
+    "createdAt": "2026-07-15T14:30:45.389531"
+  },
+  {
+    "id": "c521491b0e96",
+    "name": "Currency Agent",
+    "url": "http://localhost:10000",
+    "description": "Helps with exchange rates for currencies",
+    "provider": null,
+    "capabilities": {
+      "extensions": null,
+      "pushNotifications": true,
+      "stateTransitionHistory": null,
+      "streaming": true
+    },
+    "inputModes": [
+      "text",
+      "text/plain"
+    ],
+    "outputModes": [
+      "text",
+      "text/plain"
+    ],
+    "skills": [
+      {
+        "description": "Helps with exchange values between various currencies",
+        "examples": [
+          "What is exchange rate between USD and GBP?"
+        ],
+        "id": "convert_currency",
+        "inputModes": null,
+        "name": "Currency Exchange Rates Tool",
+        "outputModes": null,
+        "security": null,
+        "tags": [
+          "currency conversion",
+          "currency exchange"
+        ]
+      }
+    ],
+    "createdAt": "2026-07-15T14:37:13.553828"
+  },
+  {
+    "id": "1e14c66bfc8b",
+    "name": "RAGAssistant",
+    "url": "http://localhost:10005",
+    "description": "能够进行检索问答的助手",
+    "provider": null,
+    "capabilities": {
+      "extensions": null,
+      "pushNotifications": false,
+      "stateTransitionHistory": false,
+      "streaming": true
+    },
+    "inputModes": [
+      "text",
+      "text/plain"
+    ],
+    "outputModes": [
+      "text",
+      "text/plain"
+    ],
+    "skills": [
+      {
+        "description": "能够进行检索问答的助手",
+        "examples": [
+          "解释下LNG"
+        ],
+        "id": "RAGAssistant",
+        "inputModes": null,
+        "name": "RAGAssistant",
+        "outputModes": null,
+        "security": null,
+        "tags": [
+          "rag",
+          "qa"
+        ]
+      }
+    ],
+    "version": "1.0.0",
+    "protocolVersion": "0.3.0",
+    "preferredTransport": "JSONRPC",
+    "documentationUrl": "",
+    "createdAt": "2026-07-15T15:51:46.710659"
+  }
+]

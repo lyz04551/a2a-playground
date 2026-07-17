@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 #f1f5f9;
+  }
+}
+
+/* Markdown styles for chat messages */
+.markdown p { @apply mb-2 leading-relaxed; }
+.markdown p:last-child { @apply mb-0; }
+.markdown ul { @apply list-disc list-inside mb-2 space-y-1; }
+.markdown ol { @apply list-decimal list-inside mb-2 space-y-1; }
+.markdown code { @apply bg-gray-100 px-1.5 py-0.5 rounded text-sm font-mono text-emerald-700; }
+.markdown pre { @apply bg-gray-50 p-4 rounded-xl mb-2 overflow-x-auto border border-gray-200; }
+.markdown pre code { @apply bg-transparent p-0; }
+.markdown h1 { @apply text-xl font-bold mb-3 mt-4; }
+.markdown h2 { @apply text-lg font-bold mb-2 mt-3; }
+.markdown h3 { @apply text-base font-semibold mb-1 mt-2; }
+.markdown blockquote { @apply border-l-4 border-emerald-300 pl-4 italic text-gray-500 mb-2; }
+.markdown a { @apply text-emerald-600 hover:text-emerald-700 underline; }
+.markdown table { @apply w-full border-collapse mb-2; }
+.markdown th { @apply border border-gray-200 px-3 py-2 bg-gray-50 text-left font-semibold; }
+.markdown td { @apply border border-gray-200 px-3 py-2; }
+
+/* Scrollbar */
+.scrollbar-thin::-webkit-scrollbar { width: 5px; }
+.scrollbar-thin::-webkit-scrollbar-track { background: transparent; }
+.scrollbar-thin::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+.scrollbar-thin::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-in { animation: fadeIn 0.3s ease-out; }
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up { animation: slideUp 0.3s ease-out; }
