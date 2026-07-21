@@ -11,8 +11,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install a2a-sdk
-RUN pip install --no-cache-dir "a2a-sdk>=0.3.25"
+# Install a2a-sdk (locked to 0.3.25 for compatibility)
+RUN pip install --no-cache-dir "a2a-sdk==0.3.25"
 
 # Install LangGraph dependencies (optional)
 RUN pip install --no-cache-dir langgraph langchain-openai langchain-core 2>/dev/null || true

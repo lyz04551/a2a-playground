@@ -16,7 +16,7 @@ from a2a.types import (
     TaskArtifactUpdateEvent,
     TaskStatusUpdateEvent,
 )
-from a2a.utils.constants import PREV_AGENT_CARD_WELL_KNOWN_PATH
+from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH, PREV_AGENT_CARD_WELL_KNOWN_PATH
 
 logger = logging.getLogger(__name__)
 
@@ -49,17 +49,24 @@ async def fetch_agent_card(agent_url: str) -> AgentCard:
     if not url.startswith("http"):
         url = f"http://{url}"
     async with httpx.AsyncClient(timeout=15) as client:
+        # Try A2ACardResolver first (uses AGENT_CARD_WELL_KNOWN_PATH)
         try:
             resolver = A2ACardResolver(client, url)
             return await resolver.get_agent_card()
-        except Exception as e:
+        except Exception:
+            pass
+
+        # Fallback: try well-known paths directly
+        for card_path in [AGENT_CARD_WELL_KNOWN_PATH, PREV_AGENT_CARD_WELL_KNOWN_PATH]:
             try:
-                legacy_url = f"{url}{PREV_AGENT_CARD_WELL_KNOWN_PATH}"
-                resp = await client.get(legacy_url)
+                card_url = f"{url}{card_path}"
+                resp = await client.get(card_url)
                 resp.raise_for_status()
                 return AgentCard.model_validate(resp.json())
-            except Exception as fallback_e:
-                raise Exception(f"Cannot fetch agent card from {agent_url}: {e}; legacy fallback also failed: {fallback_e}")
+            except Exception:
+                continue
+
+        raise Exception(f"Cannot fetch agent card from {agent_url}")
 
 
 def _make_sdk_message(text: str, conversation_id: str) -> Message:
