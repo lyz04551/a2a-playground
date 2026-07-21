@@ -5,7 +5,7 @@ from typing import AsyncIterable, Optional
 
 import httpx
 from a2a.client.card_resolver import A2ACardResolver
-from a2a.client.client import ClientConfig, ClientEvent
+from a2a.client.client import ClientConfig
 from a2a.client.client_factory import ClientFactory
 from a2a.types import (
     AgentCard,

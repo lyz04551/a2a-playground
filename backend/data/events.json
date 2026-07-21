@@ -50,26 +50,6 @@
     "timestamp": "2026-07-15T14:03:43.381355"
   },
   {
-    "id": "6959a24f3ce349b69907755cb77eb19b",
-    "conversation_id": "b3cfdd1d393d4c708d373c939d5de091",
-    "task_id": "497ed5dd354043e4b4d15f9803475341",
-    "event_type": "error",
-    "state": "failed",
-    "content": "JSON-RPC Error code=-32603 data=None message='Internal error'",
-    "metadata": null,
-    "timestamp": "2026-07-15T14:37:24.804065"
-  },
-  {
-    "id": "38357c2626254257a2018e05c9589458",
-    "conversation_id": "b3cfdd1d393d4c708d373c939d5de091",
-    "task_id": "5b9ed167b2cb4549aaef18c33758dfdb",
-    "event_type": "status_update",
-    "state": "completed",
-    "content": "你好！我是专门处理货币兑换的助手。请问有什么关于汇率或货币转换的问题需要我帮忙吗？比如你想查询某种货币的当前汇率，或者进行货币换算？",
-    "metadata": null,
-    "timestamp": "2026-07-15T14:40:25.187585"
-  },
-  {
     "id": "193b0e1772984694b609234a07f6f41c",
     "conversation_id": "5ee9fce1de30473fb9db5ccb0ee9bf42",
     "task_id": "7d3c98c70f72455c9a3cd9412b32fefc",
@@ -88,36 +68,6 @@
     "content": "你好！很高兴能为你提供旅行方面的建议 😊\n\n无论你是想规划一次完美的家庭出游、一个人的背包旅行，还是浪漫的双人度假，我都可以帮你：\n\n📍 **推荐目的地** – 根据你的兴趣、季节和预算\n📅 **定制行程** – 从1日游到长途旅行，合理安排时间\n🍜 **地道美食** – 哪些餐厅值得打卡？哪些街头小吃不能错过？\n🛂 **实用贴士** – 签证、交通、语言、安全、省钱技巧\n🏞️ **小众体验** – 避开人群，发现当地人的秘密角落\n\n告诉我你的想法吧！比如：\n\n- 你想去哪里？\n- 什么时候出发，玩几天？\n- 是独自旅行、情侣出行还是家庭游？\n- 有什么特别的偏好？（自然、文化、美食、冒险……）\n- 预算大概是多少？\n\n等你告诉我，我们一起来打造一段难忘的旅程！✈️🌍",
     "metadata": null,
     "timestamp": "2026-07-15T15:16:42.990128"
-  },
-  {
-    "id": "dfe81e37034e4756907749fd5a38a152",
-    "conversation_id": "334e0895fb2e484fac2f11c7e08b9497",
-    "task_id": "afc6edb8fabd422e9bddc5c0bb732127",
-    "event_type": "error",
-    "state": "failed",
-    "content": "HTTP Error 400: Invalid SSE response or protocol error: Expected response header Content-Type to contain 'text/event-stream', got 'application/json'",
-    "metadata": null,
-    "timestamp": "2026-07-15T15:51:56.114846"
-  },
-  {
-    "id": "1c1fe46d75054b5da013feae9c480dd4",
-    "conversation_id": "334e0895fb2e484fac2f11c7e08b9497",
-    "task_id": "28d2353624aa4245afe2522a08603b45",
-    "event_type": "error",
-    "state": "failed",
-    "content": "HTTP Error 400: Invalid SSE response or protocol error: Expected response header Content-Type to contain 'text/event-stream', got 'application/json'",
-    "metadata": null,
-    "timestamp": "2026-07-15T15:54:36.955486"
-  },
-  {
-    "id": "de236eea86404110a798258e0bc0407e",
-    "conversation_id": "334e0895fb2e484fac2f11c7e08b9497",
-    "task_id": "d378780f223a405e8365f3e17cee4c1c",
-    "event_type": "error",
-    "state": "failed",
-    "content": "HTTP Error 400: Invalid SSE response or protocol error: Expected response header Content-Type to contain 'text/event-stream', got 'application/json'",
-    "metadata": null,
-    "timestamp": "2026-07-15T15:56:34.667799"
   },
   {
     "id": "1f8d33c3081d4511b68404e1a28dcf42",

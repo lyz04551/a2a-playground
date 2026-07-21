@@ -24,22 +24,6 @@
     "message_count": 1
   },
   {
-    "id": "b3cfdd1d393d4c708d373c939d5de091",
-    "agent_id": "c521491b0e96",
-    "title": "你好",
-    "created_at": "2026-07-15T14:37:18.476151",
-    "updated_at": "2026-07-15T14:40:25.187479",
-    "message_count": 3
-  },
-  {
-    "id": "0fd5f31e92814c9499d7d1c536dd12d0",
-    "agent_id": "133a01ae60dd",
-    "title": "New Chat",
-    "created_at": "2026-07-15T15:06:05.167881",
-    "updated_at": "2026-07-15T15:06:05.167899",
-    "message_count": 0
-  },
-  {
     "id": "5ee9fce1de30473fb9db5ccb0ee9bf42",
     "agent_id": "c521491b0e96",
     "title": "你好",
@@ -54,14 +38,6 @@
     "created_at": "2026-07-15T15:16:34.321681",
     "updated_at": "2026-07-16T10:00:09.981214",
     "message_count": 8
-  },
-  {
-    "id": "334e0895fb2e484fac2f11c7e08b9497",
-    "agent_id": "1e14c66bfc8b",
-    "title": "你好",
-    "created_at": "2026-07-15T15:51:50.832395",
-    "updated_at": "2026-07-15T15:56:34.521958",
-    "message_count": 3
   },
   {
     "id": "1206cd3cea37438ab9fb1686927558a8",
