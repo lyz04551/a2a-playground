@@ -7,18 +7,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements first for better caching
+# Copy requirements
 COPY requirements.txt .
+
+# Install google-adk first (it pins langgraph to old version)
+RUN pip install --no-cache-dir "google-adk[extensions]>=2.4.0" 2>/dev/null || true
+
+# Then install core deps (langgraph>=1.2.9 will override google-adk's old langgraph)
 RUN pip install --no-cache-dir -r requirements.txt
-
-# Install a2a-sdk (locked to 0.3.25 for compatibility)
-RUN pip install --no-cache-dir "a2a-sdk==0.3.25"
-
-# Install LangGraph dependencies (optional)
-RUN pip install --no-cache-dir langgraph langchain-openai langchain-core 2>/dev/null || true
-
-# Install google-adk (optional)
-RUN pip install --no-cache-dir google-adk 2>/dev/null || true
 
 # Copy application code
 COPY . .
