@@ -168,5 +168,125 @@
     "content": "{\"tool\": \"send_task\", \"args\": null, \"result\": \"Looking up the exchange rates...Processing the exchange rates..Processing the exchange rates..很抱歉，目前查询汇率时遇到了API服务迁移的问题（该API已从 `frankfurter.app` 迁移至 `frankfurter.dev`），暂时无法获取到最新的汇率数据。\\n\\n不过我可以告诉您，**人民币（CNY）兑美元（USD）** 的汇率是实时变动的，通常您可以通过以下渠道获取最新汇率：\\n\\n1. **银行官网**（如中国银行、工商银行等）\\n2. **财经网站**（如新浪财经、东方财富等）\\n3. **外汇交易平台**\\n\\n如果您稍后再试，或者有其他货币对需要查询，请随时告诉我！\", \"agent\": \"\"}",
     "metadata": null,
     "timestamp": "2026-07-16T15:32:50.855257"
+  },
+  {
+    "id": "f0d2af678a26412a969699f20c030a52",
+    "conversation_id": "d45f3219c96642879b8af05fc42992cf",
+    "task_id": "",
+    "event_type": "started",
+    "state": "running",
+    "content": "Agent processing: 你好",
+    "metadata": null,
+    "timestamp": "2026-07-22T14:41:18.259876"
+  },
+  {
+    "id": "a222dd7e0ba643c493ef760695b5e112",
+    "conversation_id": "d45f3219c96642879b8af05fc42992cf",
+    "task_id": "ac556102-5776-4347-a18a-7807a786257e",
+    "event_type": "completed",
+    "state": "completed",
+    "content": "你好！我是你的 Kubernetes 容器资源编排智能体助手。我可以通过 MCP 工具与 Kubernetes 集群交互，帮助你完成各种容器编排任务。\n\n**我可以帮你做以下事情：**\n\n📋 **资源管理**\n- 查看集群、节点、Pod、命名空间等资源列表\n- 获取资源的详细信息和状态\n- 创建、更新、删除 Kubernetes 资源\n\n🔄 **部署运维**\n- 部署应用（通过 YAML 或 He",
+    "metadata": null,
+    "timestamp": "2026-07-22T14:41:22.122553"
+  },
+  {
+    "id": "264c0a57aa27496c97c7515ea3437002",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704244977",
+    "event_type": "tool_call",
+    "state": "completed",
+    "content": "{\"tool\": \"list_remote_agents\", \"args\": {}, \"result\": null, \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:10:46.343994"
+  },
+  {
+    "id": "6c689f609ad04889b36ce7b42488c29a",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704244977",
+    "event_type": "tool_result",
+    "state": "completed",
+    "content": "{\"tool\": \"list_remote_agents\", \"args\": null, \"result\": \"[{\\\"name\\\": \\\"travel planner Agent\\\", \\\"description\\\": \\\"travel planner\\\", \\\"url\\\": \\\"http://localhost:10001\\\"}, {\\\"name\\\": \\\"Currency Agent\\\", \\\"description\\\": \\\"Helps with exchange rates for currencies\\\", \\\"url\\\": \\\"http://localhost:10000\\\"}, {\\\"name\\\": \\\"K8s Orchestrator Agent\\\", \\\"description\\\": \\\"Kubernetes orchestration agent that manages K8s resources via MCP tools. Supports generating, analyzing, applying, and retrieving K8s resource configurations (Deployment, Service, ConfigMap, etc.) through a LangGraph-powered ReAct agent.\\\", \\\"url\\\": \\\"http://localhost:8051\\\"}]\", \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:10:46.347569"
+  },
+  {
+    "id": "cf481d2f923f4b88964f60f80afa71a1",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704244977",
+    "event_type": "tool_call",
+    "state": "completed",
+    "content": "{\"tool\": \"send_task\", \"args\": {\"agent_name\": \"K8s Orchestrator Agent\", \"message\": \"请查询当前平台有多少个 Kubernetes 集群？\"}, \"result\": null, \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:10:47.416505"
+  },
+  {
+    "id": "91d985ccdb3c4760936548ba31a33a16",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704244977",
+    "event_type": "routing",
+    "state": "completed",
+    "content": "{\"tool\": \"\", \"args\": null, \"result\": null, \"agent\": \"K8s Orchestrator Agent\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:10:50.888487"
+  },
+  {
+    "id": "6bec24daaa0d4714a8cbef5410343194",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704244977",
+    "event_type": "tool_result",
+    "state": "completed",
+    "content": "{\"tool\": \"send_task\", \"args\": null, \"result\": \"🔧 调用工具: **list_k8s_clusters**\\n参数: ```json\\n{}\\n```✅ 工具执行完成:\\n```\\n[{\\\"host\\\":\\\"https://10.2.0.57:6443\\\",\\\"name\\\":\\\"default\\\",\\\"version\\\":\\\"v1.33.4\\\"}]\\n```✅ 工具执行完成:\\n```\\n[{\\\"host\\\":\\\"https://10.2.0.57:6443\\\",\\\"name\\\":\\\"default\\\",\\\"version\\\":\\\"v1.33.4\\\"}]\\n```当前平台已注册的 Kubernetes 集群信息如下：\\n\\n| 集群名称 | API Server 地址 | Kubernetes 版本 |\\n|---------|----------------|----------------|\\n| **default** | `https://10.2.0.57:6443` | **v1.33.4** |\\n\\n目前平台上共有 **1 个** Kubernetes 集群（名为 `default`），运行的是 Kubernetes **v1.33.4** 版本。\\n\\n如果您需要进一步操作该集群（如查看命名空间、Pod、节点等），请随时告诉我！\", \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:10:50.890306"
+  },
+  {
+    "id": "8c1cf539f0b04d36a0afd02c948ca868",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704645044",
+    "event_type": "tool_call",
+    "state": "completed",
+    "content": "{\"tool\": \"list_remote_agents\", \"args\": {}, \"result\": null, \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:17:26.210190"
+  },
+  {
+    "id": "0ae1be2d68494db49ddefc4df1e53b3d",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704645044",
+    "event_type": "tool_result",
+    "state": "completed",
+    "content": "{\"tool\": \"list_remote_agents\", \"args\": null, \"result\": \"[{\\\"name\\\": \\\"travel planner Agent\\\", \\\"description\\\": \\\"travel planner\\\", \\\"url\\\": \\\"http://localhost:10001\\\"}, {\\\"name\\\": \\\"Currency Agent\\\", \\\"description\\\": \\\"Helps with exchange rates for currencies\\\", \\\"url\\\": \\\"http://localhost:10000\\\"}, {\\\"name\\\": \\\"K8s Orchestrator Agent\\\", \\\"description\\\": \\\"Kubernetes orchestration agent that manages K8s resources via MCP tools. Supports generating, analyzing, applying, and retrieving K8s resource configurations (Deployment, Service, ConfigMap, etc.) through a LangGraph-powered ReAct agent.\\\", \\\"url\\\": \\\"http://localhost:8051\\\"}]\", \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:17:26.214463"
+  },
+  {
+    "id": "d397232c79854a3c95723d87e1de61b2",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704645044",
+    "event_type": "tool_call",
+    "state": "completed",
+    "content": "{\"tool\": \"send_task\", \"args\": {\"agent_name\": \"K8s Orchestrator Agent\", \"message\": \"请帮我查询当前 Kubernetes 集群中有多少个 Pod？列出所有 Pod 的名称和状态。\"}, \"result\": null, \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:17:27.385420"
+  },
+  {
+    "id": "6d0a4b3f6afa4d14a2a79b6829f8411a",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704645044",
+    "event_type": "routing",
+    "state": "completed",
+    "content": "{\"tool\": \"\", \"args\": null, \"result\": null, \"agent\": \"K8s Orchestrator Agent\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:17:57.062397"
+  },
+  {
+    "id": "7b59bc863e694c8f99c1a5b8659f8c92",
+    "conversation_id": "e40a3e0c7d8f4cfdb64800241e9d3f7c",
+    "task_id": "session-1784704645044",
+    "event_type": "tool_result",
+    "state": "completed",
+    "content": "{\"tool\": \"send_task\", \"args\": null, \"result\": \"🔧 调用工具: **list_k8s_clusters**\\n参数: ```json\\n{}\\n```🔧 调用工具: **list_k8s_namespace**\\n参数: ```json\\n{}\\n```✅ 工具执行完成:\\n```\\n[{\\\"name\\\":\\\"agent-sandbox-system\\\"},{\\\"name\\\":\\\"kagent\\\"},{\\\"name\\\":\\\"mcp\\\"},{\\\"name\\\":\\\"nfd\\\"},{\\\"name\\\":\\\"default\\\"},{\\\"name\\\":\\\"kube-node-lease\\\"},{\\\"name\\\":\\\"kube-public\\\"},{\\\"name\\\":\\\"kube-system\\\"}]\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\"\\n}\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\"\\n}\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-node-lease\\\"\\n}\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-public\\\"\\n}\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"agent-sandbox-system\\\"\\n}\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\"\\n}\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"mcp\\\"\\n}\\n```🔧 调用工具: **list_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"nfd\\\"\\n}\\n```✅ 工具执行完成:\\n```\\nnull\\n```🔧 调用工具: **list_k8s_resource**\\n参数: ```json\\n{\\n  \\\"kind\\\": \\\"Pod\\\",\\n  \\\"namespace\\\": \\\"default\\\"\\n}\\n```🔧 调用工具: **list_k8s_resource**\\n参数: ```json\\n{\\n  \\\"kind\\\": \\\"Pod\\\",\\n  \\\"namespace\\\": \\\"kube-system\\\"\\n}\\n```🔧 调用工具: **list_k8s_resource**\\n参数: ```json\\n{\\n  \\\"kind\\\": \\\"Pod\\\",\\n  \\\"namespace\\\": \\\"agent-sandbox-system\\\"\\n}\\n```🔧 调用工具: **list_k8s_resource**\\n参数: ```json\\n{\\n  \\\"kind\\\": \\\"Pod\\\",\\n  \\\"namespace\\\": \\\"kagent\\\"\\n}\\n```🔧 调用工具: **list_k8s_resource**\\n参数: ```json\\n{\\n  \\\"kind\\\": \\\"Pod\\\",\\n  \\\"namespace\\\": \\\"mcp\\\"\\n}\\n```✅ 工具执行完成:\\n```\\n[{\\\"name\\\":\\\"kubernetes-mcp-server-dd974ff88-6vn2j\\\",\\\"namespace\\\":\\\"mcp\\\"}]\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"memory-hog-869d8655b9-gzqrs\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"memory-hog-869d8655b9-rxpdg\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"memory-hog-869d8655b9-vhdh8\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"agent-diagnose\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"agent-remediate\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"agent-verify\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"gpu-operator-54b5cbbbc4-rrg6q\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"test-sandbox\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"default\\\",\\n  \\\"name\\\": \\\"nfs-client-provisioner-fbfd8d968-226w7\\\"\\n}\\n```✅ 工具执行完成:\\n```\\nName:             nfs-client-provisioner-fbfd8d968-226w7\\nNamespace:        default\\nPriority:         0\\nService Account:  nfs-client-provisioner\\nNode:             <none>\\nLabels:           app=nfs-client-provisioner\\n                  pod-template-hash=fbfd8d968\\nAnnotations:      <none>\\nStatus:           Pending\\nIP:               \\nIPs:              <none>\\nControlled By:    ReplicaSet/nfs-client-provisioner-fbfd8d968\\nContainers:\\n  nfs-client-provisioner:\\n    Image:      xnet.registry.io:8443/kubesph\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"kube-scheduler-master1\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"calico-kube-controllers-5d95858ff7-5z2w5\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"coredns-6cc58594f9-b9f9g\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"coredns-6cc58594f9-g8sbr\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"calico-node-4pwz9\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"kube-multus-ds-x8425\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"kube-proxy-wl4sk\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"etcd-master1\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"kube-controller-manager-master1\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kube-system\\\",\\n  \\\"name\\\": \\\"kube-apiserver-master1\\\"\\n}\\n```✅ 工具执行完成:\\n```\\nName:                 kube-apiserver-master1\\nNamespace:            kube-system\\nPriority:             2000001000\\nPriority Class Name:  system-node-critical\\nNode:                 master1/10.2.0.57\\nStart Time:           Mon, 29 Jun 2026 06:29:16 +0000\\nLabels:               component=kube-apiserver\\n                      tier=control-plane\\nAnnotations:          kubeadm.kubernetes.io/kube-apiserver.advertise-address.endpoint: 10.2.0.57:6443\\n                      kubernetes.io/config.hash: 318e23637318\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"agent-sandbox-system\\\",\\n  \\\"name\\\": \\\"agent-sandbox-controller-58497fcd87-psn5g\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"istio-agent-78b689666-5fzqj\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"k8s-agent-65dd4b694b-f2qhg\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"kgateway-agent-7f4b86f88d-kv5vw\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"promql-agent-5b4d64d7d8-j82nz\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"kagent-controller-57c59ccb7b-ckm2v\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"kagent-postgresql-b6b9c799f-pkp2n\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"kagent-kmcp-controller-manager-56fc5d5547-7pktw\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"kagent-tools-94d57f8f9-m2jqr\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"kagent\\\",\\n  \\\"name\\\": \\\"kagent-ui-5bcf7c85f4-vzmlj\\\"\\n}\\n```🔧 调用工具: **describe_k8s_pod**\\n参数: ```json\\n{\\n  \\\"namespace\\\": \\\"mcp\\\",\\n  \\\"name\\\": \\\"kubernetes-mcp-server-dd974ff88-6vn2j\\\"\\n}\\n```✅ 工具执行完成:\\n```\\nName:             kubernetes-mcp-server-dd974ff88-6vn2j\\nNamespace:        mcp\\nPriority:         0\\nService Account:  kubernetes-mcp-server\\nNode:             master1/10.2.0.57\\nStart Time:       Wed, 17 Jun 2026 08:34:46 +0000\\nLabels:           app.kubernetes.io/instance=kubernetes-mcp-server\\n                  app.kubernetes.io/managed-by=Helm\\n                  app.kubernetes.io/name=kubernetes-mcp-server\\n                  app.kubernetes.io/version=0.0.62\\n                  helm.sh/chart=kubernetes-\\n```✅ 工具执行完成:\\n```\\nName:             kubernetes-mcp-server-dd974ff88-6vn2j\\nNamespace:        mcp\\nPriority:         0\\nService Account:  kubernetes-mcp-server\\nNode:             master1/10.2.0.57\\nStart Time:       Wed, 17 Jun 2026 08:34:46 +0000\\nLabels:           app.kubernetes.io/instance=kubernetes-mcp-server\\n                  app.kubernetes.io/managed-by=Helm\\n                  app.kubernetes.io/name=kubernetes-mcp-server\\n                  app.kubernetes.io/version=0.0.62\\n                  helm.sh/chart=kubernetes-\\n```以下是当前 Kubernetes 集群中所有 Pod 的完整统计信息：\\n\\n---\\n\\n## 📊 集群 Pod 总数：**29 个**\\n\\n### 按命名空间分布\\n\\n| 命名空间 | Pod 数量 | 状态 |\\n|---------|:-------:|:----:|\\n| **default** | 9 | 8 Running + 1 Pending |\\n| **kube-system** | 10 | 全部 Running |\\n| **agent-sandbox-system** | 1 | Running |\\n| **kagent** | 9 | 全部 Running |\\n| **mcp** | 1 | Running |\\n| **kube-node-lease** | 0 | - |\\n| **kube-public** | 0 | - |\\n| **nfd** | 0 | - |\\n\\n---\\n\\n### 📋 所有 Pod 名称与状态详情\\n\\n#### 🔹 **default** 命名空间（9个）\\n| Pod 名称 | 状态 | 重启次数 | 备注 |\\n|---------|:----:|:-------:|------|\\n| `memory-hog-869d8655b9-gzqrs` | ✅ **Running** | 316 | 内存压力测试 Pod |\\n| `memory-hog-869d8655b9-rxpdg` | ✅ **Running** | 316 | 内存压力测试 Pod |\\n| `memory-hog-869d8655b9-vhdh8` | ✅ **Running** | 316 | 内存压力测试 Pod |\\n| `agent-diagnose` | ✅ **Running** | 0 | 诊断 Agent |\\n| `agent-remediate` | ✅ **Running** | 0 | 修复 Agent |\\n| `agent-verify` | ✅ **Running** | 0 | 验证 Agent |\\n| `gpu-operator-54b5cbbbc4-rrg6q` | ✅ **Running** | 0 | GPU Operator |\\n| `test-sandbox` | ✅ **Running** | 0 | Nginx 测试沙箱 |\\n| `nfs-client-provisioner-fbfd8d968-226w7` | ⏳ **Pending** | 0 | NFS 客户端（挂载待定） |\\n\\n#### 🔹 **kube-system** 命名空间（10个）\\n| Pod 名称 | 状态 | 重启次数 | 备注 |\\n|---------|:----:|:-------:|------|\\n| `kube-apiserver-master1` | ✅ **Running** | 9 | API Server |\\n| `kube-controller-manager-master1` | ✅ **Running** | 39 | 控制器管理器 |\\n| `kube-scheduler-master1` | ✅ **Running** | 41 | 调度器 |\\n| `etcd-master1` | ✅ **Running** | 8 | etcd 存储 |\\n| `coredns-6cc58594f9-b9f9g` | ✅ **Running** | 10 | CoreDNS |\\n| `coredns-6cc58594f9-g8sbr` | ✅ **Running** | 10 | CoreDNS |\\n| `calico-node-4pwz9` | ✅ **Running** | 30 | Calico 网络节点 |\\n| `calico-kube-controllers-5d95858ff7-5z2w5` | ✅ **Running** | 14 | Calico 控制器 |\\n| `kube-proxy-wl4sk` | ✅ **Running** | 7 | kube-proxy |\\n| `kube-multus-ds-x8425` | ✅ **Running** | 7 | Multus CNI |\\n\\n#### 🔹 **agent-sandbox-system** 命名空间（1个）\\n| Pod 名称 | 状态 | 重启次数 |\\n|---------|:----:|:-------:|\\n| `agent-sandbox-controller-58497fcd87-psn5g` | ✅ **Running** | 0 |\\n\\n#### 🔹 **kagent** 命名空间（9个）\\n| Pod 名称 | 状态 | 重启次数 |\\n|---------|:----:|:-------:|\\n| `istio-agent-78b689666-5fzqj` | ✅ **Running** | 0 |\\n| `k8s-agent-65dd4b694b-f2qhg` | ✅ **Running** | 0 |\\n| `kgateway-agent-7f4b86f88d-kv5vw` | ✅ **Running** | 0 |\\n| `promql-agent-5b4d64d7d8-j82nz` | ✅ **Running** | 0 |\\n| `kagent-controller-57c59ccb7b-ckm2v` | ✅ **Running** | 0 |\\n| `kagent-postgresql-b6b9c799f-pkp2n` | ✅ **Running** | 0 |\\n| `kagent-kmcp-controller-manager-56fc5d5547-7pktw` | ✅ **Running** | 0 |\\n| `kagent-tools-94d57f8f9-m2jqr` | ✅ **Running** | 0 |\\n| `kagent-ui-5bcf7c85f4-vzmlj` | ✅ **Running** | 0 |\\n\\n#### 🔹 **mcp** 命名空间（1个）\\n| Pod 名称 | 状态 | 重启次数 |\\n|---------|:----:|:-------:|\\n| `kubernetes-mcp-server-dd974ff88-6vn2j` | ✅ **Running** | 43 |\\n\\n---\\n\\n### 📈 状态汇总\\n\\n| 状态 | 数量 |\\n|:---:|:---:|\\n| ✅ **Running** | **28** |\\n| ⏳ **Pending** | **1**（nfs-client-provisioner） |\\n| ❌ **Failed/Error** | **0** |\\n\\n> ⚠️ **注意**：`nfs-client-provisioner` 处于 **Pending** 状态，可能是因为 NFS 挂载点尚未就绪。另外，`memory-hog` 和 `kubernetes-mcp-server` 等 Pod 有较高的重启次数，建议关注其稳定性。\", \"agent\": \"\"}",
+    "metadata": null,
+    "timestamp": "2026-07-22T15:17:57.063940"
   }
 ]

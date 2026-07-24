@@ -243,12 +243,41 @@ async def message_send_stream(data: dict):
     async def event_stream():
         accumulated = ""
         task_id = ""
-        async for chunk in stream_message_to_agent(agent["url"], content, conversation_id):
-            if chunk.get("type") == "text" and chunk.get("text"):
-                accumulated += chunk["text"]
-            if chunk.get("task_id"):
-                task_id = chunk["task_id"]
-            yield f"data: {json.dumps(chunk)}\n\n"
+        # Save started event
+        db.add_event(TaskEvent(
+            conversation_id=conversation_id,
+            task_id="",
+            event_type="started",
+            state="running",
+            content=f"Agent processing: {content[:100]}",
+        ).model_dump())
+        try:
+            async for chunk in stream_message_to_agent(agent["url"], content, conversation_id):
+                if chunk.get("type") == "text" and chunk.get("text"):
+                    accumulated += chunk["text"]
+                if chunk.get("task_id"):
+                    task_id = chunk["task_id"]
+                # Save tool_call / tool_result events for the EventsDrawer
+                if chunk.get("type") in ("tool_call", "tool_result"):
+                    db.add_event(TaskEvent(
+                        conversation_id=conversation_id,
+                        task_id=chunk.get("task_id", task_id),
+                        event_type=chunk["type"],
+                        state=chunk.get("state", "working"),
+                        content=chunk.get("text", "")[:500],
+                    ).model_dump())
+                yield f"data: {json.dumps(chunk)}\n\n"
+        finally:
+            # Safety-net: always yield a done event
+            yield f"data: {json.dumps({'type': 'done', 'task_id': task_id, 'text': accumulated})}\n\n"
+        # Save completed event
+        db.add_event(TaskEvent(
+            conversation_id=conversation_id,
+            task_id=task_id,
+            event_type="completed",
+            state="completed",
+            content=accumulated[:200] if accumulated else "No response",
+        ).model_dump())
         # Save agent message
         if accumulated:
             agent_msg = Message(

@@ -220,11 +220,15 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                     if isinstance(update, TaskStatusUpdateEvent):
                         msg = update.status.message
                         if msg:
+                            # Check message metadata for event type
+                            event_type = "text"
+                            if msg.metadata and "event_type" in msg.metadata:
+                                event_type = msg.metadata["event_type"]
                             for part in msg.parts:
                                 t = _get_text_from_part(part)
                                 if t:
                                     accumulated += t
-                                    yield {"type": "text", "text": t, "state": state, "task_id": task_id}
+                                    yield {"type": event_type, "text": t, "state": state, "task_id": task_id}
                         artifact_text = _extract_text_from_task(task)
                         if artifact_text and artifact_text not in accumulated:
                             accumulated += "\n" + artifact_text

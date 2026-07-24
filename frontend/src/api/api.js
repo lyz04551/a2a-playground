@@ -49,9 +49,20 @@ export function sendMessageStream(conversationId, content, onEvent, onError, onD
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let doneCalled = false
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          if (buffer && buffer.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(buffer.slice(6))
+              if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
+              else if (evt.type === 'error') onError?.(evt.text)
+              else onEvent?.(evt)
+            } catch {}
+          }
+          break
+        }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
@@ -60,12 +71,13 @@ export function sendMessageStream(conversationId, content, onEvent, onError, onD
             try {
               const evt = JSON.parse(line.slice(6))
               if (evt.type === 'error' && onError) onError(evt.text)
-              else if (evt.type === 'done' && onDone) onDone(evt)
+              else if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (onEvent) onEvent(evt)
             } catch { /* skip */ }
           }
         }
       }
+      if (!doneCalled) onDone?.({})
     })
     .catch(onError || console.error)
 }
@@ -92,9 +104,20 @@ export function hostSendStream(conversationId, content, onEvent, onRouting, onEr
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let doneCalled = false
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          if (buffer && buffer.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(buffer.slice(6))
+              if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
+              else if (evt.type === 'error') onError?.(evt.text)
+              else onEvent?.(evt)
+            } catch {}
+          }
+          break
+        }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
@@ -104,12 +127,13 @@ export function hostSendStream(conversationId, content, onEvent, onRouting, onEr
               const evt = JSON.parse(line.slice(6))
               if (evt.type === 'routing' && onRouting) onRouting(evt)
               else if (evt.type === 'error' && onError) onError(evt.text)
-              else if (evt.type === 'done' && onDone) onDone(evt)
+              else if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (onEvent) onEvent(evt)
             } catch { /* skip */ }
           }
         }
       }
+      if (!doneCalled) onDone?.({})
     })
     .catch(onError || console.error)
 }
@@ -125,9 +149,20 @@ export function hostAdkSendStream(content, sessionId, onEvent, onToolCall, onToo
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let doneCalled = false
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          if (buffer && buffer.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(buffer.slice(6))
+              if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
+              else if (evt.type === 'error') onError?.(evt.text)
+              else if (evt.type === 'text' && onEvent) onEvent(evt)
+            } catch {}
+          }
+          break
+        }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
@@ -139,12 +174,13 @@ export function hostAdkSendStream(content, sessionId, onEvent, onToolCall, onToo
               else if (evt.type === 'tool_result' && onToolResult) onToolResult(evt)
               else if (evt.type === 'routing' && onRouting) onRouting(evt)
               else if (evt.type === 'error' && onError) onError(evt.text)
-              else if (evt.type === 'done' && onDone) onDone(evt)
+              else if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (evt.type === 'text' && onEvent) onEvent(evt)
             } catch { /* skip */ }
           }
         }
       }
+      if (!doneCalled) onDone?.({})
     })
     .catch(onError || console.error)
 }
@@ -165,9 +201,20 @@ export function hostLgSendStream(content, sessionId, conversationId, onEvent, on
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
       let buffer = ''
+      let doneCalled = false
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          if (buffer && buffer.startsWith('data: ')) {
+            try {
+              const evt = JSON.parse(buffer.slice(6))
+              if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
+              else if (evt.type === 'error') onError?.(evt.text)
+              else if (evt.type === 'text' && onEvent) onEvent(evt)
+            } catch {}
+          }
+          break
+        }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() || ''
@@ -179,12 +226,13 @@ export function hostLgSendStream(content, sessionId, conversationId, onEvent, on
               else if (evt.type === 'tool_result' && onToolResult) onToolResult(evt)
               else if (evt.type === 'routing' && onRouting) onRouting(evt)
               else if (evt.type === 'error' && onError) onError(evt.text)
-              else if (evt.type === 'done' && onDone) onDone(evt)
+              else if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (evt.type === 'text' && onEvent) onEvent(evt)
             } catch { /* skip */ }
           }
         }
       }
+      if (!doneCalled) onDone?.({})
     })
     .catch(onError || console.error)
 }

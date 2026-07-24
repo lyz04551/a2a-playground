@@ -76,15 +76,15 @@
     "createdAt": "2026-07-15T14:37:13.553828"
   },
   {
-    "id": "1e14c66bfc8b",
-    "name": "RAGAssistant",
-    "url": "http://localhost:10005",
-    "description": "能够进行检索问答的助手",
+    "id": "11a580df8a7e",
+    "name": "K8s Orchestrator Agent",
+    "url": "http://localhost:8051",
+    "description": "Kubernetes orchestration agent that manages K8s resources via MCP tools. Supports generating, analyzing, applying, and retrieving K8s resource configurations (Deployment, Service, ConfigMap, etc.) through a LangGraph-powered ReAct agent.",
     "provider": null,
     "capabilities": {
       "extensions": null,
       "pushNotifications": false,
-      "stateTransitionHistory": false,
+      "stateTransitionHistory": null,
       "streaming": true
     },
     "inputModes": [
@@ -97,18 +97,30 @@
     ],
     "skills": [
       {
-        "description": "能够进行检索问答的助手",
+        "description": "Generate, analyze, apply, and retrieve Kubernetes resource configurations (Deployment, Service, ConfigMap, Namespace, Pod, etc.) via MCP tools",
         "examples": [
-          "解释下LNG"
+          "Create a deployment for an nginx web server",
+          "List all pods in the default namespace",
+          "Analyze the current state of the cluster",
+          "Generate a ConfigMap for application configuration",
+          "Apply a YAML deployment configuration"
         ],
-        "id": "RAGAssistant",
-        "inputModes": null,
-        "name": "RAGAssistant",
-        "outputModes": null,
+        "id": "k8s_orchestration",
+        "inputModes": [
+          "text/plain"
+        ],
+        "name": "Kubernetes Resource Orchestration",
+        "outputModes": [
+          "text/plain"
+        ],
         "security": null,
         "tags": [
-          "rag",
-          "qa"
+          "kubernetes",
+          "k8s",
+          "orchestration",
+          "deployment",
+          "infrastructure",
+          "mcp"
         ]
       }
     ],
@@ -116,6 +128,6 @@
     "protocolVersion": "0.3.0",
     "preferredTransport": "JSONRPC",
     "documentationUrl": "",
-    "createdAt": "2026-07-15T15:51:46.710659"
+    "createdAt": "2026-07-21T20:31:19.723533"
   }
 ]

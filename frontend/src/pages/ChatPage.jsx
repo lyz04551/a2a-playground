@@ -39,10 +39,131 @@ function TypingIndicator() {
   )
 }
 
+/* ───────── Tool Call Card ───────── */
+function ToolCallCard({ content }) {
+  const [collapsed, setCollapsed] = useState(true)
+  const toolMatch = content.match(/🔧 调用工具: \*\*(.+?)\*\*/)
+  const argsMatch = content.match(/```json\n([\s\S]*?)```/)
+  const toolName = toolMatch ? toolMatch[1] : 'Unknown Tool'
+  const args = argsMatch ? argsMatch[1] : ''
+
+  return (
+    <div style={{
+      margin: '8px 0',
+      borderRadius: 10,
+      border: '1px solid #e0e7ff',
+      background: '#eef2ff',
+      overflow: 'hidden',
+      animation: 'fadeIn 0.3s ease-out',
+    }}>
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 12px', cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>🔧</span>
+          <span style={{ fontWeight: 600, fontSize: 13, color: '#4338ca' }}>{toolName}</span>
+          <span style={{
+            fontSize: 10, background: '#c7d2fe', color: '#3730a3',
+            padding: '1px 6px', borderRadius: 4, fontWeight: 600,
+          }}>
+            TOOL CALL
+          </span>
+        </div>
+        <span style={{ color: '#6366f1', fontSize: 12, transition: 'transform 0.2s', transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+          &#9660;
+        </span>
+      </div>
+      {!collapsed && (
+        <div style={{ padding: '0 12px 8px' }}>
+          <pre style={{
+            margin: 0, padding: 8, borderRadius: 6,
+            background: '#f8faff', border: '1px solid #dde3f0',
+            fontSize: 12, overflow: 'auto', maxHeight: 300,
+            color: '#1e293b', fontFamily: "'JetBrains Mono', monospace",
+          }}>{args}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ───────── Tool Result Card ───────── */
+function ToolResultCard({ content }) {
+  const [collapsed, setCollapsed] = useState(true)
+  const resultMatch = content.match(/```\n([\s\S]*?)```/)
+  const result = resultMatch ? resultMatch[1] : content.replace(/^✅ 工具执行完成:\n/, '').trim()
+
+  return (
+    <div style={{
+      margin: '8px 0',
+      borderRadius: 10,
+      border: '1px solid #bbf7d0',
+      background: '#f0fdf4',
+      overflow: 'hidden',
+      animation: 'fadeIn 0.3s ease-out',
+    }}>
+      <div
+        onClick={() => setCollapsed(!collapsed)}
+        style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '8px 12px', cursor: 'pointer',
+          userSelect: 'none',
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span style={{ fontSize: 14 }}>✅</span>
+          <span style={{ fontWeight: 600, fontSize: 13, color: '#15803d' }}>Tool Result</span>
+          <span style={{
+            fontSize: 10, background: '#bbf7d0', color: '#166534',
+            padding: '1px 6px', borderRadius: 4, fontWeight: 600,
+          }}>
+            RESULT
+          </span>
+        </div>
+        <span style={{ color: '#16a34a', fontSize: 12, transition: 'transform 0.2s', transform: collapsed ? 'rotate(0deg)' : 'rotate(180deg)' }}>
+          &#9660;
+        </span>
+      </div>
+      {!collapsed && (
+        <div style={{ padding: '0 12px 8px' }}>
+          <pre style={{
+            margin: 0, padding: 8, borderRadius: 6,
+            background: '#fafefc', border: '1px solid #bbf7d0',
+            fontSize: 12, overflow: 'auto', maxHeight: 300,
+            color: '#1e293b', fontFamily: "'JetBrains Mono', monospace",
+          }}>{result}</pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
+/* ───────── Agent Step Item ───────── */
+function AgentStepItem({ step }) {
+  if (step.type === 'tool_call') {
+    return <ToolCallCard content={step.content} />
+  }
+  if (step.type === 'tool_result') {
+    return <ToolResultCard content={step.content} />
+  }
+  // Regular text
+  return (
+    <div className="markdown" style={{ fontSize: 14, lineHeight: 1.7 }}>
+      {step.content}
+    </div>
+  )
+}
+
 /* ───────── Message Bubble ───────── */
 function MessageBubble({ msg, agentName }) {
   const isUser = msg.role === 'user'
   const displayName = isUser ? 'You' : (agentName || 'Assistant')
+  const steps = msg.steps || (msg.content ? [{ type: 'text', content: msg.content }] : [])
 
   return (
     <div style={{
@@ -85,9 +206,15 @@ function MessageBubble({ msg, agentName }) {
             ? '0 4px 14px rgba(59,130,246,0.2)'
             : '0 2px 8px rgba(0,0,0,0.04)',
         }}>
-          <div className="markdown" style={{ fontSize: 14, lineHeight: 1.7 }}>
-            {msg.content}
-          </div>
+          {steps.length > 0 ? (
+            steps.map((step, i) => (
+              <AgentStepItem key={i} step={step} />
+            ))
+          ) : (
+            <div className="markdown" style={{ fontSize: 14, lineHeight: 1.7 }}>
+              {msg.content}
+            </div>
+          )}
         </div>
       </div>
       {isUser && (
@@ -178,6 +305,7 @@ export default function ChatPage() {
   const navigate = useNavigate()
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const stepsRef = useRef([])
 
   const [agents, setAgents] = useState([])
   const [agentId, setAgentId] = useState(urlAgentId || '')
@@ -272,19 +400,25 @@ export default function ChatPage() {
     setSending(true)
 
     const userMsg = { role: 'user', content: text, id: `opt-${Date.now()}` }
-    const agentMsg = { role: 'agent', content: '', id: `agent-${Date.now()}`, loading: true }
+    const agentMsg = { role: 'agent', content: '', steps: [], id: `agent-${Date.now()}`, loading: true }
     setMessages(prev => [...prev, userMsg, agentMsg])
 
-    let accumulated = ''
+    stepsRef.current = []
     api.sendMessageStream(currentConvId, text,
       (evt) => {
         if (evt.text) {
-          accumulated += evt.text
+          if (evt.type === 'tool_call') {
+            stepsRef.current.push({ type: 'tool_call', content: evt.text })
+          } else if (evt.type === 'tool_result') {
+            stepsRef.current.push({ type: 'tool_result', content: evt.text })
+          } else if (evt.type === 'text') {
+            stepsRef.current.push({ type: 'text', content: evt.text })
+          }
           setMessages(prev => {
             const copy = [...prev]
             const last = copy[copy.length - 1]
             if (last && last.role === 'agent' && last.loading) {
-              copy[copy.length - 1] = { ...last, content: accumulated }
+              copy[copy.length - 1] = { ...last, content: '', steps: [...stepsRef.current] }
             }
             return copy
           })
@@ -295,7 +429,7 @@ export default function ChatPage() {
           const copy = [...prev]
           const last = copy[copy.length - 1]
           if (last && last.role === 'agent' && last.loading) {
-            copy[copy.length - 1] = { ...last, content: `Error: ${error}`, loading: false }
+            copy[copy.length - 1] = { ...last, content: `Error: ${error}`, steps: [], loading: false }
           }
           return copy
         })
@@ -306,14 +440,11 @@ export default function ChatPage() {
           const copy = [...prev]
           const last = copy[copy.length - 1]
           if (last && last.role === 'agent' && last.loading) {
-            copy[copy.length - 1] = { ...last, loading: false }
+            copy[copy.length - 1] = { ...last, steps: [...stepsRef.current], loading: false }
           }
           return copy
         })
         setSending(false)
-        api.getConversation(currentConvId).then(conv => {
-          setMessages(conv?.messages || [])
-        }).catch(() => {})
         api.listConversations(agentId).then(setConversations).catch(() => {})
       }
     )
@@ -461,7 +592,7 @@ export default function ChatPage() {
               ) : (
                 <div style={{ maxWidth: 800, margin: '0 auto' }}>
                   {messages.map((m) => (
-                    m.content || m.loading ? <MessageBubble key={m.id} msg={m} agentName={currentAgentName} /> : null
+                    m.content || m.steps?.length > 0 || m.loading ? <MessageBubble key={m.id} msg={m} agentName={currentAgentName} /> : null
                   ))}
                 </div>
               )}
