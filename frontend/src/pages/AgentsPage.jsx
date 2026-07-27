@@ -1,12 +1,13 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
-  Card, Button, Modal, Input, Tag, Spin, Empty, Pagination, message, Tooltip, Popconfirm, Statistic, Row, Col, Badge
+  Card, Button, Modal, Input, Tag, Spin, Empty, Pagination, message, Tooltip, Popconfirm, Statistic, Row, Col,
 } from 'antd'
 import {
   PlusOutlined, MessageOutlined, DeleteOutlined, SearchOutlined,
   RobotOutlined, ApiOutlined, ThunderboltOutlined, TagsOutlined,
   CheckCircleOutlined, CloseCircleOutlined, AimOutlined,
+  ReloadOutlined,
 } from '@ant-design/icons'
 import * as api from '../api/api'
 
@@ -14,10 +15,13 @@ export default function AgentsPage() {
   const navigate = useNavigate()
   const [agents, setAgents] = useState([])
   const [loading, setLoading] = useState(true)
+  const [healthMap, setHealthMap] = useState({})
+  const [healthLoading, setHealthLoading] = useState(false)
   const [showModal, setShowModal] = useState(false)
   const [page, setPage] = useState(1)
   const [searchQuery, setSearchQuery] = useState('')
   const pageSize = 9
+  const healthTimerRef = useRef(null)
 
   const filteredAgents = searchQuery
     ? agents.filter(a => {
@@ -46,6 +50,31 @@ export default function AgentsPage() {
 
   useEffect(() => { load() }, [load])
 
+  // ── Health check ──
+  const runHealthCheck = useCallback(async () => {
+    if (agents.length === 0) return
+    setHealthLoading(true)
+    try {
+      const result = await api.checkAgentsHealth()
+      setHealthMap(result)
+    } catch { /* ignore */ }
+    setHealthLoading(false)
+  }, [agents.length])
+
+  // Run health check when agents list loads, and auto-refresh every 30s
+  useEffect(() => {
+    if (agents.length > 0) {
+      runHealthCheck()
+      healthTimerRef.current = setInterval(runHealthCheck, 30000)
+    }
+    return () => {
+      if (healthTimerRef.current) {
+        clearInterval(healthTimerRef.current)
+        healthTimerRef.current = null
+      }
+    }
+  }, [agents.length, runHealthCheck])
+
   const handleDelete = async (agent) => {
     try {
       await api.deleteAgent(agent.id)
@@ -57,6 +86,7 @@ export default function AgentsPage() {
   // Stats
   const streamingCount = agents.filter(a => a.capabilities?.streaming).length
   const totalSkills = agents.reduce((sum, a) => sum + (a.skills?.length || 0), 0)
+  const onlineCount = agents.filter(a => healthMap[a.id]?.online).length
 
   return (
     <div style={{ padding: 32, height: '100vh', display: 'flex', flexDirection: 'column' }}>
@@ -71,15 +101,26 @@ export default function AgentsPage() {
             Manage and monitor your A2A agents
           </p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => setShowModal(true)}
-          size="large"
-          style={{ height: 42, paddingInline: 24, fontWeight: 600, borderRadius: 10 }}
-        >
-          Add Agent
-        </Button>
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Button
+            icon={<ReloadOutlined spin={healthLoading} />}
+            onClick={runHealthCheck}
+            size="large"
+            style={{ height: 42, paddingInline: 16, borderRadius: 10 }}
+            loading={healthLoading}
+          >
+            {healthLoading ? 'Checking...' : 'Health Check'}
+          </Button>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => setShowModal(true)}
+            size="large"
+            style={{ height: 42, paddingInline: 24, fontWeight: 600, borderRadius: 10 }}
+          >
+            Add Agent
+          </Button>
+        </div>
       </div>
 
       {/* Stats Overview */}
@@ -244,10 +285,76 @@ export default function AgentsPage() {
                         {agent.url.replace(/^https?:\/\//, '')}
                       </div>
                     </div>
-                    {/* Status dot */}
-                    <Tooltip title={agent.capabilities?.streaming ? 'Streaming enabled' : 'Standard'}>
-                      <span className={`status-dot ${agent.capabilities?.streaming ? 'online' : 'offline'}`} />
-                    </Tooltip>
+                    {/* Status indicators: health + streaming */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      {/* Health status badge */}
+                      {healthMap[agent.id] ? (
+                        healthMap[agent.id].online ? (
+                          <Tooltip title={`Online · ${healthMap[agent.id].latency_ms}ms latency`}>
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '2px 8px', borderRadius: 20,
+                              background: '#ecfdf5', border: '1px solid #bbf7d0',
+                              color: '#059669', fontSize: 11, fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                            }}>
+                              <span style={{
+                                width: 6, height: 6, borderRadius: '50%',
+                                background: '#10b981', display: 'inline-block',
+                              }} />
+                              Online
+                            </span>
+                          </Tooltip>
+                        ) : (
+                          <Tooltip title={`Offline · ${healthMap[agent.id].error || 'Unreachable'}`}>
+                            <span style={{
+                              display: 'inline-flex', alignItems: 'center', gap: 4,
+                              padding: '2px 8px', borderRadius: 20,
+                              background: '#fef2f2', border: '1px solid #fecaca',
+                              color: '#dc2626', fontSize: 11, fontWeight: 600,
+                              whiteSpace: 'nowrap',
+                            }}>
+                              <span style={{
+                                width: 6, height: 6, borderRadius: '50%',
+                                background: '#ef4444', display: 'inline-block',
+                              }} />
+                              Offline
+                            </span>
+                          </Tooltip>
+                        )
+                      ) : (
+                        <Tooltip title="Health status unknown">
+                          <span style={{
+                            display: 'inline-flex', alignItems: 'center', gap: 4,
+                            padding: '2px 8px', borderRadius: 20,
+                            background: '#f8fafc', border: '1px solid #e2e8f0',
+                            color: '#94a3b8', fontSize: 11, fontWeight: 600,
+                            whiteSpace: 'nowrap',
+                          }}>
+                            <span style={{
+                              width: 6, height: 6, borderRadius: '50%',
+                              background: '#cbd5e1', display: 'inline-block',
+                            }} />
+                            Unknown
+                          </span>
+                        </Tooltip>
+                      )}
+                      {/* Streaming indicator */}
+                      <Tooltip title={agent.capabilities?.streaming ? 'Streaming enabled' : 'Standard mode'}>
+                        <span style={{
+                          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                          width: 28, height: 28, borderRadius: 8,
+                          background: agent.capabilities?.streaming
+                            ? 'linear-gradient(135deg, #fef3c7, #fde68a)'
+                            : '#f1f5f9',
+                          color: agent.capabilities?.streaming ? '#d97706' : '#94a3b8',
+                          fontSize: 14,
+                          cursor: 'default', transition: 'all 0.2s',
+                        }}>
+                          <ThunderboltOutlined />
+                        </span>
+                      </Tooltip>
+                    </div>
                   </div>
 
                   {/* Version · Transport · Protocol · streaming */}
@@ -268,11 +375,6 @@ export default function AgentsPage() {
                     {agent.protocolVersion && (
                       <Tag style={{ fontSize: 10, lineHeight: '18px', padding: '0 6px', margin: 0, borderRadius: 4, border: '1px solid #e2e8f0', background: '#f8fafc', color: '#64748b' }}>
                         {agent.protocolVersion}
-                      </Tag>
-                    )}
-                    {agent.capabilities?.streaming && (
-                      <Tag color="green" style={{ fontSize: 10, lineHeight: '18px', padding: '0 6px', margin: 0, borderRadius: 4 }}>
-                        <ThunderboltOutlined /> streaming
                       </Tag>
                     )}
                   </div>

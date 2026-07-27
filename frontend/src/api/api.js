@@ -17,6 +17,7 @@ export const registerAgent = (agentAddress) => request('/agents/register', { age
 export const fetchAgentCard = (agentAddress) => request('/agents/fetch-card', { agentAddress })
 export const deleteAgent = (agentId) => request('/agents/delete', { agentId })
 export const getAgent = (agentId) => request('/agents/get', { agentId })
+export const checkAgentsHealth = () => request('/agents/health-check')
 
 // ---- Conversations ----
 export const createConversation = (agentId, title = 'New Chat', type = 'single') =>

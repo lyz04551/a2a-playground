@@ -15,7 +15,7 @@ from models import (
     SendMessageRequest, ApiResponse,
 )
 import database as db
-from a2a_client import fetch_agent_card, send_message_to_agent, stream_message_to_agent
+from a2a_client import fetch_agent_card, send_message_to_agent, stream_message_to_agent, check_agent_health
 
 logger = logging.getLogger(__name__)
 
@@ -101,6 +101,24 @@ async def agent_get(data: dict):
     if not agent:
         return ApiResponse(success=False, error="Agent not found")
     return ApiResponse(result=agent)
+
+
+@app.post("/api/agents/health-check")
+async def agents_health_check():
+    """Check health status of all registered agents concurrently."""
+    agents = db.list_agents()
+    if not agents:
+        return ApiResponse(result=[])
+
+    import asyncio
+    tasks = [check_agent_health(a["url"]) for a in agents]
+    results = await asyncio.gather(*tasks)
+
+    health_map = {}
+    for agent, health in zip(agents, results):
+        health_map[agent["id"]] = health
+
+    return ApiResponse(result=health_map)
 
 
 # ============================================================

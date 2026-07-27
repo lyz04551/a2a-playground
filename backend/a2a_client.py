@@ -69,6 +69,53 @@ async def fetch_agent_card(agent_url: str) -> AgentCard:
         raise Exception(f"Cannot fetch agent card from {agent_url}")
 
 
+async def check_agent_health(agent_url: str) -> dict:
+    """Lightweight health check for an agent.
+    Returns dict with 'online' bool and optional 'latency_ms' and 'error'.
+    """
+    url = agent_url.strip().rstrip("/")
+    if not url.startswith("http"):
+        url = f"http://{url}"
+    import time
+    start = time.monotonic()
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            # Try A2ACardResolver first
+            try:
+                resolver = A2ACardResolver(client, url)
+                await resolver.get_agent_card()
+                latency = int((time.monotonic() - start) * 1000)
+                return {"online": True, "latency_ms": latency}
+            except Exception:
+                pass
+
+            # Fallback: try well-known paths
+            for card_path in [AGENT_CARD_WELL_KNOWN_PATH, PREV_AGENT_CARD_WELL_KNOWN_PATH]:
+                try:
+                    card_url = f"{url}{card_path}"
+                    resp = await client.get(card_url)
+                    resp.raise_for_status()
+                    latency = int((time.monotonic() - start) * 1000)
+                    return {"online": True, "latency_ms": latency}
+                except Exception:
+                    continue
+
+            # Last resort: try a simple GET on the base URL
+            try:
+                resp = await client.get(url, timeout=3)
+                resp.raise_for_status()
+                latency = int((time.monotonic() - start) * 1000)
+                return {"online": True, "latency_ms": latency}
+            except Exception:
+                pass
+
+            latency = int((time.monotonic() - start) * 1000)
+            return {"online": False, "latency_ms": latency, "error": "Agent unreachable"}
+    except Exception as e:
+        latency = int((time.monotonic() - start) * 1000)
+        return {"online": False, "latency_ms": latency, "error": str(e)[:100]}
+
+
 def _make_sdk_message(text: str, conversation_id: str) -> Message:
     return Message(
         message_id=uuid.uuid4().hex,
