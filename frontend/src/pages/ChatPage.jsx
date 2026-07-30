@@ -40,12 +40,10 @@ function TypingIndicator() {
 }
 
 /* ───────── Tool Call Card ───────── */
-function ToolCallCard({ content }) {
+function ToolCallCard({ step }) {
   const [collapsed, setCollapsed] = useState(true)
-  const toolMatch = content.match(/🔧 调用工具: \*\*(.+?)\*\*/)
-  const argsMatch = content.match(/```json\n([\s\S]*?)```/)
-  const toolName = toolMatch ? toolMatch[1] : 'Unknown Tool'
-  const args = argsMatch ? argsMatch[1] : ''
+  const toolName = step.tool || step.content || 'Unknown Tool'
+  const args = JSON.stringify(step.args || {}, null, 2)
 
   return (
     <div style={{
@@ -93,10 +91,11 @@ function ToolCallCard({ content }) {
 }
 
 /* ───────── Tool Result Card ───────── */
-function ToolResultCard({ content }) {
+function ToolResultCard({ step }) {
   const [collapsed, setCollapsed] = useState(true)
-  const resultMatch = content.match(/```\n([\s\S]*?)```/)
-  const result = resultMatch ? resultMatch[1] : content.replace(/^✅ 工具执行完成:\n/, '').trim()
+  const result = typeof step.result === 'string'
+    ? step.result
+    : JSON.stringify(step.result ?? step.content ?? '', null, 2)
 
   return (
     <div style={{
@@ -146,10 +145,10 @@ function ToolResultCard({ content }) {
 /* ───────── Agent Step Item ───────── */
 function AgentStepItem({ step }) {
   if (step.type === 'tool_call') {
-    return <ToolCallCard content={step.content} />
+    return <ToolCallCard step={step} />
   }
   if (step.type === 'tool_result') {
-    return <ToolResultCard content={step.content} />
+    return <ToolResultCard step={step} />
   }
   // Regular text
   return (
@@ -356,7 +355,10 @@ export default function ChatPage() {
     if (!currentConvId) { setMessages([]); return }
     setMsgLoading(true)
     api.getConversation(currentConvId).then(conv => {
-      setMessages(conv?.messages || [])
+      setMessages((conv?.messages || []).map(item => ({
+        ...item,
+        steps: item.metadata?.steps,
+      })))
     }).catch(() => {}).finally(() => setMsgLoading(false))
   }, [currentConvId])
 
@@ -406,14 +408,25 @@ export default function ChatPage() {
     stepsRef.current = []
     api.sendMessageStream(currentConvId, text,
       (evt) => {
-        if (evt.text) {
-          if (evt.type === 'tool_call') {
-            stepsRef.current.push({ type: 'tool_call', content: evt.text })
-          } else if (evt.type === 'tool_result') {
-            stepsRef.current.push({ type: 'tool_result', content: evt.text })
-          } else if (evt.type === 'text') {
+        if (evt.type === 'tool_call') {
+          stepsRef.current.push({
+            type: 'tool_call',
+            id: evt.id,
+            tool: evt.tool,
+            args: evt.args || {},
+            content: evt.text,
+          })
+        } else if (evt.type === 'tool_result') {
+          stepsRef.current.push({
+            type: 'tool_result',
+            id: evt.id,
+            result: evt.result,
+            content: evt.text,
+          })
+        } else if (evt.type === 'text' && evt.text) {
             stepsRef.current.push({ type: 'text', content: evt.text })
-          }
+        }
+        if (['tool_call', 'tool_result', 'text'].includes(evt.type)) {
           setMessages(prev => {
             const copy = [...prev]
             const last = copy[copy.length - 1]

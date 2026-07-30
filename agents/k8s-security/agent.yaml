@@ -1,0 +1,23 @@
+agent_id: k8s-security
+name: K8s Security Agent
+description: Read-only Kubernetes workload, RBAC, network, image, and policy security assessment.
+port: 8053
+public_url: ${AGENT_PUBLIC_URL}
+mcp_url: ${K8S_MCP_URL}
+skills:
+  - id: cluster.security_assess
+    name: Kubernetes Security Assessment
+    description: Identify risky workload settings, RBAC, image, and NetworkPolicy findings.
+    tags: [kubernetes, security, rbac, network-policy]
+    examples:
+      - Audit a namespace for privileged workloads.
+      - Review RBAC and NetworkPolicy risks.
+tool_policy:
+  allow:
+    - list_k8s_*
+    - get_k8s_resource
+    - describe_k8s_resource
+  deny:
+    - get_k8s_pod_linked_env
+  approval_required: []
+

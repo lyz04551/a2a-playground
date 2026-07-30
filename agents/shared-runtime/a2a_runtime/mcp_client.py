@@ -1,0 +1,97 @@
+from __future__ import annotations
+
+import asyncio
+import os
+from collections.abc import Callable
+from contextlib import AsyncExitStack
+from typing import Any
+
+from mcp import ClientSession
+from mcp.client.sse import sse_client
+
+
+class K8sMCPClient:
+    """Reusable MCP SSE client with an injectable session boundary for tests."""
+
+    def __init__(
+        self,
+        mcp_url: str,
+        *,
+        session_factory: Callable[[], Any] | None = None,
+        connect_timeout: float = 30.0,
+        sse_read_timeout: float | None = None,
+    ):
+        self.mcp_url = mcp_url
+        self._session_factory = session_factory
+        self.connect_timeout = connect_timeout
+        self.sse_read_timeout = sse_read_timeout or float(
+            os.getenv("MCP_SSE_READ_TIMEOUT", "3600")
+        )
+        self._session: Any | None = None
+        self._stack: AsyncExitStack | None = None
+        self._connect_lock = asyncio.Lock()
+
+    async def connect(self) -> None:
+        if self._session is not None:
+            return
+        async with self._connect_lock:
+            if self._session is not None:
+                return
+            if self._session_factory is not None:
+                self._session = self._session_factory()
+                return
+
+            stack = AsyncExitStack()
+            try:
+                read, write = await asyncio.wait_for(
+                    stack.enter_async_context(
+                        sse_client(
+                            url=self.mcp_url,
+                            timeout=self.connect_timeout,
+                            sse_read_timeout=self.sse_read_timeout,
+                        )
+                    ),
+                    timeout=self.connect_timeout,
+                )
+                session = await stack.enter_async_context(ClientSession(read, write))
+                await asyncio.wait_for(
+                    session.initialize(),
+                    timeout=self.connect_timeout,
+                )
+            except BaseException:
+                await stack.aclose()
+                raise
+            self._stack = stack
+            self._session = session
+
+    async def disconnect(self) -> None:
+        self._session = None
+        if self._stack is not None:
+            stack = self._stack
+            self._stack = None
+            await stack.aclose()
+
+    async def list_tools(self) -> list[dict[str, Any]]:
+        await self.connect()
+        response = await self._session.list_tools()
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description or "",
+                "input_schema": tool.inputSchema,
+            }
+            for tool in response.tools
+        ]
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        await self.connect()
+        response = await self._session.call_tool(name, arguments)
+        parts: list[str] = []
+        for content in response.content:
+            if hasattr(content, "text"):
+                parts.append(content.text)
+            elif hasattr(content, "data"):
+                parts.append(str(content.data))
+            else:
+                parts.append(str(content))
+        return "\n".join(parts)

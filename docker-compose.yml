@@ -1,27 +1,105 @@
 services:
+  k8s-orchestrator:
+    build:
+      context: .
+      dockerfile: agents/k8s-orchestrator/Dockerfile
+    environment:
+      AGENT_PUBLIC_URL: http://k8s-orchestrator:8051
+      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/sse}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+    ports:
+      - "8051:8051"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8051/.well-known/agent-card.json')"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
+    restart: unless-stopped
+
+  k8s-ops:
+    build:
+      context: .
+      dockerfile: agents/k8s-ops/Dockerfile
+    environment:
+      AGENT_PUBLIC_URL: http://k8s-ops:8052
+      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/sse}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+    ports:
+      - "8052:8052"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8052/.well-known/agent-card.json')"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
+    restart: unless-stopped
+
+  k8s-security:
+    build:
+      context: .
+      dockerfile: agents/k8s-security/Dockerfile
+    environment:
+      AGENT_PUBLIC_URL: http://k8s-security:8053
+      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/sse}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+    ports:
+      - "8053:8053"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8053/.well-known/agent-card.json')"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
+    restart: unless-stopped
+
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    container_name: a2a-backend
+    environment:
+      PLAYGROUND_DB_PATH: /app/data/playground.db
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      BOOTSTRAP_AGENTS: >-
+        [{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"}]
     ports:
       - "8050:8050"
     volumes:
       - backend_data:/app/data
-    env_file:
-      - ./backend/.env
+    depends_on:
+      k8s-ops:
+        condition: service_healthy
+      k8s-orchestrator:
+        condition: service_healthy
+      k8s-security:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; request=urllib.request.Request('http://127.0.0.1:8050/api/ping', data=b'{}', headers={'Content-Type':'application/json'}); urllib.request.urlopen(request)"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
     restart: unless-stopped
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    container_name: a2a-frontend
     ports:
       - "5173:80"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 10s
+      timeout: 4s
+      retries: 10
     restart: unless-stopped
 
 volumes:
   backend_data:
+

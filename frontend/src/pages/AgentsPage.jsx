@@ -25,14 +25,14 @@ export default function AgentsPage() {
 
   const filteredAgents = searchQuery
     ? agents.filter(a => {
-        const q = searchQuery.toLowerCase()
-        return (a.name || '').toLowerCase().includes(q)
-          || (a.description || '').toLowerCase().includes(q)
-          || (a.skills || []).some(s =>
-              (s.name || s.id || '').toLowerCase().includes(q)
-              || (s.tags || []).some(t => t.toLowerCase().includes(q))
-            )
-      })
+      const q = searchQuery.toLowerCase()
+      return (a.name || '').toLowerCase().includes(q)
+        || (a.description || '').toLowerCase().includes(q)
+        || (a.skills || []).some(s =>
+          (s.name || s.id || '').toLowerCase().includes(q)
+          || (s.tags || []).some(t => t.toLowerCase().includes(q))
+        )
+    })
     : agents
 
   const totalPages = Math.ceil(filteredAgents.length / pageSize) || 1
@@ -176,7 +176,7 @@ export default function AgentsPage() {
           placeholder="Search agents by name, description, or skills..."
           allowClear
           onChange={(e) => { setSearchQuery(e.target.value); setPage(1) }}
-          onSearch={() => {}}
+          onSearch={() => { }}
           style={{ marginBottom: 20 }}
           size="large"
           prefix={<SearchOutlined style={{ color: '#94a3b8' }} />}

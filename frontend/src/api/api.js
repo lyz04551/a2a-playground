@@ -17,7 +17,6 @@ export const registerAgent = (agentAddress) => request('/agents/register', { age
 export const fetchAgentCard = (agentAddress) => request('/agents/fetch-card', { agentAddress })
 export const deleteAgent = (agentId) => request('/agents/delete', { agentId })
 export const getAgent = (agentId) => request('/agents/get', { agentId })
-export const checkAgentsHealth = () => request('/agents/health-check')
 
 // ---- Conversations ----
 export const createConversation = (agentId, title = 'New Chat', type = 'single') =>
@@ -60,7 +59,7 @@ export function sendMessageStream(conversationId, content, onEvent, onError, onD
               if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (evt.type === 'error') onError?.(evt.text)
               else onEvent?.(evt)
-            } catch {}
+            } catch { }
           }
           break
         }
@@ -87,6 +86,17 @@ export function sendMessageStream(conversationId, content, onEvent, onError, onD
 export const listEvents = () => request('/events/list')
 export const queryEvents = (conversationId) =>
   request('/events/query', { conversationId })
+
+// ---- Health Check ----
+export const checkAgentsHealth = () => request('/agents/health-check')
+
+// ---- Orchestration runs & approvals ----
+export const listRuns = () => request('/runs/list')
+export const getRun = (runId) => request('/runs/get', { run_id: runId })
+export const listApprovals = (runId = '') =>
+  request('/approvals/list', { run_id: runId })
+export const decideApproval = (approvalId, decision) =>
+  request('/approvals/decide', { approval_id: approvalId, decision })
 
 // ---- Ping ----
 export const ping = () => request('/ping')
@@ -115,7 +125,7 @@ export function hostSendStream(conversationId, content, onEvent, onRouting, onEr
               if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (evt.type === 'error') onError?.(evt.text)
               else onEvent?.(evt)
-            } catch {}
+            } catch { }
           }
           break
         }
@@ -160,7 +170,7 @@ export function hostAdkSendStream(content, sessionId, onEvent, onToolCall, onToo
               if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (evt.type === 'error') onError?.(evt.text)
               else if (evt.type === 'text' && onEvent) onEvent(evt)
-            } catch {}
+            } catch { }
           }
           break
         }
@@ -187,7 +197,7 @@ export function hostAdkSendStream(content, sessionId, onEvent, onToolCall, onToo
 }
 
 // ---- LangGraph Host Agent (Streaming) ----
-export function hostLgSendStream(content, sessionId, conversationId, onEvent, onToolCall, onToolResult, onRouting, onError, onDone) {
+export function hostLgSendStream(content, sessionId, conversationId, onEvent, onToolCall, onToolResult, onRouting, onApproval, onError, onDone) {
   fetch(`${BASE}/host-lg/send`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -212,7 +222,7 @@ export function hostLgSendStream(content, sessionId, conversationId, onEvent, on
               if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (evt.type === 'error') onError?.(evt.text)
               else if (evt.type === 'text' && onEvent) onEvent(evt)
-            } catch {}
+            } catch { }
           }
           break
         }
@@ -226,6 +236,7 @@ export function hostLgSendStream(content, sessionId, conversationId, onEvent, on
               if (evt.type === 'tool_call' && onToolCall) onToolCall(evt)
               else if (evt.type === 'tool_result' && onToolResult) onToolResult(evt)
               else if (evt.type === 'routing' && onRouting) onRouting(evt)
+              else if (evt.type === 'approval_required' && onApproval) onApproval(evt)
               else if (evt.type === 'error' && onError) onError(evt.text)
               else if (evt.type === 'done') { doneCalled = true; onDone?.(evt) }
               else if (evt.type === 'text' && onEvent) onEvent(evt)

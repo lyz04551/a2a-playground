@@ -7,3 +7,10 @@ node_modules
 __pycache__
 *.pyc
 .env.local
+.env
+.superpowers
+.playwright-cli
+output
+frontend/.vite
+frontend/dist
+backend/data/*.db

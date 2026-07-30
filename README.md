@@ -2,6 +2,50 @@
 
 A full-stack web application for managing and chatting with A2A (Agent-to-Agent) protocol agents. Built with **FastAPI** backend and **React + Ant Design** frontend. Features **Host Agent** multi-agent routing powered by LangGraph / LLM.
 
+## Engineering MVP
+
+The current architecture keeps every Kubernetes specialist as an independent
+`a2a-sdk==0.3.25` service:
+
+| Service | Stable ID | Responsibility | MCP policy |
+|---|---|---|---|
+| K8s Ops | `k8s-ops` | Logs, events, diagnostics, health | Read-only |
+| K8s Orchestrator | `k8s-orchestrator` | Plans and approved mutations | Every write requires approval |
+| K8s Security | `k8s-security` | Workload, RBAC, image and network assessment | Read-only |
+
+The LangGraph Host lives in the backend and delegates only through A2A. It routes
+with stable IDs and reuses each child Agent's A2A context inside an orchestration
+run. The run is a durable SQLite trace, not a fixed workflow: the Host LLM remains
+responsible for asking questions, selecting Agents, and deciding when to summarize.
+
+The shared runtime under `agents/shared-runtime` provides MCP connection handling,
+tool schema adaptation, deterministic allow/deny policy, approval digests, A2A task
+status, and artifacts. Direct single-Agent chat remains supported.
+
+### One-command startup
+
+```bash
+cp .env.example .env
+# Add DEEPSEEK_API_KEY to .env
+docker compose up --build
+```
+
+Open `http://localhost:5173`. Compose starts the frontend, backend, and three
+independent A2A Agent servers on ports 8051–8053. The backend discovers them through
+their Agent Cards and stores data in `/app/data/playground.db`.
+
+The existing JSON files are imported into SQLite once on first startup and remain
+unchanged as backups.
+
+### Safety model
+
+- Read-only Ops and Security tools execute automatically.
+- Kubernetes mutations stop the A2A task in `input_required`.
+- The Playground shows the exact tool, target, arguments, and action digest.
+- Approval resumes the same Agent run; changed arguments require a new approval.
+- Pod exec, file mutation, cluster registration, node drain, force deletion, and
+  Helm uninstall are denied by the MVP global policy.
+
 ---
 
 ## Architecture

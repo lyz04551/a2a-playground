@@ -1,0 +1,42 @@
+agent_id: k8s-orchestrator
+name: K8s Orchestrator Agent
+description: Plans Kubernetes changes and executes only exact user-approved mutations.
+port: 8051
+public_url: ${AGENT_PUBLIC_URL}
+mcp_url: ${K8S_MCP_URL}
+skills:
+  - id: workload.orchestrate
+    name: Kubernetes Workload Orchestration
+    description: Generate manifests and perform approved workload, rollout, and Helm changes.
+    tags: [kubernetes, deployment, rollout, helm]
+    examples:
+      - Generate and apply a Deployment after approval.
+      - Scale a Deployment and verify rollout status.
+tool_policy:
+  allow:
+    - list_k8s_*
+    - get_k8s_*
+    - describe_k8s_*
+    - helm_list_releases
+    - helm_search_repo
+  deny:
+    - delete_k8s_resource
+    - delete_k8s_yaml
+    - delete_k8s_pod
+    - force_*
+  approval_required:
+    - apply_k8s_yaml
+    - patch_k8s_resource
+    - scale_k8s_deployment
+    - restart_k8s_deployment
+    - restart_k8s_daemonset
+    - stop_k8s_deployment
+    - restore_k8s_deployment
+    - pause_k8s_deployment_rollout
+    - resume_k8s_deployment_rollout
+    - undo_k8s_deployment_rollout
+    - update_k8s_deployment_image_tag
+    - annotate_k8s_resource
+    - label_k8s_resource
+    - helm_install_chart
+

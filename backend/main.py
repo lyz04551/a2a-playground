@@ -1,6 +1,7 @@
 import json
 import uuid
 import logging
+import os
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
@@ -16,6 +17,12 @@ from models import (
 )
 import database as db
 from a2a_client import fetch_agent_card, send_message_to_agent, stream_message_to_agent, check_agent_health
+try:
+    from events.feed import build_event_feed
+    from events.single_agent import relay_agent_events, stream_step
+except ImportError:
+    from backend.events.feed import build_event_feed
+    from backend.events.single_agent import relay_agent_events, stream_step
 
 logger = logging.getLogger(__name__)
 
@@ -60,29 +67,63 @@ async def fetch_card(req: AgentRegister):
 @app.post("/api/agents/register")
 async def agent_register(req: AgentRegister):
     try:
-        card = await fetch_agent_card(req.agentAddress)
-        agent_url = req.agentAddress.strip()
-        if not agent_url.startswith("http"):
-            agent_url = f"http://{agent_url}"
-
-        agent = Agent(
-            name=card.name or "Unknown Agent",
-            url=agent_url,
-            description=card.description or "",
-            provider=card.provider.model_dump() if card.provider else None,
-            capabilities=card.capabilities.model_dump(mode="json") if card.capabilities else {},
-            inputModes=card.default_input_modes or ["text"],
-            outputModes=card.default_output_modes or ["text"],
-            skills=[s.model_dump() for s in (card.skills or [])],
-            version=card.version or "",
-            protocolVersion=card.protocol_version or "",
-            preferredTransport=card.preferred_transport or "",
-            documentationUrl=card.documentation_url or "",
-        )
-        saved = db.add_agent(agent.model_dump())
+        saved = await register_agent_address(req.agentAddress)
         return ApiResponse(result=saved)
     except Exception as e:
         return ApiResponse(success=False, error=str(e))
+
+
+async def register_agent_address(
+    address: str,
+    *,
+    stable_id: str | None = None,
+    risk_level: str | None = None,
+) -> dict:
+    card = await fetch_agent_card(address)
+    agent_url = address.strip()
+    if not agent_url.startswith("http"):
+        agent_url = f"http://{agent_url}"
+    agent = Agent(
+        id=stable_id or uuid.uuid4().hex[:12],
+        name=card.name or "Unknown Agent",
+        url=agent_url,
+        description=card.description or "",
+        provider=card.provider.model_dump() if card.provider else None,
+        capabilities=card.capabilities.model_dump(mode="json") if card.capabilities else {},
+        inputModes=card.default_input_modes or ["text"],
+        outputModes=card.default_output_modes or ["text"],
+        skills=[s.model_dump() for s in (card.skills or [])],
+        version=card.version or "",
+        protocolVersion=card.protocol_version or "",
+        preferredTransport=card.preferred_transport or "",
+        documentationUrl=card.documentation_url or "",
+    ).model_dump()
+    agent["risk_level"] = risk_level or "unknown"
+    agent["health"] = {"online": True}
+    return db.add_agent(agent)
+
+
+@app.on_event("startup")
+async def bootstrap_builtin_agents():
+    raw = os.getenv("BOOTSTRAP_AGENTS", "[]")
+    try:
+        definitions = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.error("BOOTSTRAP_AGENTS is not valid JSON")
+        return
+    for definition in definitions:
+        try:
+            await register_agent_address(
+                definition["url"],
+                stable_id=definition["id"],
+                risk_level=definition.get("risk_level"),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Unable to bootstrap agent %s: %s",
+                definition.get("id"),
+                exc,
+            )
 
 
 @app.post("/api/agents/delete")
@@ -259,8 +300,7 @@ async def message_send_stream(data: dict):
     db.add_message(user_msg.model_dump())
 
     async def event_stream():
-        accumulated = ""
-        task_id = ""
+        steps = []
         # Save started event
         db.add_event(TaskEvent(
             conversation_id=conversation_id,
@@ -269,42 +309,50 @@ async def message_send_stream(data: dict):
             state="running",
             content=f"Agent processing: {content[:100]}",
         ).model_dump())
-        try:
-            async for chunk in stream_message_to_agent(agent["url"], content, conversation_id):
-                if chunk.get("type") == "text" and chunk.get("text"):
-                    accumulated += chunk["text"]
-                if chunk.get("task_id"):
-                    task_id = chunk["task_id"]
-                # Save tool_call / tool_result events for the EventsDrawer
-                if chunk.get("type") in ("tool_call", "tool_result"):
-                    db.add_event(TaskEvent(
-                        conversation_id=conversation_id,
-                        task_id=chunk.get("task_id", task_id),
-                        event_type=chunk["type"],
-                        state=chunk.get("state", "working"),
-                        content=chunk.get("text", "")[:500],
-                    ).model_dump())
-                yield f"data: {json.dumps(chunk)}\n\n"
-        finally:
-            # Safety-net: always yield a done event
-            yield f"data: {json.dumps({'type': 'done', 'task_id': task_id, 'text': accumulated})}\n\n"
-        # Save completed event
-        db.add_event(TaskEvent(
-            conversation_id=conversation_id,
-            task_id=task_id,
-            event_type="completed",
-            state="completed",
-            content=accumulated[:200] if accumulated else "No response",
-        ).model_dump())
-        # Save agent message
-        if accumulated:
-            agent_msg = Message(
+
+        async def persist_event(chunk: dict):
+            step = stream_step(chunk)
+            if step:
+                steps.append(step)
+            if chunk.get("type") not in ("tool_call", "tool_result"):
+                return
+            db.add_event(TaskEvent(
                 conversation_id=conversation_id,
-                role="agent",
-                content=accumulated,
+                task_id=chunk.get("task_id", ""),
+                event_type=chunk["type"],
+                state=chunk.get("state", "working"),
+                content=json.dumps(step, ensure_ascii=False),
+                metadata=step,
+            ).model_dump())
+
+        async def persist_completion(result: dict):
+            task_id = result.get("task_id", "")
+            accumulated = result.get("text", "")
+            db.add_event(TaskEvent(
+                conversation_id=conversation_id,
                 task_id=task_id,
-            )
-            db.add_message(agent_msg.model_dump())
+                event_type="completed",
+                state="completed",
+                content=accumulated[:200] if accumulated else "No response",
+            ).model_dump())
+            if accumulated:
+                db.add_message(Message(
+                    conversation_id=conversation_id,
+                    role="agent",
+                    content=accumulated,
+                    task_id=task_id,
+                    metadata={"steps": steps},
+                ).model_dump())
+
+        upstream = stream_message_to_agent(
+            agent["url"], content, conversation_id
+        )
+        async for chunk in relay_agent_events(
+            upstream,
+            persist_event=persist_event,
+            persist_completion=persist_completion,
+        ):
+            yield f"data: {json.dumps(chunk)}\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
@@ -316,28 +364,21 @@ async def message_send_stream(data: dict):
 
 @app.post("/api/events/list")
 async def events_list():
-    events = db.list_events()
-    # Only return events for currently registered agents
-    agents = db.list_agents()
-    agent_conv_ids = set()
-    all_convs = db.list_conversations()
-    for a in agents:
-        for c in all_convs:
-            if c.get("agent_id") == a["id"]:
-                agent_conv_ids.add(c["id"])
-    # Also include multi-agent conversations
-    for c in all_convs:
-        if c.get("type") == "multi":
-            agent_conv_ids.add(c["id"])
-    filtered = [e for e in events if e.get("conversation_id") in agent_conv_ids]
-    return ApiResponse(result=filtered)
+    return ApiResponse(result=build_event_feed(
+        db.list_events(),
+        db.list_conversations(),
+        db.list_agents(),
+    ))
 
 
 @app.post("/api/events/query")
 async def events_query(data: dict):
     conversation_id = data.get("conversationId", "")
-    events = db.get_events_for_conversation(conversation_id)
-    return ApiResponse(result=events)
+    return ApiResponse(result=build_event_feed(
+        db.get_events_for_conversation(conversation_id),
+        db.list_conversations(),
+        db.list_agents(),
+    ))
 
 
 # ============================================================
@@ -418,7 +459,7 @@ async def host_send_stream(data: dict):
 # ============================================================
 # ADK Host Agent — Multi-Agent with LLM Router (google.adk)
 
-from host.manager import get_manager as get_adk_manager
+from host.adk.manager import get_manager as get_adk_manager
 
 @app.post("/api/host-adk/send")
 async def host_adk_send(data: dict):
@@ -448,7 +489,9 @@ async def host_adk_send(data: dict):
 # LangGraph Host Agent — Multi-Agent Router (Streaming)
 # ============================================================
 
-from host.langgraph_manager import get_manager as get_lg_manager
+from host.langgraph.manager import get_manager as get_lg_manager
+from a2a_gateway import A2AGateway
+from approvals.service import ApprovalService
 
 @app.post("/api/host-lg/send")
 async def host_lg_send(data: dict):
@@ -465,6 +508,11 @@ async def host_lg_send(data: dict):
     if not conv_id:
         c = Conversation(agent_id="multi-host", title="Multi-Agent Chat", type="multi")
         conv_id = db.create_conversation(c.model_dump())["id"]
+    if db.repository.get_run(session_id) is None:
+        db.repository.create_run(
+            session_id, conv_id, "running",
+            {"title": content[:80]},
+        )
 
     # Save user message
     db.add_message(Message(
@@ -539,3 +587,89 @@ async def host_lg_send(data: dict):
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
+
+
+@app.post("/api/runs/list")
+async def runs_list():
+    return ApiResponse(result=db.repository.list_runs())
+
+
+@app.post("/api/runs/get")
+async def runs_get(data: dict):
+    run = db.repository.get_run(data.get("run_id", ""))
+    if run is None:
+        return ApiResponse(success=False, error="Run not found")
+    return ApiResponse(
+        result={
+            **run,
+            "approvals": db.repository.list_approvals(run["id"]),
+        }
+    )
+
+
+@app.post("/api/approvals/list")
+async def approvals_list(data: dict):
+    return ApiResponse(
+        result=db.repository.list_approvals(data.get("run_id"))
+    )
+
+
+@app.post("/api/approvals/decide")
+async def approvals_decide(data: dict):
+    service = ApprovalService(
+        db.repository,
+        A2AGateway(db.repository),
+    )
+    try:
+        result = await service.decide(
+            data.get("approval_id", ""),
+            data.get("decision", ""),
+        )
+        result_text = result.get("result", {}).get("text", "")
+        if (
+            result["approval"]["status"] == "approved"
+            and result.get("result", {}).get("state") != "failed"
+        ):
+            try:
+                summary = await get_lg_manager().summarize_approval_result(
+                    result["approval"],
+                    result_text,
+                )
+                result["result"]["raw_text"] = result_text
+                result["result"]["text"] = summary
+                result_text = summary
+            except Exception:
+                logger.warning(
+                    "Host summary unavailable; using deterministic summary"
+                )
+                arguments = json.dumps(
+                    result["approval"].get("arguments", {}),
+                    ensure_ascii=False,
+                )
+                result_text = (
+                    "操作已批准并执行完成。\n\n"
+                    f"- 执行工具：`{result['approval']['tool_name']}`\n"
+                    f"- 执行参数：`{arguments}`\n"
+                    f"- MCP 结果：{result_text}"
+                )
+                result["result"]["raw_text"] = (
+                    result["result"].get("text", "")
+                )
+                result["result"]["text"] = result_text
+        run = db.repository.get_run(result["approval"]["run_id"])
+        if run and result_text:
+            db.add_message(Message(
+                conversation_id=run["conversation_id"],
+                role="agent",
+                content=result_text,
+                task_id=result.get("result", {}).get("task_id"),
+                metadata={
+                    "source": "approval",
+                    "routing_agent": "Host Agent",
+                    "executed_by": result["approval"]["agent_id"],
+                    "approval_id": result["approval"]["id"],
+                },
+            ).model_dump())
+        return ApiResponse(result=result)
+    except (KeyError, ValueError) as exc:
+        return ApiResponse(success=False, error=str(exc))

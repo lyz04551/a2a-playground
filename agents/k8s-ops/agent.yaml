@@ -1,0 +1,24 @@
+agent_id: k8s-ops
+name: K8s Ops Agent
+description: Read-only Kubernetes diagnostics, logs, events, health, and resource inspection.
+port: 8052
+public_url: ${AGENT_PUBLIC_URL}
+mcp_url: ${K8S_MCP_URL}
+skills:
+  - id: pod.diagnose
+    name: Kubernetes Diagnostics
+    description: Diagnose pods, deployments, nodes, events, logs, and resource pressure.
+    tags: [kubernetes, diagnostics, logs, monitoring]
+    examples:
+      - Diagnose why a Pod is in CrashLoopBackOff.
+      - Check the health and resource usage of a namespace.
+tool_policy:
+  allow:
+    - list_k8s_*
+    - get_k8s_*
+    - get_pod_*
+    - describe_k8s_*
+  deny:
+    - get_k8s_pod_linked_env
+  approval_required: []
+

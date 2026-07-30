@@ -1,46 +1,12 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-*.egg-info/
-dist/
-build/
-*.egg
-.venv/
-venv/
-env/
-
-# Node
-node_modules/
-frontend/dist/
-frontend/build/
-*.tsbuildinfo
-
-# Environment files
 .env
-.env.local
-.env.*.local
-
-# IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# Logs
-*.log
-logs/
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
-
-# Docker
-.docker/
-
-# OS files
-Thumbs.db
+.superpowers/
+.pytest_cache/
+**/__pycache__/
+**/.venv/
+backend/data/*.db
+backend/data/*.db-*
+frontend/dist/
+frontend/node_modules/
+frontend/.vite/
+output/
+.playwright-cli/

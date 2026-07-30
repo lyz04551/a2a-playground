@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import uuid
 from typing import AsyncIterable, Optional
 
@@ -19,6 +20,7 @@ from a2a.types import (
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH, PREV_AGENT_CARD_WELL_KNOWN_PATH
 
 logger = logging.getLogger(__name__)
+A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "120"))
 
 
 def _get_text_from_part(p) -> str:
@@ -33,15 +35,43 @@ def _get_text_from_part(p) -> str:
     return ""
 
 
+def _unwrap_artifact_text(text: str) -> str:
+    try:
+        payload = json.loads(text)
+    except (TypeError, json.JSONDecodeError):
+        return text
+    if isinstance(payload, dict):
+        value = payload.get("text", payload.get("result"))
+        if isinstance(value, str):
+            try:
+                decoded = json.loads(value)
+                return decoded if isinstance(decoded, str) else value
+            except json.JSONDecodeError:
+                return value
+    return text
+
+
+def _extract_text_from_artifact(artifact) -> str:
+    return "".join(
+        _unwrap_artifact_text(_get_text_from_part(part))
+        for part in (artifact.parts or [])
+    )
+
+
 def _extract_text_from_task(task) -> str:
-    parts = []
-    if task.status and task.status.message and task.status.message.parts:
-        parts.extend(task.status.message.parts)
     if task.artifacts:
-        for artifact in task.artifacts:
-            if artifact and artifact.parts:
-                parts.extend(artifact.parts)
-    return "".join(_get_text_from_part(p) for p in parts)
+        for artifact in reversed(task.artifacts):
+            if not artifact or artifact.name == "pending_action":
+                continue
+            text = _extract_text_from_artifact(artifact)
+            if text:
+                return text
+    if task.status and task.status.message and task.status.message.parts:
+        return "".join(
+            _get_text_from_part(part)
+            for part in task.status.message.parts
+        )
+    return ""
 
 
 async def fetch_agent_card(agent_url: str) -> AgentCard:
@@ -116,12 +146,18 @@ async def check_agent_health(agent_url: str) -> dict:
         return {"online": False, "latency_ms": latency, "error": str(e)[:100]}
 
 
-def _make_sdk_message(text: str, conversation_id: str) -> Message:
+def _make_sdk_message(
+    text: str,
+    conversation_id: str,
+    task_id: str | None = None,
+) -> Message:
     return Message(
         message_id=uuid.uuid4().hex,
         role=Role.user,
         parts=[TextPart(text=text)],
         context_id=conversation_id,
+        task_id=task_id,
+        reference_task_ids=[task_id] if task_id else None,
     )
 
 
@@ -208,29 +244,47 @@ async def _send_tasks_send_subscribe_legacy(agent_url: str, text: str, session_i
 
 # ────────── Main functions ──────────
 
-async def send_message_to_agent(agent_url: str, text: str, conversation_id: str, agent_card: Optional[AgentCard] = None) -> dict:
+async def send_message_to_agent(agent_url: str, text: str, conversation_id: str, agent_card: Optional[AgentCard] = None, task_id: str | None = None) -> dict:
     """Send message. Tries new SDK (message/send), then falls back to legacy (tasks/send)."""
     # Try new SDK path first
+    httpx_client = None
+    client = None
     try:
         if agent_card is None:
             agent_card = await fetch_agent_card(agent_url)
-        config = ClientConfig(streaming=False, polling=False)
+        httpx_client = httpx.AsyncClient(timeout=A2A_CLIENT_TIMEOUT)
+        config = ClientConfig(streaming=False, polling=False, httpx_client=httpx_client)
         factory = ClientFactory(config)
         client = factory.create(agent_card)
-        sdk_msg = _make_sdk_message(text, conversation_id)
+        sdk_msg = _make_sdk_message(text, conversation_id, task_id)
         accumulated = ""
         state = "unknown"
+        task_id = ""
+        response_context_id = conversation_id
+        artifacts = []
         async for event in client.send_message(sdk_msg):
             if isinstance(event, Message):
                 accumulated += _get_text_from_part(event)
                 state = "completed"
             elif isinstance(event, tuple):
                 task, update = event
+                if task:
+                    task_id = task.id
+                    response_context_id = task.context_id or conversation_id
+                    artifacts = [
+                        artifact.model_dump(by_alias=True)
+                        for artifact in (task.artifacts or [])
+                    ]
                 if task and task.status:
-                    state = task.status.state
+                    state = task.status.state.value
                 accumulated += _extract_text_from_task(task)
-        await client.close()
-        return {"text": accumulated, "state": state}
+        return {
+            "text": accumulated,
+            "state": state,
+            "task_id": task_id,
+            "context_id": response_context_id,
+            "artifacts": artifacts,
+        }
     except Exception as e:
         err = str(e)
         if "400" in err or "Method not found" in err or "Unexpected request" in err:
@@ -238,6 +292,11 @@ async def send_message_to_agent(agent_url: str, text: str, conversation_id: str,
             return await _send_tasks_send_legacy(agent_url, text, conversation_id)
         logger.exception(f"send_message_to_agent failed: {err}")
         return {"text": "", "state": "failed"}
+    finally:
+        if client is not None:
+            await client.close()
+        if httpx_client is not None:
+            await httpx_client.aclose()
 
 
 async def stream_message_to_agent(agent_url: str, text: str, conversation_id: str, agent_card: Optional[AgentCard] = None) -> AsyncIterable[dict]:
@@ -246,7 +305,8 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
     try:
         if agent_card is None:
             agent_card = await fetch_agent_card(agent_url)
-        config = ClientConfig(streaming=True)
+        httpx_client = httpx.AsyncClient(timeout=A2A_CLIENT_TIMEOUT)
+        config = ClientConfig(streaming=True, httpx_client=httpx_client)
         factory = ClientFactory(config)
         client = factory.create(agent_card)
         sdk_msg = _make_sdk_message(text, conversation_id)
@@ -267,26 +327,50 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                     if isinstance(update, TaskStatusUpdateEvent):
                         msg = update.status.message
                         if msg:
-                            # Check message metadata for event type
                             event_type = "text"
-                            if msg.metadata and "event_type" in msg.metadata:
-                                event_type = msg.metadata["event_type"]
+                            metadata = msg.metadata or {}
+                            if "event_type" in metadata:
+                                event_type = metadata["event_type"]
+                            data = metadata.get("data") or {}
                             for part in msg.parts:
                                 t = _get_text_from_part(part)
                                 if t:
-                                    accumulated += t
-                                    yield {"type": event_type, "text": t, "state": state, "task_id": task_id}
-                        artifact_text = _extract_text_from_task(task)
+                                    chunk = {
+                                        "type": event_type,
+                                        "text": t,
+                                        "state": state,
+                                        "task_id": task_id,
+                                    }
+                                    if event_type == "tool_call":
+                                        chunk.update({
+                                            "id": data.get("id", ""),
+                                            "tool": data.get("tool") or t,
+                                            "args": data.get("arguments", {}),
+                                        })
+                                    elif event_type == "tool_result":
+                                        chunk.update({
+                                            "id": data.get(
+                                                "tool_call_id", ""
+                                            ),
+                                            "result": data.get("result", t),
+                                        })
+                                    else:
+                                        accumulated += t
+                                    yield chunk
+                        artifact_text = (
+                            _extract_text_from_task(task)
+                            if update.final
+                            else ""
+                        )
                         if artifact_text and artifact_text not in accumulated:
-                            accumulated += "\n" + artifact_text
+                            accumulated += artifact_text
                             yield {"type": "text", "text": artifact_text, "state": state, "task_id": task_id}
                         yield {"type": "status", "state": state, "final": update.final, "task_id": task_id}
                     elif isinstance(update, TaskArtifactUpdateEvent):
-                        for part in update.artifact.parts:
-                            t = _get_text_from_part(part)
-                            if t:
-                                accumulated += t
-                                yield {"type": "text", "text": t, "state": state, "task_id": task_id}
+                        t = _extract_text_from_artifact(update.artifact)
+                        if t and t not in accumulated:
+                            accumulated += t
+                            yield {"type": "text", "text": t, "state": state, "task_id": task_id}
                     else:
                         artifact_text = _extract_text_from_task(task)
                         if artifact_text and artifact_text not in accumulated:
@@ -309,6 +393,7 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
             yield {"type": "error", "text": err, "task_id": task_id}
         finally:
             await client.close()
+            await httpx_client.aclose()
     except Exception as e:
         logger.warning(f"SDK init failed ({str(e)[:80]}), trying legacy tasks/sendSubscribe")
         async for chunk in _send_tasks_send_subscribe_legacy(agent_url, text, conversation_id):

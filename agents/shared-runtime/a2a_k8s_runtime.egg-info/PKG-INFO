@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: a2a-k8s-runtime
+Version: 0.1.0
+Summary: Shared runtime for A2A Kubernetes agents
+Requires-Python: >=3.11
+Requires-Dist: a2a-sdk==0.3.25
+Requires-Dist: httpx<1,>=0.27
+Requires-Dist: langchain-core<2,>=0.3
+Requires-Dist: langchain-openai<2,>=0.3
+Requires-Dist: langgraph<2,>=0.2
+Requires-Dist: mcp<2,>=1.0
+Requires-Dist: pydantic<3,>=2.7
+Requires-Dist: PyYAML<7,>=6
