@@ -8,7 +8,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements
-COPY requirements.txt .
+COPY backend/requirements.txt .
 
 # Install google-adk first (it pins langgraph to old version)
 RUN pip install --no-cache-dir "google-adk[extensions]>=2.4.0" 2>/dev/null || true
@@ -17,11 +17,11 @@ RUN pip install --no-cache-dir "google-adk[extensions]>=2.4.0" 2>/dev/null || tr
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
-COPY . .
+COPY backend ./backend
 
 # Create data directory for persistent storage
 RUN mkdir -p /app/data
 
 EXPOSE 8050
 
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8050", "--log-level", "info"]
+CMD ["uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8050", "--log-level", "info"]

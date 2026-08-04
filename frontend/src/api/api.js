@@ -1,5 +1,7 @@
 const BASE = '/api'
 
+export { streamRun } from './runStream'
+
 async function request(endpoint, body = {}) {
   const res = await fetch(`${BASE}${endpoint}`, {
     method: 'POST',
@@ -93,6 +95,9 @@ export const checkAgentsHealth = () => request('/agents/health-check')
 // ---- Orchestration runs & approvals ----
 export const listRuns = () => request('/runs/list')
 export const getRun = (runId) => request('/runs/get', { run_id: runId })
+export const listRunEvents = (runId, afterSequence = 0) => request('/runs/events', { run_id: runId, after_sequence: afterSequence })
+export const cancelRun = (runId) => request('/runs/cancel', { run_id: runId })
+export const getSystemStatus = () => request('/system/status')
 export const listApprovals = (runId = '') =>
   request('/approvals/list', { run_id: runId })
 export const decideApproval = (approvalId, decision) =>

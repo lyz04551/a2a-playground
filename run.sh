@@ -21,32 +21,32 @@ kill_port $FRONTEND_PORT
 
 # ── Backend ──
 echo "==> Starting backend on port $BACKEND_PORT..."
-cd "$ROOT/backend"
+cd "$ROOT"
 
 # Create venv if needed
-if [ ! -d .venv ]; then
+if [ ! -d backend/.venv ]; then
   echo "  Creating .venv..."
-  python3 -m venv .venv
+  python3 -m venv backend/.venv
 fi
 
 # Install core dependencies
 echo "  Installing dependencies..."
-.venv/bin/pip install -q fastapi uvicorn httpx pydantic python-dotenv 2>&1 | tail -1
+backend/.venv/bin/pip install -q fastapi uvicorn httpx pydantic python-dotenv 2>&1 | tail -1
 
 # Install a2a-sdk
 echo "  Installing a2a-sdk..."
-.venv/bin/pip install -q "a2a-sdk>=0.3.25" 2>&1 | tail -1 || echo "  WARNING: a2a-sdk install issue"
+backend/.venv/bin/pip install -q "a2a-sdk>=0.3.25" 2>&1 | tail -1 || echo "  WARNING: a2a-sdk install issue"
 
 # Install LangGraph dependencies
 echo "  Installing langgraph dependencies..."
-.venv/bin/pip install -q langgraph langchain-openai langchain-core 2>&1 | tail -1 || echo "  WARNING: langgraph install issue"
+backend/.venv/bin/pip install -q langgraph langchain-openai langchain-core 2>&1 | tail -1 || echo "  WARNING: langgraph install issue"
 
 # Install google-adk
 echo "  Installing google-adk..."
-.venv/bin/pip install -q google-adk 2>&1 | tail -1 || echo "  WARNING: google-adk install issue"
+backend/.venv/bin/pip install -q google-adk 2>&1 | tail -1 || echo "  WARNING: google-adk install issue"
 
 echo "  Starting server..."
-.venv/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port $BACKEND_PORT --log-level info &
+backend/.venv/bin/python3 -m uvicorn backend.main:app --host 127.0.0.1 --port $BACKEND_PORT --log-level info &
 BACKEND_PID=$!
 sleep 2
 

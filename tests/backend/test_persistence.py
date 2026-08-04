@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from backend.persistence.repository import SQLiteRepository
+from concurrent.futures import ThreadPoolExecutor
+from sqlalchemy import inspect
 
 
 def test_repository_uses_stable_agent_ids_even_with_duplicate_names(tmp_path):
@@ -64,3 +66,56 @@ def test_approval_decision_is_idempotent(tmp_path):
     assert first["status"] == "approved"
     assert second == first
 
+
+def test_message_insert_atomically_updates_conversation_count(tmp_path):
+    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository.initialize()
+    repository.create_conversation(
+        {"id": "conv-1", "agent_id": "ops", "message_count": 0}
+    )
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        list(
+            pool.map(
+                lambda index: repository.add_message(
+                    {
+                        "id": f"message-{index}",
+                        "conversation_id": "conv-1",
+                        "role": "user",
+                        "content": str(index),
+                    }
+                ),
+                range(12),
+            )
+        )
+
+    conversation = repository.get_conversation("conv-1")
+    assert conversation["message_count"] == 12
+    assert conversation["updated_at"]
+
+
+def test_sqlite_enables_wal_and_common_lookup_indexes(tmp_path):
+    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository.initialize()
+
+    with repository.engine.connect() as connection:
+        assert connection.exec_driver_sql("PRAGMA journal_mode").scalar().lower() == "wal"
+
+    indexes = {
+        (table, index["name"])
+        for table in (
+            "messages",
+            "events",
+            "orchestration_runs",
+            "orchestration_tasks",
+            "approvals",
+        )
+        for index in inspect(repository.engine).get_indexes(table)
+    }
+    assert {
+        ("messages", "ix_messages_conversation"),
+        ("events", "ix_events_conversation_type"),
+        ("orchestration_runs", "ix_runs_conversation_status"),
+        ("orchestration_tasks", "ix_tasks_run_status"),
+        ("approvals", "ix_approvals_run_status"),
+    } <= indexes

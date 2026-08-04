@@ -7,12 +7,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-try:
-    from persistence.migrate_json import import_legacy_json
-    from persistence.repository import SQLiteRepository
-except ImportError:
-    from backend.persistence.migrate_json import import_legacy_json
-    from backend.persistence.repository import SQLiteRepository
+from backend.persistence.migrate_json import import_legacy_json
+from backend.persistence.repository import SQLiteRepository
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data"

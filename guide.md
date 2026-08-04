@@ -66,9 +66,10 @@ agents/.venv/bin/python agents/k8s-security/main.py
 cd /Users/liyangzhong/Documents/GitHub/a2a-samples/a2a-playground1
 
 export PLAYGROUND_DB_PATH="$PWD/backend/data/playground-local.db"
+export PLAYGROUND_ALLOW_PRIVATE_AGENTS=true
 export BOOTSTRAP_AGENTS='[{"id":"k8s-ops","url":"http://127.0.0.1:8052","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://127.0.0.1:8051","risk_level":"write_approval"},{"id":"k8s-security","url":"http://127.0.0.1:8053","risk_level":"read_only"}]'
 
-backend/.venv/bin/python -m uvicorn --app-dir backend main:app --host 127.0.0.1 --port 8050
+backend/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8050
 ```
 
 ## 4. 启动前端

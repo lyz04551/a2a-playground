@@ -12,7 +12,7 @@ from google.adk.memory.in_memory_memory_service import InMemoryMemoryService
 from google.adk.artifacts import InMemoryArtifactService
 from google.genai import types
 
-from host.adk.agent import HostAgent
+from backend.host.adk.agent import HostAgent
 from a2a.types import AgentCard
 
 logger = logging.getLogger(__name__)

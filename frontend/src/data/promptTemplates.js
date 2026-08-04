@@ -1,0 +1,42 @@
+export const PROMPT_TEMPLATES = [
+  {
+    id: 'cluster-health',
+    category: 'operations',
+    icon: 'pulse',
+    title: { 'zh-CN': '检查集群健康', 'en-US': 'Check cluster health' },
+    description: { 'zh-CN': '检查节点、工作负载与近期异常事件', 'en-US': 'Inspect nodes, workloads, and recent warning events' },
+    prompt: '检查当前 Kubernetes 集群的整体健康状态，重点分析异常节点、失败工作负载和近期 Warning 事件，并给出按优先级排序的建议。',
+  },
+  {
+    id: 'pod-analysis',
+    category: 'diagnostics',
+    icon: 'bug',
+    title: { 'zh-CN': '分析异常 Pod', 'en-US': 'Analyze abnormal Pods' },
+    description: { 'zh-CN': '定位重启、Pending 和 CrashLoopBackOff', 'en-US': 'Triage restarts, Pending, and CrashLoopBackOff' },
+    prompt: '查找当前集群中的异常 Pod，分析 Pending、CrashLoopBackOff、频繁重启的根因，并列出相关日志和事件证据。',
+  },
+  {
+    id: 'security-scan',
+    category: 'security',
+    icon: 'shield',
+    title: { 'zh-CN': '执行安全扫描', 'en-US': 'Run security review' },
+    description: { 'zh-CN': '检查 RBAC、镜像与高风险配置', 'en-US': 'Review RBAC, images, and risky configuration' },
+    prompt: '对当前 Kubernetes 集群执行只读安全检查，重点检查高权限 RBAC、特权容器、不安全镜像和网络暴露风险。',
+  },
+  {
+    id: 'event-triage',
+    category: 'diagnostics',
+    icon: 'event',
+    title: { 'zh-CN': '排查告警事件', 'en-US': 'Triage warning events' },
+    description: { 'zh-CN': '汇总近期 Warning 并关联工作负载', 'en-US': 'Group recent warnings by affected workload' },
+    prompt: '汇总集群近期的 Warning 事件，按影响范围和紧急程度分组，关联到具体工作负载并给出排查顺序。',
+  },
+  {
+    id: 'deployment-review',
+    category: 'operations',
+    icon: 'deploy',
+    title: { 'zh-CN': '审查部署状态', 'en-US': 'Review deployments' },
+    description: { 'zh-CN': '检查副本、滚动更新和资源配置', 'en-US': 'Inspect replicas, rollout, and resources' },
+    prompt: '审查当前集群所有 Deployment 的副本、滚动更新、资源请求与限制，列出需要关注的部署及原因。',
+  },
+]

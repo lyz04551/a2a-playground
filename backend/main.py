@@ -8,32 +8,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from models import (
+from backend.models import (
     Agent, AgentRegister, Conversation, Message, TaskEvent,
     SendMessageRequest, ApiResponse,
 )
-import database as db
-from a2a_client import fetch_agent_card, send_message_to_agent, stream_message_to_agent, check_agent_health
-try:
-    from events.feed import build_event_feed
-    from events.single_agent import relay_agent_events, stream_step
-except ImportError:
-    from backend.events.feed import build_event_feed
-    from backend.events.single_agent import relay_agent_events, stream_step
+from backend import database as db
+from backend.a2a_client import fetch_agent_card, send_message_to_agent, stream_message_to_agent, check_agent_health
+from backend.events.feed import build_event_feed
+from backend.events.single_agent import relay_agent_events, stream_step
+from backend.settings import AppSettings, configure_http_security
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="A2A Playground API")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+configure_http_security(app, AppSettings.from_env())
 
 
 # ============================================================
@@ -459,7 +449,7 @@ async def host_send_stream(data: dict):
 # ============================================================
 # ADK Host Agent — Multi-Agent with LLM Router (google.adk)
 
-from host.adk.manager import get_manager as get_adk_manager
+from backend.host.adk.manager import get_manager as get_adk_manager
 
 @app.post("/api/host-adk/send")
 async def host_adk_send(data: dict):
@@ -489,9 +479,29 @@ async def host_adk_send(data: dict):
 # LangGraph Host Agent — Multi-Agent Router (Streaming)
 # ============================================================
 
-from host.langgraph.manager import get_manager as get_lg_manager
-from a2a_gateway import A2AGateway
-from approvals.service import ApprovalService
+from backend.host.langgraph.manager import get_manager as get_lg_manager
+from backend.a2a_gateway import A2AGateway
+from backend.registry.service import AgentRegistry
+from backend.orchestration.service import RunService
+from backend.api.runs import create_approval_router, create_router as create_runs_router
+
+run_gateway = A2AGateway(db.repository)
+run_host = get_lg_manager()
+run_service = RunService(
+    db.repository,
+    AgentRegistry(db.repository),
+    run_gateway,
+    run_host,
+)
+app.include_router(create_runs_router(run_service))
+app.include_router(
+    create_approval_router(
+        run_service,
+        run_gateway,
+        run_host,
+        logger=logger,
+    )
+)
 
 @app.post("/api/host-lg/send")
 async def host_lg_send(data: dict):
@@ -587,89 +597,3 @@ async def host_lg_send(data: dict):
 
     return StreamingResponse(event_stream(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "Connection": "keep-alive", "X-Accel-Buffering": "no"})
-
-
-@app.post("/api/runs/list")
-async def runs_list():
-    return ApiResponse(result=db.repository.list_runs())
-
-
-@app.post("/api/runs/get")
-async def runs_get(data: dict):
-    run = db.repository.get_run(data.get("run_id", ""))
-    if run is None:
-        return ApiResponse(success=False, error="Run not found")
-    return ApiResponse(
-        result={
-            **run,
-            "approvals": db.repository.list_approvals(run["id"]),
-        }
-    )
-
-
-@app.post("/api/approvals/list")
-async def approvals_list(data: dict):
-    return ApiResponse(
-        result=db.repository.list_approvals(data.get("run_id"))
-    )
-
-
-@app.post("/api/approvals/decide")
-async def approvals_decide(data: dict):
-    service = ApprovalService(
-        db.repository,
-        A2AGateway(db.repository),
-    )
-    try:
-        result = await service.decide(
-            data.get("approval_id", ""),
-            data.get("decision", ""),
-        )
-        result_text = result.get("result", {}).get("text", "")
-        if (
-            result["approval"]["status"] == "approved"
-            and result.get("result", {}).get("state") != "failed"
-        ):
-            try:
-                summary = await get_lg_manager().summarize_approval_result(
-                    result["approval"],
-                    result_text,
-                )
-                result["result"]["raw_text"] = result_text
-                result["result"]["text"] = summary
-                result_text = summary
-            except Exception:
-                logger.warning(
-                    "Host summary unavailable; using deterministic summary"
-                )
-                arguments = json.dumps(
-                    result["approval"].get("arguments", {}),
-                    ensure_ascii=False,
-                )
-                result_text = (
-                    "操作已批准并执行完成。\n\n"
-                    f"- 执行工具：`{result['approval']['tool_name']}`\n"
-                    f"- 执行参数：`{arguments}`\n"
-                    f"- MCP 结果：{result_text}"
-                )
-                result["result"]["raw_text"] = (
-                    result["result"].get("text", "")
-                )
-                result["result"]["text"] = result_text
-        run = db.repository.get_run(result["approval"]["run_id"])
-        if run and result_text:
-            db.add_message(Message(
-                conversation_id=run["conversation_id"],
-                role="agent",
-                content=result_text,
-                task_id=result.get("result", {}).get("task_id"),
-                metadata={
-                    "source": "approval",
-                    "routing_agent": "Host Agent",
-                    "executed_by": result["approval"]["agent_id"],
-                    "approval_id": result["approval"]["id"],
-                },
-            ).model_dump())
-        return ApiResponse(result=result)
-    except (KeyError, ValueError) as exc:
-        return ApiResponse(success=False, error=str(exc))

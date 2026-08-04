@@ -12,6 +12,7 @@ import * as api from '../api/api'
 import {
   eventTimestamp, filterEvents, groupEventsByConversation, summarizeEvent,
 } from '../state/eventFeed'
+import EventDetailDrawer from '../components/EventDetailDrawer'
 
 const { Text } = Typography
 
@@ -52,7 +53,7 @@ function EventDetail({ event }) {
   return (
     <div style={{ padding: '2px 0 12px' }}>
       <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 6, flexWrap: 'wrap' }}>
-        <Tag bordered={false} color={event.conversation_type === 'multi' ? 'blue' : 'green'}>
+        <Tag variant="filled" color={event.conversation_type === 'multi' ? 'blue' : 'green'}>
           {event.conversation_type === 'multi' ? '多智能体' : '单智能体'}
         </Tag>
         <Text style={{ color: '#334155', fontWeight: 600 }}>
@@ -90,6 +91,7 @@ export default function EventsPage() {
   const [type, setType] = useState('all')
   const [state, setState] = useState('all')
   const [query, setQuery] = useState('')
+  const [selectedEvent, setSelectedEvent] = useState(null)
 
   const load = async () => {
     setLoading(true)
@@ -113,7 +115,7 @@ export default function EventsPage() {
   const multi = new Set(events.filter(event => event.conversation_type === 'multi').map(event => event.conversation_id)).size
 
   return (
-    <div style={{
+    <div className="events-page" style={{
       minHeight: '100vh', overflow: 'auto', padding: '30px clamp(20px, 4vw, 54px) 56px',
       background: 'radial-gradient(circle at 90% 0%, #dbeafe 0, transparent 26%), #f8fafc',
     }}>
@@ -207,7 +209,7 @@ export default function EventsPage() {
                   <span style={{ color: '#0f172a', overflow: 'hidden', textOverflow: 'ellipsis' }}>
                     {first.conversation_title || '未命名会话'}
                   </span>
-                  <Tag bordered={false}>{first.conversation_type === 'multi' ? '多智能体' : '单智能体'}</Tag>
+                  <Tag variant="filled">{first.conversation_type === 'multi' ? '多智能体' : '单智能体'}</Tag>
                 </div>
               }
               extra={<Text type="secondary">{items.length} 条事件</Text>}
@@ -218,7 +220,7 @@ export default function EventsPage() {
               }}>
                 <span><RobotOutlined /> {first.agent_name || 'Host Agent'}</span>
                 <span>Task: <code>{first.task_id || '等待远程 Task ID'}</code></span>
-                <Tag bordered={false} style={{ color: stateInfo.color, background: `${stateInfo.color}12` }}>
+                <Tag variant="filled" style={{ color: stateInfo.color, background: `${stateInfo.color}12` }}>
                   {stateInfo.label}
                 </Tag>
               </div>
@@ -226,13 +228,14 @@ export default function EventsPage() {
                 items={items.map(event => ({
                   color: (STATE[event.state] || {}).color || '#94a3b8',
                   dot: eventIcon(event),
-                  children: <EventDetail event={event} />,
+                  children: <div className="event-timeline-entry" role="button" tabIndex={0} onClick={() => setSelectedEvent(event)} onKeyDown={keyEvent => { if (keyEvent.key === 'Enter') setSelectedEvent(event) }}><EventDetail event={event} /></div>,
                 }))}
               />
             </Card>
           )
         })}
       </div>
+      <EventDetailDrawer event={selectedEvent} open={Boolean(selectedEvent)} onClose={() => setSelectedEvent(null)} />
     </div>
   )
 }

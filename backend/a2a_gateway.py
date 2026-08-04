@@ -4,10 +4,7 @@ import uuid
 import json
 from typing import Any
 
-try:
-    from a2a_client import send_message_to_agent
-except ImportError:
-    from backend.a2a_client import send_message_to_agent
+from backend.a2a_client import send_message_to_agent
 
 
 class SDKTransport:

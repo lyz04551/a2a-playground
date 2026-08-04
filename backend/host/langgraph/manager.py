@@ -7,14 +7,10 @@ from typing import AsyncIterable, Optional
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from host.langgraph.agent import LangGraphHostAgent, RemoteAgentConnections
+from backend.host.langgraph.agent import LangGraphHostAgent, RemoteAgentConnections
 from a2a.types import AgentCard
-try:
-    import database
-    from a2a_gateway import A2AGateway
-except ImportError:
-    from backend import database
-    from backend.a2a_gateway import A2AGateway
+from backend import database
+from backend.a2a_gateway import A2AGateway
 
 logger = logging.getLogger(__name__)
 

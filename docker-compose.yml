@@ -58,14 +58,16 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       PLAYGROUND_DB_PATH: /app/data/playground.db
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
       DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
       BOOTSTRAP_AGENTS: >-
         [{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"}]
+      PLAYGROUND_ALLOW_PRIVATE_AGENTS: "true"
+      PLAYGROUND_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
     ports:
       - "8050:8050"
     volumes:
@@ -102,4 +104,3 @@ services:
 
 volumes:
   backend_data:
-

@@ -89,7 +89,7 @@ export default function AgentsPage() {
   const onlineCount = agents.filter(a => healthMap[a.id]?.online).length
 
   return (
-    <div style={{ padding: 32, height: '100vh', display: 'flex', flexDirection: 'column' }}>
+    <div className="agents-page" style={{ padding: 32, height: '100vh', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
       <div style={{
         display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
@@ -232,7 +232,7 @@ export default function AgentsPage() {
                     <Button
                       type="text"
                       icon={<MessageOutlined />}
-                      onClick={() => navigate(`/chat/${agent.id}`)}
+                      onClick={() => navigate(`/workspace?mode=direct&agent=${encodeURIComponent(agent.id)}`)}
                       style={{ color: '#10b981' }}
                     >
                       Chat

@@ -80,6 +80,29 @@ unchanged as backups.
 | **Task Events** | Full event log with tool_call, tool_result, routing events |
 | **Pagination** | Agent cards paginated (9 per page) |
 
+### Operations console experience
+
+The frontend includes a responsive operations console designed for internal
+engineering and Kubernetes operations workflows:
+
+- Dashboard with live Agent, run, approval, and model-configuration summaries.
+- Global `Command+K` / `Ctrl+K` search for pages, Agents, conversations, and
+  loaded events.
+- Light and dark themes, comfortable and compact density, collapsible
+  navigation, and Chinese/English shell labels.
+- Kubernetes prompt templates for health checks, abnormal Pod analysis,
+  security reviews, warning-event triage, and deployment reviews.
+- Searchable and renameable conversations, message copy actions, responsive
+  conversation/trace drawers, and deep links from Dashboard search results.
+- Host → Agent → Tool execution timeline and a debugger drawer with raw SSE
+  events, IDs, elapsed time, and copyable JSON.
+- First-use guidance and resilient partial-data states when one dashboard API
+  is unavailable.
+
+Token statistics are displayed only when the backend supplies real usage data.
+Server-side full-text search, favorites, pinning, regenerate, and historical
+analytics remain follow-up features.
+
 ---
 
 ## Quick Start
@@ -121,11 +144,10 @@ Open [http://127.0.0.1:5174](http://127.0.0.1:5174) in your browser.
 ### Manual Setup
 
 ```bash
-# Backend
-cd backend
-python3 -m venv .venv
-.venv/bin/pip install fastapi uvicorn httpx pydantic python-dotenv a2a-sdk>=0.3.25 langgraph langchain-openai langchain-core
-.venv/bin/python3 -m uvicorn main:app --host 127.0.0.1 --port 8050 --log-level info
+# Backend (run from the repository root)
+python3 -m venv backend/.venv
+backend/.venv/bin/pip install -r backend/requirements.txt
+PLAYGROUND_ALLOW_PRIVATE_AGENTS=true backend/.venv/bin/python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8050 --log-level info
 
 # Frontend
 cd frontend
@@ -261,6 +283,10 @@ a2a-playground/
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `DEEPSEEK_API_KEY` | Yes | API key for Host Agent route decisions |
+| `PLAYGROUND_API_KEY` | No | Bearer token required by `/api/*` except `/api/ping` when set |
+| `PLAYGROUND_CORS_ORIGINS` | No | Comma-separated allowed frontend origins |
+| `PLAYGROUND_ALLOW_PRIVATE_AGENTS` | No | Allow private/loopback Agent addresses for trusted local networks |
+| `PLAYGROUND_DB_BUSY_TIMEOUT_MS` | No | SQLite lock wait, default `5000` ms |
 
 #### Default configuration
 
@@ -271,7 +297,7 @@ a2a-playground/
 | DeepSeek model | `deepseek-chat` |
 | DeepSeek base URL | `https://api.deepseek.com/v1` |
 | A2A SDK | `>=0.3.25` |
-| Data storage | JSON files in `backend/data/` |
+| Data storage | SQLite in `backend/data/` |
 
 ---
 
