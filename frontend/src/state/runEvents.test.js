@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { emptyRunState, normalizeLegacyRunEvent, reduceRunEvent } from './runEvents.js'
+import { emptyRunState, normalizeLegacyRunEvent, reduceRunEvent, restoreRunEventState } from './runEvents.js'
 
 function event(type, sequence, data = {}, overrides = {}) {
   return {
@@ -110,6 +110,23 @@ test('derives task duration from real start and completion timestamps', () => {
   assert.equal(state.tasksById['task-1'].completedAt, '2026-07-30T12:00:02.250Z')
 })
 
+test('merges tool completion by tool_call_id and derives its duration', () => {
+  let state = reduceRunEvent(emptyRunState, event('task.delegated', 1, { agent_id: 'ops' }))
+  state = reduceRunEvent(state, event('tool.called', 2, {
+    tool_call_id: 'call-1', tool: 'get_nodes', arguments: { wide: true },
+  }, { timestamp: '2026-07-30T12:00:00Z' }))
+  state = reduceRunEvent(state, event('tool.completed', 3, {
+    tool_call_id: 'call-1', tool: 'get_nodes', result: 'Ready',
+  }, { timestamp: '2026-07-30T12:00:01.250Z' }))
+
+  assert.equal(state.tasksById['task-1'].tools.length, 1)
+  assert.deepEqual(state.tasksById['task-1'].tools[0], {
+    id: 'call-1', name: 'get_nodes', arguments: { wide: true }, status: 'completed',
+    result: 'Ready', startedAt: '2026-07-30T12:00:00.000Z',
+    completedAt: '2026-07-30T12:00:01.250Z', durationMs: 1250,
+  })
+})
+
 test('failed tasks retain error details and completed tasks survive interruption', () => {
   let state = reduceRunEvent(emptyRunState, event('task.completed', 1, { result: 'healthy' }, { task_id: 'task-ok' }))
   state = reduceRunEvent(state, event('task.failed', 2, { error: { message: 'timeout', code: 'ETIMEDOUT' } }, { task_id: 'task-bad' }))
@@ -118,4 +135,39 @@ test('failed tasks retain error details and completed tasks survive interruption
   assert.equal(state.tasksById['task-ok'].status, 'completed')
   assert.deepEqual(state.tasksById['task-bad'].error, { message: 'timeout', code: 'ETIMEDOUT' })
   assert.equal(state.run.status, 'interrupted')
+})
+
+test('multi-agent plan retains dependencies retries replacement and blocked state', () => {
+  let state = reduceRunEvent(emptyRunState, event('host.plan_created', 1, {
+    summary: 'diagnose and review',
+    tasks: [
+      { id: 'diagnose', agent_id: 'ops', depends_on: [] },
+      { id: 'security', agent_id: 'security', depends_on: [] },
+      { id: 'remediate', agent_id: 'orchestrator', objective: '生成修复结论', input: '综合前序结果', completion_criteria: ['给出优先级'], depends_on: ['diagnose', 'security'] },
+    ],
+  }, { task_id: 'root' }))
+  state = reduceRunEvent(state, event('task.delegated', 2, { agent_id: 'ops' }, { task_id: 'diagnose', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('task.retry_scheduled', 3, { agent_id: 'ops', attempt: 2, reason: 'timeout' }, { task_id: 'diagnose', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('host.plan_revised', 4, { agent_id: 'fallback', replacement_agent_id: 'fallback' }, { task_id: 'diagnose', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('task.blocked', 5, { reason: 'dependency unavailable' }, { task_id: 'remediate', parent_task_id: 'root' }))
+
+  assert.deepEqual(state.plan.taskIds, ['diagnose', 'security', 'remediate'])
+  assert.deepEqual(state.tasksById.remediate.dependsOn, ['diagnose', 'security'])
+  assert.equal(state.tasksById.remediate.objective, '生成修复结论')
+  assert.equal(state.tasksById.remediate.input, '综合前序结果')
+  assert.deepEqual(state.tasksById.remediate.completionCriteria, ['给出优先级'])
+  assert.equal(state.tasksById.diagnose.attempt, 2)
+  assert.equal(state.tasksById.diagnose.replacedAgentId, 'fallback')
+  assert.equal(state.tasksById.remediate.status, 'blocked')
+})
+
+test('restores task details and results by replaying persisted events', () => {
+  const rawEvents = [
+    event('run.started', 1),
+    event('host.plan_created', 2, { tasks: [{ id: 'ops', agent_id: 'ops-agent', objective: '检查集群', input: '当前状态', depends_on: [] }] }),
+    event('task.completed', 3, { result: '集群健康' }, { task_id: 'ops', parent_task_id: 'root' }),
+  ]
+  const state = restoreRunEventState({ run: { id: 'run-1', status: 'completed' }, rawEvents })
+  assert.equal(state.tasksById.ops.objective, '检查集群')
+  assert.equal(state.tasksById.ops.result, '集群健康')
 })

@@ -12,6 +12,7 @@ import PromptTemplates from '../components/PromptTemplates'
 import DebugDrawer from '../components/workspace/DebugDrawer'
 import { useConsoleSettings } from '../context/ConsoleSettingsContext'
 import { getWorkspaceSendState } from '../components/workspace/workspaceState'
+import { deriveRunStage } from '../state/runStage'
 
 export default function WorkspacePage() {
   const location = useLocation()
@@ -63,7 +64,8 @@ export default function WorkspacePage() {
   }, [workspace.loading, workspace.conversationId])
 
   const sendState = getWorkspaceSendState({ mode: workspace.mode, selectedAgentId: workspace.selectedAgentId, agents, modelConfigured })
-  const trace = useMemo(() => ({ ...workspace.state.run, tasks: workspace.state.taskOrder.map(id => workspace.state.tasksById[id]), approvals: workspace.state.approvals, artifacts: workspace.state.artifacts, rawEvents: workspace.state.rawEvents || [] }), [workspace.state])
+  const trace = useMemo(() => ({ ...workspace.state.run, tasks: workspace.state.taskOrder.map(id => { const task = workspace.state.tasksById[id]; return { ...task, agentName: agents.find(agent => agent.id === (task.replacedAgentId || task.agentId))?.name || task.agentName } }), approvals: workspace.state.approvals, artifacts: workspace.state.artifacts, rawEvents: workspace.state.rawEvents || [] }), [workspace.state, agents])
+  const runStage = useMemo(() => deriveRunStage(trace.rawEvents, agents), [trace.rawEvents, agents])
   const changeMode = mode => {
     if (workspace.state.messages.length > 0) workspace.beginNewConversation(mode, mode === 'direct' ? workspace.selectedAgentId : '')
     else workspace.setMode(mode)
@@ -88,14 +90,14 @@ export default function WorkspacePage() {
   }
 
   const sidebar = <ConversationSidebar conversations={conversations} activeId={workspace.conversationId} language={language} onSelect={id => { workspace.restoreConversation(id); setDrawer('') }} onNew={() => { workspace.beginNewConversation(); setDrawer('') }} onDelete={deleteConversation} onRename={renameConversation} />
-  const tracePanel = <RunTracePanel run={trace} loading={workspace.loading} error={workspace.error} onDebug={() => setDrawer('debug')} onApproval={async (approval, decision) => { await api.decideApproval(approval.id, decision); workspace.restoreConversation(workspace.conversationId) }} />
+  const tracePanel = <RunTracePanel run={trace} stage={runStage} agents={agents} language={language} loading={workspace.loading} error={workspace.error} onDebug={() => setDrawer('debug')} onApproval={async (approval, decision) => { await api.decideApproval(approval.id, decision); workspace.restoreConversation(workspace.conversationId) }} />
 
   return <div className="agent-workspace">
     <div className="agent-workspace__desktop">{sidebar}</div>
     <main className="agent-workspace__main">
       <header className="agent-workspace__header"><Button className="agent-workspace__drawer-button" icon={<MenuOutlined />} onClick={() => setDrawer('conversations')}>{zh ? '会话' : 'Conversations'}</Button><div><span className="workspace-eyebrow">Unified Agent Workspace</span><h1>{workspace.mode === 'direct' ? (zh ? 'Direct 对话' : 'Direct conversation') : (zh ? '自动编排' : 'Auto orchestration')}</h1></div><Button className="agent-workspace__drawer-button" onClick={() => setDrawer('trace')}>{zh ? '轨迹' : 'Trace'}</Button></header>
       <section className="agent-workspace__controls"><ModeSwitch mode={workspace.mode} messageCount={workspace.state.messages.length} onChange={changeMode} language={language} />{workspace.mode === 'direct' ? <Select aria-label="Target Agent" placeholder={zh ? '选择在线 Agent' : 'Select an online Agent'} value={workspace.selectedAgentId || undefined} onChange={workspace.setSelectedAgentId} options={agents.filter(agent => agent.online).map(agent => ({ value: agent.id, label: agent.name }))} /> : <p><strong>Host Agent</strong> {zh ? `将协调 ${agents.filter(agent => agent.online).length} 个在线 Agent。` : `coordinates ${agents.filter(agent => agent.online).length} online Agents.`}</p>}</section>
-      <section className="agent-workspace__messages"><MessageTimeline messages={workspace.state.messages} loading={workspace.loading} error={workspace.error} onRetry={workspace.retry} language={language} /></section>
+      <section className="agent-workspace__messages"><MessageTimeline messages={workspace.state.messages} loading={workspace.loading} stage={runStage} error={workspace.error} onRetry={workspace.retry} language={language} /></section>
       <footer className="agent-workspace__composer"><div className="agent-workspace__composer-main">{workspace.state.messages.length === 0 && <PromptTemplates language={language} compact onSelect={template => setDraft(template.prompt)} />}<Input.TextArea value={draft} onChange={event => setDraft(event.target.value)} onPressEnter={event => { if (!event.shiftKey) { event.preventDefault(); submit() } }} placeholder={sendState.reason || (zh ? '描述一个目标…' : 'Describe a goal…')} autoSize={{ minRows: 2, maxRows: 6 }} disabled={workspace.loading} /></div><Button type="primary" icon={workspace.loading ? <StopOutlined /> : <SendOutlined />} onClick={workspace.loading ? workspace.cancel : submit} disabled={!workspace.loading && (sendState.disabled || !draft.trim())}>{workspace.loading ? (zh ? '停止' : 'Stop') : (zh ? '发送' : 'Send')}</Button></footer>
     </main>
     <div className="agent-workspace__desktop agent-workspace__trace">{tracePanel}</div>

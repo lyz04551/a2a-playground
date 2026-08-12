@@ -87,8 +87,9 @@ async def register_agent_address(
         protocolVersion=card.protocol_version or "",
         preferredTransport=card.preferred_transport or "",
         documentationUrl=card.documentation_url or "",
+        read_only=risk_level != "write_approval",
+        risk_level=risk_level or "read_only",
     ).model_dump()
-    agent["risk_level"] = risk_level or "unknown"
     agent["health"] = {"online": True}
     return db.add_agent(agent)
 

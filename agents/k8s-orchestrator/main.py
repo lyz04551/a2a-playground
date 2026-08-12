@@ -27,7 +27,7 @@ agent = RuntimeMCPAgent(config, load_prompt(BASE_DIR / "prompt.md"))
 
 @asynccontextmanager
 async def lifespan(_app):
-    await agent.ensure_ready()
+    await agent.warm_up()
     yield
     await agent.shutdown()
 

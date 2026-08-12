@@ -97,12 +97,13 @@ export async function streamRun(command, handlers = {}, options = {}) {
   const dedupeLimit = options.dedupeLimit ?? DEFAULT_DEDUPE_LIMIT
   const seenEventIds = new Set()
   let lastSequence = 0
+  let runId = ''
   let reconnects = 0
 
   connection: while (true) {
     const body = reconnects === 0
       ? command
-      : { ...command, after_sequence: lastSequence }
+      : { ...command, run_id: runId, after_sequence: lastSequence }
     let response
     try {
       response = await fetchImpl(endpoint, {
@@ -134,6 +135,7 @@ export async function streamRun(command, handlers = {}, options = {}) {
 
     const parser = createSSEParser(event => {
       if (!boundedRemember(seenEventIds, event?.event_id, dedupeLimit)) return
+      if (event?.run_id) runId = event.run_id
       if (Number.isFinite(event.sequence)) lastSequence = Math.max(lastSequence, event.sequence)
       handlers.onEvent?.(event)
     })

@@ -33,6 +33,10 @@ class AgentRuntimeConfig(BaseModel):
     public_url: str = Field(min_length=1)
     mcp_url: str = Field(min_length=1)
     skills: list[AgentSkillConfig] = Field(default_factory=list)
+    read_only: bool = True
+    risk_level: str = "read_only"
+    limitations: list[str] = Field(default_factory=list)
+    priority: int = 100
     tool_policy: ToolPolicyConfig = Field(default_factory=ToolPolicyConfig)
     input_modes: list[str] = Field(default_factory=lambda: ["text/plain"])
     output_modes: list[str] = Field(default_factory=lambda: ["text/plain"])

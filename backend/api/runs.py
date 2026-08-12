@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter
@@ -44,6 +45,7 @@ def _command(data: dict[str, Any]) -> RunCommand:
 
 def create_router(service) -> APIRouter:
     router = APIRouter()
+    background_runs: set[asyncio.Task] = set()
 
     @router.post("/api/runs/stream")
     async def runs_stream(data: dict[str, Any]):
@@ -52,9 +54,48 @@ def create_router(service) -> APIRouter:
         except ValidationError as exc:
             return _error(str(exc))
 
-        async def event_stream():
-            async for event in service.stream(command):
-                yield encode_sse(event)
+        reconnect_run_id = str(data.get("run_id") or data.get("runId") or "")
+        if reconnect_run_id:
+            if service.get(reconnect_run_id) is None:
+                return _error("Run not found", status_code=404)
+            try:
+                after_sequence = max(0, int(data.get("after_sequence", 0)))
+            except (TypeError, ValueError):
+                return _error("after_sequence must be an integer")
+
+            async def event_stream():
+                cursor = after_sequence
+                while True:
+                    events = service.events(reconnect_run_id, cursor)
+                    for event in events:
+                        cursor = max(cursor, event.sequence)
+                        yield encode_sse(event)
+                    run = service.get(reconnect_run_id)
+                    if run is None or run["status"] in {
+                        "completed", "failed", "cancelled", "approval_required"
+                    }:
+                        return
+                    await asyncio.sleep(0.1)
+        else:
+            queue: asyncio.Queue = asyncio.Queue()
+
+            async def produce():
+                try:
+                    async for event in service.stream(command):
+                        await queue.put(event)
+                finally:
+                    await queue.put(None)
+
+            producer = asyncio.create_task(produce())
+            background_runs.add(producer)
+            producer.add_done_callback(background_runs.discard)
+
+            async def event_stream():
+                while True:
+                    event = await queue.get()
+                    if event is None:
+                        return
+                    yield encode_sse(event)
 
         return StreamingResponse(
             event_stream(),

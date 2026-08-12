@@ -30,6 +30,10 @@ class Agent(BaseModel):
     inputModes: list[str] = ["text"]
     outputModes: list[str] = ["text"]
     skills: list[dict] = []
+    read_only: bool = True
+    risk_level: str = "read_only"
+    limitations: list[str] = []
+    priority: int = 100
     version: str = ""
     protocolVersion: str = ""
     preferredTransport: str = ""

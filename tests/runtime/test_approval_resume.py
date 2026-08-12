@@ -89,3 +89,29 @@ async def test_changed_digest_never_executes_tool():
 
     assert events[-1].type is RuntimeEventType.ERROR
     assert client.calls == []
+
+
+@pytest.mark.anyio
+async def test_approved_action_recovers_after_agent_restart_from_signed_payload():
+    client = FakeMCPClient()
+    restarted_agent = make_agent(client)
+    pending = PendingAction.from_call(
+        approval_id="ap-1",
+        agent_id="k8s-orchestrator",
+        tool_name="scale_k8s_deployment",
+        arguments={"name": "api", "replicas": 2},
+    )
+    message = json.dumps({
+        "type": "approval_decision",
+        "approval_id": pending.approval_id,
+        "agent_id": pending.agent_id,
+        "decision": "approved",
+        "tool_name": pending.tool_name,
+        "arguments": pending.arguments,
+        "action_digest": pending.action_digest,
+    })
+
+    events = [event async for event in restarted_agent.stream(message, "ctx-1")]
+
+    assert events[-1].type is RuntimeEventType.COMPLETED
+    assert client.calls == [("scale_k8s_deployment", {"name": "api", "replicas": 2})]

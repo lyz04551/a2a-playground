@@ -109,6 +109,35 @@ async def test_approval_required_tool_never_calls_mcp():
     assert client.calls == []
 
 
+@pytest.mark.anyio
+async def test_tool_budget_stops_mcp_calls_and_resets_for_next_task():
+    client = FakeMCPClient()
+    adapter = MCPToolAdapter(
+        client,
+        ToolPolicy(ToolPolicyConfig(allow=["get_k8s_*"])),
+        agent_id="k8s-ops",
+        max_calls=2,
+    )
+    tool = adapter.build_tools([{
+        "name": "get_k8s_pod_logs",
+        "description": "Read logs",
+        "input_schema": {"type": "object", "properties": {}},
+    }])[0]
+    config = {"configurable": {"thread_id": "ctx"}}
+
+    adapter.reset_budget("ctx")
+    await tool.ainvoke({}, config=config)
+    await tool.ainvoke({}, config=config)
+    limited = await tool.ainvoke({}, config=config)
+
+    assert len(client.calls) == 2
+    assert "预算" in limited
+
+    adapter.reset_budget("ctx")
+    assert await tool.ainvoke({}, config=config) == "called:get_k8s_pod_logs"
+    assert len(client.calls) == 3
+
+
 def test_denied_tools_are_not_exposed_to_the_model():
     adapter = MCPToolAdapter(
         FakeMCPClient(),

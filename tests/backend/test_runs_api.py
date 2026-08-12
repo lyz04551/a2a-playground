@@ -103,6 +103,33 @@ async def test_direct_without_target_returns_structured_400(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_stream_reconnect_replays_original_run_without_creating_another(tmp_path):
+    app, repository, service = make_app(tmp_path)
+    completed = [event async for event in service.stream(RunCommand(
+        mode="direct", target_agent_id="ops", message="Inspect",
+    ))]
+    original_run_id = completed[0].run_id
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test",
+    ) as client:
+        response = await client.post("/api/runs/stream", json={
+            "mode": "direct",
+            "target_agent_id": "ops",
+            "message": "Inspect",
+            "run_id": original_run_id,
+            "after_sequence": 2,
+        })
+
+    replayed = sse_events(response)
+    assert {event["run_id"] for event in replayed} == {original_run_id}
+    assert [event["sequence"] for event in replayed] == [
+        event.sequence for event in completed[2:]
+    ]
+    assert len(repository.list_runs()) == 1
+
+
+@pytest.mark.anyio
 async def test_run_query_replay_and_cancel_endpoints(tmp_path):
     app, repository, service = make_app(tmp_path)
     completed = [

@@ -38,6 +38,17 @@ def test_agent_configs_have_unique_stable_ids_and_urls(monkeypatch):
     assert len({config.public_url for config in configs}) == 3
 
 
+def test_agent_configs_declare_orchestration_capabilities(monkeypatch):
+    ops, orchestrator, security = load_configs(monkeypatch)
+
+    assert ops.read_only is True
+    assert security.read_only is True
+    assert orchestrator.read_only is False
+    assert ops.risk_level == "read_only"
+    assert orchestrator.risk_level == "write_approval"
+    assert "mutation requires approval" in orchestrator.limitations
+
+
 def test_ops_and_security_cannot_mutate_cluster(monkeypatch):
     ops, _, security = load_configs(monkeypatch)
 
@@ -77,4 +88,3 @@ def test_orchestrator_mutations_require_approval(monkeypatch):
         policy.classify("run_command_in_k8s_pod", {}).action
         is PolicyAction.DENY
     )
-

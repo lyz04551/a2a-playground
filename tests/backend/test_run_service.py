@@ -182,7 +182,7 @@ async def test_failure_marks_run_and_root_task_and_preserves_partial_output(
 
 
 @pytest.mark.anyio
-async def test_closing_client_iterator_leaves_run_active(tmp_path):
+async def test_closing_client_iterator_cancels_orphaned_run(tmp_path):
     repository, service = make_service(
         tmp_path,
         [
@@ -201,10 +201,11 @@ async def test_closing_client_iterator_leaves_run_active(tmp_path):
     started = await anext(stream)
     await stream.aclose()
 
-    assert repository.get_run(started.run_id)["status"] == "running"
-    assert repository.list_tasks(started.run_id)[0]["status"] == "working"
+    assert repository.get_run(started.run_id)["status"] == "cancelled"
+    assert repository.list_tasks(started.run_id)[0]["status"] == "cancelled"
     assert [event.type for event in repository.list_run_events(started.run_id)] == [
         RunEventType.RUN_STARTED,
+        RunEventType.RUN_CANCELLED,
     ]
 
 

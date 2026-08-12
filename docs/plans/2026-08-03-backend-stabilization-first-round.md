@@ -25,7 +25,6 @@
 - Modify: `backend/host/langgraph/agent.py`
 - Modify: `backend/Dockerfile`
 - Modify: `docker-compose.yml`
-- Modify: `run.sh`
 - Test: `tests/backend/test_backend_import_mode.py`
 
 1. Extend the import regression test to assert the service, strategies, repository, and API router share the exact same `RunEvent` class.

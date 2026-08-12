@@ -13,6 +13,14 @@ from google.adk.artifacts import InMemoryArtifactService
 from google.genai import types
 
 from backend.host.adk.agent import HostAgent
+from backend.host.adk.decisions import ADKDecisionPort
+from backend.host.langgraph.agent import LangGraphHostAgent
+from backend.host.orchestration.engine import HostOrchestrationEngine
+from backend.host.orchestration.models import DelegationResult
+from backend.a2a_gateway import A2AGateway
+from backend.registry.service import AgentRegistry
+from backend import database
+from backend.settings import AppSettings
 from a2a.types import AgentCard
 
 logger = logging.getLogger(__name__)
@@ -21,8 +29,22 @@ logger = logging.getLogger(__name__)
 class ADKHostManager:
     """Manages the ADK HostAgent and streams events to the frontend."""
 
-    def __init__(self):
+    def __init__(self, *, registry=None, gateway=None, decisions=None):
+        settings = AppSettings.from_env()
         self._host_agent = HostAgent()
+        self._registry = registry or AgentRegistry(database.repository)
+        self._gateway = gateway or A2AGateway(database.repository)
+        self._decisions = decisions or ADKDecisionPort(
+            LangGraphHostAgent._make_model(streaming=False)
+        )
+        self._engine = HostOrchestrationEngine(
+            self._registry,
+            self._decisions,
+            self._delegate_task,
+            max_concurrency=settings.host_max_concurrency,
+            max_tasks=settings.host_max_tasks,
+            max_attempts=settings.host_max_attempts,
+        )
         self._session_service = InMemorySessionService()
         self._memory_service = InMemoryMemoryService()
         self._artifact_service = InMemoryArtifactService()
@@ -44,7 +66,7 @@ class ADKHostManager:
                     skills=a.get("skills", []),
                     preferred_transport=a.get("preferredTransport", "JSONRPC"),
                 )
-                self._host_agent.register_agent_card(card)
+                self._host_agent.register_agent_card(a["id"], card)
                 logger.info(f"Registered ADK sub-agent: {card.name}")
             except Exception as e:
                 logger.warning(f"Failed to register agent {a.get('name')}: {e}")
@@ -67,7 +89,56 @@ class ADKHostManager:
     def recreate_runner(self):
         self._runner = None
 
-    async def process_message_stream(self, text: str, session_id: str) -> AsyncIterable[dict]:
+    async def process_message_stream(
+        self, text: str, session_id: str
+    ) -> AsyncIterable[dict]:
+        async for event in self._engine.stream(text, session_id):
+            yield event
+
+    async def _delegate_task(
+        self, run_id: str, agent_id: str, message: str, on_event
+    ) -> DelegationResult:
+        agent = self._registry.get(agent_id)
+        if agent is None:
+            return DelegationResult(
+                state="failed", error=f"Agent '{agent_id}' not found"
+            )
+        response = {"state": "completed", "text": ""}
+        accumulated = ""
+        async for event in self._gateway.delegate_stream(run_id, agent, message):
+            event_type = str(event.get("type") or "")
+            if event_type in {"tool_call", "tool_result", "status"}:
+                await on_event(event)
+            if event_type == "text":
+                accumulated += str(event.get("text") or "")
+            elif event_type == "done":
+                response = event
+                response["text"] = str(event.get("text") or accumulated)
+            elif event_type == "error":
+                response = {"state": "failed", "error": event.get("text")}
+            elif not event_type:
+                response = event
+        state = str(response.get("state") or "").replace("_", "-").lower()
+        if response.get("approval") or state == "input-required":
+            return DelegationResult(
+                state="approval_required",
+                text=str(response.get("text") or ""),
+                approval=response.get("approval"),
+            )
+        if state in {"failed", "error", "rejected", "cancelled", "canceled"}:
+            return DelegationResult(
+                state="failed",
+                error=str(
+                    response.get("error")
+                    or response.get("text")
+                    or "remote execution failed"
+                ),
+            )
+        return DelegationResult(
+            state="completed", text=str(response.get("text") or "")
+        )
+
+    async def _process_legacy_message_stream(self, text: str, session_id: str) -> AsyncIterable[dict]:
         """Process a user message and stream ADK events to the frontend.
 
         Yields dicts:

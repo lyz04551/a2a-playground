@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import pytest
 
 from backend.approvals.service import ApprovalService
@@ -54,3 +55,12 @@ async def test_approval_service_resumes_same_agent_run_with_exact_digest(
     assert gateway.calls[0][0:2] == ("run-1", "k8s-orchestrator")
     assert '"action_digest": "bbbb' in gateway.calls[0][2]
     assert '"decision": "approved"' in gateway.calls[0][2]
+    continuation = json.loads(gateway.calls[0][2])
+    assert continuation["agent_id"] == "k8s-orchestrator"
+    assert continuation["tool_name"] == "scale_k8s_deployment"
+    assert continuation["arguments"] == {"name": "api", "replicas": 2}
+
+    repeated = await service.decide("ap-1", "approved")
+    assert len(gateway.calls) == 1
+    assert repeated["result"]["state"] == "completed"
+    assert "未重复执行" in repeated["result"]["text"]

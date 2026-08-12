@@ -122,7 +122,7 @@ test('stream client reconnects network interruptions with the last received sequ
   assert.deepEqual(received.map(event => event.sequence), [7, 8])
   assert.deepEqual(bodies, [
     { mode: 'auto', message: 'inspect' },
-    { mode: 'auto', message: 'inspect', after_sequence: 7 },
+    { mode: 'auto', message: 'inspect', run_id: 'run-1', after_sequence: 7 },
   ])
 })
 

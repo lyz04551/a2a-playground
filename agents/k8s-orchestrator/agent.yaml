@@ -1,6 +1,11 @@
 agent_id: k8s-orchestrator
 name: K8s Orchestrator Agent
 description: Plans Kubernetes changes and executes only exact user-approved mutations.
+read_only: false
+risk_level: write_approval
+limitations:
+  - mutation requires approval
+priority: 40
 port: 8051
 public_url: ${AGENT_PUBLIC_URL}
 mcp_url: ${K8S_MCP_URL}
@@ -39,4 +44,3 @@ tool_policy:
     - annotate_k8s_resource
     - label_k8s_resource
     - helm_install_chart
-

@@ -84,36 +84,28 @@ class HostAgent:
         self.remote_connections: dict[str, RemoteAgentConnections] = {}
         self.cards: dict[str, AgentCard] = {}
 
-    def register_agent_card(self, card: AgentCard):
+    def register_agent_card(self, agent_id: str, card: AgentCard):
         """Register a remote agent by its AgentCard."""
         conn = RemoteAgentConnections(card)
-        name = card.name or card.url
-        self.remote_connections[name] = conn
-        self.cards[name] = card
+        self.remote_connections[agent_id] = conn
+        self.cards[agent_id] = card
 
     def unregister_agent(self, agent_id: str):
         """Remove a registered agent by ID."""
-        for name in list(self.remote_connections.keys()):
-            conn = self.remote_connections[name]
-            if hasattr(conn.card, 'url') and agent_id in conn.card.url:
-                del self.remote_connections[name]
-                del self.cards[name]
-                return
-            if agent_id in name:
-                del self.remote_connections[name]
-                del self.cards[name]
-                return
+        self.remote_connections.pop(agent_id, None)
+        self.cards.pop(agent_id, None)
 
     def _get_agents_text(self) -> str:
         """Build the agents description text for the system prompt."""
         lines = []
-        for name, card in self.cards.items():
+        for agent_id, card in self.cards.items():
             skills = card.skills or []
             skills_str = "; ".join(
                 f"{s.name}: {s.description}" for s in skills if s.name
             ) or "general"
             lines.append(json.dumps({
-                "name": name,
+                "id": agent_id,
+                "name": card.name or agent_id,
                 "description": card.description or "",
                 "skills": skills_str,
                 "url": card.url,
@@ -146,33 +138,34 @@ class HostAgent:
     def list_remote_agents(self, tool_context: ToolContext):
         """List the available remote agents."""
         result = []
-        for name, card in self.cards.items():
+        for agent_id, card in self.cards.items():
             result.append({
-                "name": name,
+                "id": agent_id,
+                "name": card.name or agent_id,
                 "description": card.description or "",
                 "url": card.url,
             })
         return result
 
-    async def send_task(self, agent_name: str, message: str, tool_context: ToolContext):
+    async def send_task(self, agent_id: str, message: str, tool_context: ToolContext):
         """Send a task to a remote agent by name.
 
         Args:
-            agent_name: The name of the agent to delegate to.
+            agent_id: The stable ID of the agent to delegate to.
             message: The message/query to send.
         """
-        if agent_name not in self.remote_connections:
-            raise ValueError(f"Agent '{agent_name}' not found")
+        if agent_id not in self.remote_connections:
+            raise ValueError(f"Agent '{agent_id}' not found")
 
         state = tool_context.state
         if 'session_id' not in state:
             state['session_id'] = str(uuid.uuid4())
 
-        state['agent'] = agent_name
+        state['agent'] = agent_id
         task_id = state.get('task_id') or str(uuid.uuid4())
         state['task_id'] = task_id
 
-        conn = self.remote_connections[agent_name]
+        conn = self.remote_connections[agent_id]
         response_text = await conn.send_message(message, state['session_id'], task_id)
 
         # Mark session as no longer active unless agent says otherwise

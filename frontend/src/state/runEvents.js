@@ -11,6 +11,7 @@ export const emptyRunState = {
   seenEventIds: [],
   lastSequence: 0,
   status: 'idle',
+  plan: null,
   steps: [],
   rawEvents: [],
 }
@@ -101,6 +102,39 @@ function reduceNormalizedEvent(state, event) {
     return { ...state, run: { ...state.run, id: event.run_id || state.run?.id, status: 'interrupted', ...data } }
   }
   if (event.type === 'host.planning') return { ...state, run: { ...state.run, id: event.run_id, status: 'planning', ...data } }
+  if (event.type === 'host.plan_created') {
+    const tasks = data.tasks || []
+    const tasksById = { ...state.tasksById }
+    const taskOrder = [...state.taskOrder]
+    for (const task of tasks) {
+      tasksById[task.id] = {
+        ...(tasksById[task.id] || {}),
+        id: task.id,
+        parentTaskId: event.task_id,
+        agentId: task.agent_id,
+        label: task.objective || task.id,
+        objective: task.objective || task.id,
+        input: task.input || '',
+        completionCriteria: task.completion_criteria || [],
+        risk: task.risk,
+        maxAttempts: task.max_attempts,
+        dependsOn: task.depends_on || [],
+        status: tasksById[task.id]?.status || 'queued',
+      }
+      if (!taskOrder.includes(task.id)) taskOrder.push(task.id)
+    }
+    return {
+      ...state,
+      plan: { summary: data.summary || '', taskIds: tasks.map(task => task.id) },
+      tasksById,
+      taskOrder,
+    }
+  }
+  if (event.type === 'host.plan_revised') return updateTask(state, event, {
+    ...(data.agent_id ? { agentId: data.agent_id } : {}),
+    replacedAgentId: data.replacement_agent_id,
+    replanReason: data.reason,
+  })
   if (event.type === 'task.delegated') return updateTask(state, event, {
     status: data.status || 'delegated',
     ...(data.agent_id ? { agentId: data.agent_id } : {}),
@@ -113,6 +147,20 @@ function reduceNormalizedEvent(state, event) {
     ...(data.label || data.agent_name ? { label: data.label || data.agent_name } : {}),
   })
   if (event.type === 'task.status_changed') return updateTask(state, event, { status: data.state || data.status || 'working' })
+  if (event.type === 'task.context_prepared') return updateTask(state, event, { dependsOn: data.depends_on || [] })
+  if (event.type === 'task.retry_scheduled') return updateTask(state, event, {
+    attempt: data.attempt,
+    retryReason: data.reason,
+    status: 'retrying',
+  })
+  if (event.type === 'task.evaluated') return updateTask(state, event, {
+    evaluation: data.outcome,
+    evaluationReason: data.reason,
+  })
+  if (event.type === 'task.blocked') return updateTask(state, event, {
+    status: 'blocked',
+    blockedReason: data.reason,
+  })
   if (event.type === 'task.completed' || event.type === 'task.failed') {
     const task = state.tasksById[event.task_id]
     const completedAt = normalizeTimestamp(event.timestamp)
@@ -126,14 +174,25 @@ function reduceNormalizedEvent(state, event) {
     })
   }
   if (event.type === 'tool.called' || event.type === 'tool.completed') {
+    const task = state.tasksById[event.task_id]
+    const id = data.id || data.tool_call_id || event.event_id
+    const existing = (task?.tools || []).find(tool => tool.id === id)
+    const timestamp = normalizeTimestamp(event.timestamp)
+    const startedAt = event.type === 'tool.called' ? timestamp : existing?.startedAt
+    const startedMs = startedAt ? Date.parse(startedAt) : NaN
+    const completedMs = event.type === 'tool.completed' && timestamp ? Date.parse(timestamp) : NaN
     const tool = {
-      id: data.id || event.event_id,
+      ...existing,
+      id,
       ...(data.tool || data.tool_name ? { name: data.tool || data.tool_name } : {}),
       ...(data.arguments || data.args ? { arguments: data.arguments || data.args } : {}),
       status: event.type === 'tool.called' ? 'working' : 'completed',
+      ...(startedAt ? { startedAt } : {}),
+      ...(event.type === 'tool.completed' && timestamp ? { completedAt: timestamp } : {}),
+      ...(Number.isFinite(startedMs) && Number.isFinite(completedMs) ? { durationMs: Math.max(0, completedMs - startedMs) } : {}),
       ...(data.result === undefined ? {} : { result: data.result }),
+      ...(data.error === undefined ? {} : { error: data.error, status: 'failed' }),
     }
-    const task = state.tasksById[event.task_id]
     return updateTask(state, event, { tools: upsertById(task?.tools || [], tool) })
   }
   if (event.type === 'message.delta' || event.type === 'message.completed') {
@@ -182,6 +241,10 @@ export function adaptRunStateForLegacy(state) {
       agentName: task.label,
       label: task.label,
       status,
+      dependsOn: task.dependsOn || [],
+      attempt: task.attempt,
+      replacedAgentId: task.replacedAgentId,
+      reason: task.blockedReason || task.retryReason || task.evaluationReason,
     }]
   })
   return { status: state.run?.status || 'idle', steps }
@@ -198,4 +261,17 @@ export function reduceRunEvent(state, incomingEvent) {
     .slice(-MAX_RAW_EVENTS)
   const normalized = { ...reduced, rawEvents, seenEventIds, lastSequence: Math.max(state.lastSequence, event.sequence || 0) }
   return { ...normalized, ...adaptRunStateForLegacy(normalized) }
+}
+
+export function restoreRunEventState({ run = null, messages = [], approvals = [], tasks = [], rawEvents = [] } = {}) {
+  let state = { ...emptyRunState, messages }
+  for (const event of rawEvents) state = reduceRunEvent(state, event)
+  const tasksById = { ...state.tasksById }
+  const taskOrder = [...state.taskOrder]
+  for (const task of tasks) {
+    tasksById[task.id] = { ...(tasksById[task.id] || {}), ...task }
+    if (!taskOrder.includes(task.id)) taskOrder.push(task.id)
+  }
+  const restored = { ...state, run: { ...(state.run || {}), ...(run || {}) }, messages, approvals: approvals.length ? approvals : state.approvals, tasksById, taskOrder }
+  return { ...restored, ...adaptRunStateForLegacy(restored) }
 }

@@ -1,4 +1,11 @@
-from backend.a2a_client import _unwrap_artifact_text
+from backend.a2a_client import _normalize_readiness, _unwrap_artifact_text
+
+
+def test_normalize_readiness_rejects_unknown_states_and_malformed_checks():
+    assert _normalize_readiness({"state": "surprising", "checks": {"mcp": "bad"}}) == {
+        "state": "degraded",
+        "checks": {},
+    }
 
 
 def test_final_result_artifact_is_unwrapped_to_plain_text():

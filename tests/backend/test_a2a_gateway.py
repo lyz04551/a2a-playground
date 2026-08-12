@@ -45,6 +45,29 @@ class FakeTransport:
         }
 
 
+class StreamingTransport(FakeTransport):
+    async def stream(self, *, agent, message, context_id, task_id):
+        yield {
+            "type": "tool_call",
+            "id": "call-1",
+            "tool": "get_secret",
+            "args": {"namespace": "default", "authorization": "Bearer abc"},
+            "task_id": "remote-1",
+        }
+        yield {
+            "type": "tool_result",
+            "id": "call-1",
+            "result": {"password": "value", "count": 3},
+            "task_id": "remote-1",
+        }
+        yield {
+            "type": "done",
+            "text": "finished",
+            "state": "completed",
+            "task_id": "remote-1",
+        }
+
+
 @pytest.mark.anyio
 async def test_gateway_reuses_remote_context_for_same_run_and_agent(tmp_path):
     repository = SQLiteRepository(tmp_path / "db.sqlite")
@@ -107,3 +130,26 @@ async def test_approval_continuation_reuses_pending_task_id(tmp_path):
     assert continued["task_id"] == pending["task_id"]
     assert transport.calls[-1]["task_id"] == pending["task_id"]
     assert continued["approval"] is None
+
+
+@pytest.mark.anyio
+async def test_gateway_stream_redacts_public_tool_events_and_saves_binding(tmp_path):
+    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository.initialize()
+    repository.create_run("run-1", "conv-1", "running")
+    gateway = A2AGateway(repository, transport=StreamingTransport())
+    agent = {"id": "ops", "url": "http://ops"}
+
+    events = [
+        event async for event in gateway.delegate_stream(
+            "run-1", agent, "diagnose"
+        )
+    ]
+
+    assert events[0]["args"] == {
+        "namespace": "default",
+        "authorization": "[REDACTED]",
+    }
+    assert events[1]["result"] == {"password": "[REDACTED]", "count": 3}
+    binding = repository.get_remote_binding("run-1", "ops")
+    assert binding["task_id"] == "remote-1"

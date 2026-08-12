@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from pydantic import ValidationError
+from a2a.types import TaskState
 
 from backend.orchestration.commands import RunCommand
 from backend.orchestration.events import RunEvent, RunEventType
@@ -35,6 +36,11 @@ class FakeGateway:
                 yield event
 
         return stream()
+
+
+class PublicTraceGateway(FakeGateway):
+    def delegate_stream(self, run_id, agent, message):
+        return self.delegate(run_id, agent, message)
 
 
 class FakeHostManager:
@@ -203,6 +209,22 @@ async def test_direct_normalizes_one_agent_stream_under_the_root_task():
 
 
 @pytest.mark.anyio
+async def test_direct_prefers_the_public_trace_stream_when_available():
+    gateway = PublicTraceGateway([
+        {"type": "tool_call", "id": "call-1", "tool": "get_nodes"},
+        {"type": "done", "text": "healthy"},
+    ])
+
+    events = await _collect(
+        _direct_strategy(gateway),
+        RunCommand(mode="direct", target_agent_id="ops", message="Inspect"),
+    )
+
+    assert any(event.type == RunEventType.TOOL_CALLED for event in events)
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.anyio
 async def test_direct_turns_remote_errors_into_a_failed_task_event():
     gateway = FakeGateway(
         [
@@ -233,6 +255,18 @@ async def test_direct_turns_remote_errors_into_a_failed_task_event():
         "error": "remote unavailable",
         "remote_task_id": "remote-2",
     }
+
+
+@pytest.mark.anyio
+async def test_direct_accepts_sdk_task_state_enum_as_completed():
+    events = await _collect(
+        _direct_strategy(FakeGateway([
+            {"type": "status", "state": TaskState.completed, "final": True},
+        ])),
+        RunCommand(mode="direct", target_agent_id="ops", message="Inspect"),
+    )
+
+    assert events[-1].type == RunEventType.TASK_COMPLETED
 
 
 @pytest.mark.anyio
@@ -380,54 +414,74 @@ async def test_auto_normalizes_two_routings_as_children_of_the_host_task():
     assert len(delegated) == 2
     assert len({event.task_id for event in delegated}) == 2
     assert all(event.parent_task_id == "task-host" for event in delegated)
-    assert [event.data["agent_id"] for event in delegated] == [
-        "ops",
-        "security",
-    ]
-    completed_children = [
-        event for event in events
-        if event.type == RunEventType.TASK_COMPLETED
-        and event.parent_task_id == "task-host"
-    ]
-    assert [event.task_id for event in completed_children] == [
-        delegated[0].task_id
-    ]
-
-    approval = next(
-        event for event in events
-        if event.type == RunEventType.APPROVAL_REQUIRED
-    )
+    assert [event.data["agent_id"] for event in delegated] == ["ops", "security"]
+    completed_children = [event for event in events if event.type == RunEventType.TASK_COMPLETED and event.parent_task_id == "task-host"]
+    assert [event.task_id for event in completed_children] == [delegated[0].task_id]
+    approval = next(event for event in events if event.type == RunEventType.APPROVAL_REQUIRED)
     assert approval.task_id == delegated[1].task_id
     assert approval.parent_task_id == "task-host"
     assert approval.data["approval"]["id"] == "approval-1"
-
-    host_events = [
-        event for event in events if event.task_id == "task-host"
-    ]
-    assert [event.type for event in host_events] == [
-        RunEventType.HOST_PLANNING,
-        RunEventType.MESSAGE_DELTA,
-        RunEventType.MESSAGE_COMPLETED,
-        RunEventType.TASK_STATUS_CHANGED,
-    ]
+    host_events = [event for event in events if event.task_id == "task-host"]
+    assert [event.type for event in host_events] == [RunEventType.HOST_PLANNING, RunEventType.MESSAGE_DELTA, RunEventType.MESSAGE_COMPLETED, RunEventType.TASK_STATUS_CHANGED]
     assert host_events[-1].data["state"] == "approval_required"
     for tool_call_id in ("send-ops", "send-security"):
-        lifecycle = [
-            event for event in events
-            if event.data.get("host_tool_call_id") == tool_call_id
-            or event.data.get("tool_call_id") == tool_call_id
-        ]
+        lifecycle = [event for event in events if event.data.get("host_tool_call_id") == tool_call_id or event.data.get("tool_call_id") == tool_call_id]
         assert lifecycle[0].type == RunEventType.TASK_DELEGATED
         assert lifecycle[1].type == RunEventType.TOOL_CALLED
         assert len({event.task_id for event in lifecycle}) == 1
-        assert all(
-            event.parent_task_id == "task-host" for event in lifecycle
-        )
+        assert all(event.parent_task_id == "task-host" for event in lifecycle)
     assert all(isinstance(event, RunEvent) for event in events)
-    assert [event.sequence for event in events] == list(
-        range(1, len(events) + 1)
-    )
+    assert [event.sequence for event in events] == list(range(1, len(events) + 1))
     assert host.calls == [("Inspect and audit", "run-auto")]
+
+
+@pytest.mark.anyio
+async def test_auto_places_remote_tool_events_under_the_planned_agent_task():
+    host = FakeHostManager([
+        {
+            "type": "plan_created",
+            "summary": "inspect",
+            "tasks": [{
+                "id": "inspect",
+                "agent_id": "ops",
+                "objective": "Inspect nodes",
+                "depends_on": [],
+            }],
+        },
+        {"type": "routing", "task_id": "inspect", "agent_id": "ops"},
+        {
+            "type": "tool_call",
+            "task_id": "inspect",
+            "agent_id": "ops",
+            "id": "call-1",
+            "tool": "get_nodes",
+            "args": {"wide": True},
+        },
+        {
+            "type": "tool_result",
+            "task_id": "inspect",
+            "agent_id": "ops",
+            "id": "call-1",
+            "tool": "get_nodes",
+            "result": "master Ready",
+        },
+        {"type": "task_completed", "task_id": "inspect", "agent_id": "ops", "result": "healthy"},
+        {"type": "text", "text": "complete"},
+        {"type": "done", "session_id": "run-auto"},
+    ])
+
+    events = await _collect(
+        _auto_strategy(host),
+        RunCommand(mode="auto", message="Inspect"),
+    )
+
+    tool_events = [event for event in events if event.type in {
+        RunEventType.TOOL_CALLED, RunEventType.TOOL_COMPLETED,
+    }]
+    assert [event.task_id for event in tool_events] == [
+        "task-host:plan:inspect", "task-host:plan:inspect",
+    ]
+    assert tool_events[0].data["agent_id"] == "ops"
 
 
 @pytest.mark.anyio
@@ -809,3 +863,170 @@ async def test_auto_rejects_explicit_call_with_mismatched_agent():
     assert not any(
         event.type == RunEventType.APPROVAL_REQUIRED for event in events
     )
+
+
+@pytest.mark.anyio
+async def test_auto_normalizes_structured_orchestration_lifecycle():
+    host = FakeHostManager(
+        [
+            {
+                "type": "plan_created",
+                "summary": "inspect",
+                "tasks": [{"id": "inspect", "agent_id": "ops"}],
+            },
+            {
+                "type": "context_prepared",
+                "task_id": "inspect",
+                "agent_id": "ops",
+                "depends_on": [],
+            },
+            {
+                "type": "routing",
+                "task_id": "inspect",
+                "agent_id": "ops",
+                "agent": "Operations",
+            },
+            {"type": "task_started", "task_id": "inspect", "agent_id": "ops"},
+            {
+                "type": "task_evaluated",
+                "task_id": "inspect",
+                "agent_id": "ops",
+                "outcome": "sufficient",
+                "reason": "has evidence",
+            },
+            {
+                "type": "task_completed",
+                "task_id": "inspect",
+                "agent_id": "ops",
+                "result": "healthy",
+            },
+            {"type": "synthesis_started"},
+            {"type": "text", "text": "Pod is healthy"},
+            {"type": "done"},
+        ]
+    )
+
+    events = await _collect(
+        _auto_strategy(host), RunCommand(mode="auto", message="Inspect")
+    )
+
+    assert [event.type for event in events] == [
+        RunEventType.HOST_PLANNING,
+        RunEventType.HOST_PLAN_CREATED,
+        RunEventType.TASK_CONTEXT_PREPARED,
+        RunEventType.TASK_DELEGATED,
+        RunEventType.TASK_STARTED,
+        RunEventType.TASK_EVALUATED,
+        RunEventType.TASK_COMPLETED,
+        RunEventType.HOST_SYNTHESIS_STARTED,
+        RunEventType.MESSAGE_DELTA,
+        RunEventType.MESSAGE_COMPLETED,
+        RunEventType.TASK_COMPLETED,
+    ]
+    child = next(
+        event for event in events
+        if event.type == RunEventType.TASK_DELEGATED
+    )
+    assert child.task_id == "task-host:plan:inspect"
+
+
+@pytest.mark.anyio
+async def test_auto_keeps_logical_task_id_across_retry_and_replacement():
+    host = FakeHostManager(
+        [
+            {"type": "routing", "task_id": "inspect", "agent_id": "ops"},
+            {
+                "type": "task_retry_scheduled",
+                "task_id": "inspect",
+                "agent_id": "ops",
+                "attempt": 2,
+                "reason": "temporary",
+            },
+            {
+                "type": "plan_revised",
+                "task_id": "inspect",
+                "agent_id": "ops",
+                "replacement_agent_id": "fallback",
+                "reason": "offline",
+            },
+            {
+                "type": "task_completed",
+                "task_id": "inspect",
+                "agent_id": "fallback",
+                "result": "healthy",
+            },
+            {"type": "done"},
+        ]
+    )
+
+    events = await _collect(
+        _auto_strategy(host), RunCommand(mode="auto", message="Inspect")
+    )
+    child_events = [
+        event for event in events if event.parent_task_id == "task-host"
+    ]
+
+    assert {event.task_id for event in child_events} == {
+        "task-host:plan:inspect"
+    }
+    assert any(
+        event.type == RunEventType.HOST_PLAN_REVISED
+        and event.data["replacement_agent_id"] == "fallback"
+        for event in child_events
+    )
+
+
+@pytest.mark.anyio
+async def test_auto_links_structured_plan_approval_to_logical_child():
+    host = FakeHostManager(
+        [
+            {
+                "type": "routing",
+                "task_id": "change",
+                "agent_id": "orchestrator",
+            },
+            {
+                "type": "approval_required",
+                "task_id": "change",
+                "agent_id": "orchestrator",
+                "approval": {"id": "approval-1"},
+            },
+            {"type": "done"},
+        ]
+    )
+
+    events = await _collect(
+        _auto_strategy(host), RunCommand(mode="auto", message="Change")
+    )
+
+    approval = next(
+        event for event in events
+        if event.type == RunEventType.APPROVAL_REQUIRED
+    )
+    assert approval.task_id == "task-host:plan:change"
+
+
+@pytest.mark.anyio
+async def test_auto_accepts_blocked_plan_task_that_was_never_routed():
+    host = FakeHostManager([
+        {"type": "plan_created", "summary": "parallel", "tasks": [
+            {"id": "ops", "agent_id": "ops", "objective": "inspect", "completion_criteria": ["result"]},
+            {"id": "summary", "agent_id": "ops", "objective": "combine", "depends_on": ["ops"], "completion_criteria": ["summary"]},
+        ]},
+        {"type": "context_prepared", "task_id": "ops", "agent_id": "ops", "depends_on": []},
+        {"type": "routing", "task_id": "ops", "agent_id": "ops"},
+        {"type": "task_started", "task_id": "ops", "agent_id": "ops"},
+        {"type": "task_failed", "task_id": "ops", "agent_id": "ops", "error": "unavailable"},
+        {"type": "task_blocked", "task_id": "summary", "agent_id": "ops", "reason": "dependency failed"},
+        {"type": "synthesis_started"},
+        {"type": "text", "text": "partial conclusion"},
+        {"type": "done"},
+    ])
+
+    events = await _collect(
+        _auto_strategy(host), RunCommand(mode="auto", message="Inspect")
+    )
+
+    assert any(event.type == RunEventType.TASK_BLOCKED for event in events)
+    assert any(event.type == RunEventType.MESSAGE_COMPLETED for event in events)
+    assert events[-1].type == RunEventType.TASK_COMPLETED

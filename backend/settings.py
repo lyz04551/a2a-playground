@@ -15,14 +15,20 @@ class AppSettings:
     cors_origins: tuple[str, ...] = (
         "http://127.0.0.1:5173",
         "http://localhost:5173",
-        "http://127.0.0.1:5174",
-        "http://localhost:5174",
     )
     allow_private_agents: bool = False
+    host_max_tasks: int = 6
+    host_max_concurrency: int = 3
+    host_max_attempts: int = 2
 
     @classmethod
     def from_env(cls) -> "AppSettings":
         origins = os.getenv("PLAYGROUND_CORS_ORIGINS", "")
+        host_max_tasks = _bounded_env("HOST_MAX_TASKS", 6, 1, 6)
+        host_max_concurrency = _bounded_env(
+            "HOST_MAX_CONCURRENCY", 3, 1, 5
+        )
+        host_max_attempts = _bounded_env("HOST_MAX_ATTEMPTS", 2, 1, 2)
         return cls(
             api_key=os.getenv("PLAYGROUND_API_KEY") or None,
             cors_origins=(
@@ -33,7 +39,23 @@ class AppSettings:
             allow_private_agents=os.getenv(
                 "PLAYGROUND_ALLOW_PRIVATE_AGENTS", ""
             ).lower() in {"1", "true", "yes"},
+            host_max_tasks=host_max_tasks,
+            host_max_concurrency=host_max_concurrency,
+            host_max_attempts=host_max_attempts,
         )
+
+
+def _bounded_env(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = os.getenv(name)
+    try:
+        value = default if raw in {None, ""} else int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if not minimum <= value <= maximum:
+        raise ValueError(
+            f"{name} must be between {minimum} and {maximum}"
+        )
+    return value
 
 
 def configure_http_security(app: FastAPI, settings: AppSettings) -> None:

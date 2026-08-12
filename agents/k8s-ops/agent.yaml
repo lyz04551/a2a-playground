@@ -1,6 +1,11 @@
 agent_id: k8s-ops
 name: K8s Ops Agent
 description: Read-only Kubernetes diagnostics, logs, events, health, and resource inspection.
+read_only: true
+risk_level: read_only
+limitations:
+  - cannot mutate cluster resources
+priority: 20
 port: 8052
 public_url: ${AGENT_PUBLIC_URL}
 mcp_url: ${K8S_MCP_URL}
@@ -21,4 +26,3 @@ tool_policy:
   deny:
     - get_k8s_pod_linked_env
   approval_required: []
-

@@ -119,9 +119,7 @@ async def fetch_agent_card(agent_url: str) -> AgentCard:
 
 
 async def check_agent_health(agent_url: str) -> dict:
-    """Lightweight health check for an agent.
-    Returns dict with 'online' bool and optional 'latency_ms' and 'error'.
-    """
+    """Check transport availability and, when supported, dependency readiness."""
     try:
         url = await validate_agent_url(
             agent_url,
@@ -138,7 +136,8 @@ async def check_agent_health(agent_url: str) -> dict:
                 resolver = A2ACardResolver(client, url)
                 await resolver.get_agent_card()
                 latency = int((time.monotonic() - start) * 1000)
-                return {"online": True, "latency_ms": latency}
+                readiness = await _fetch_agent_readiness(client, url)
+                return {"online": True, "latency_ms": latency, **readiness}
             except Exception:
                 pass
 
@@ -149,7 +148,8 @@ async def check_agent_health(agent_url: str) -> dict:
                     resp = await client.get(card_url)
                     resp.raise_for_status()
                     latency = int((time.monotonic() - start) * 1000)
-                    return {"online": True, "latency_ms": latency}
+                    readiness = await _fetch_agent_readiness(client, url)
+                    return {"online": True, "latency_ms": latency, **readiness}
                 except Exception:
                     continue
 
@@ -158,7 +158,8 @@ async def check_agent_health(agent_url: str) -> dict:
                 resp = await client.get(url, timeout=3)
                 resp.raise_for_status()
                 latency = int((time.monotonic() - start) * 1000)
-                return {"online": True, "latency_ms": latency}
+                readiness = await _fetch_agent_readiness(client, url)
+                return {"online": True, "latency_ms": latency, **readiness}
             except Exception:
                 pass
 
@@ -167,6 +168,35 @@ async def check_agent_health(agent_url: str) -> dict:
     except Exception as e:
         latency = int((time.monotonic() - start) * 1000)
         return {"online": False, "latency_ms": latency, "error": str(e)[:100]}
+
+
+async def _fetch_agent_readiness(client: httpx.AsyncClient, url: str) -> dict:
+    checks = {"http": {"state": "ok"}}
+    try:
+        response = await client.get(f"{url}/health/ready", timeout=3)
+        response.raise_for_status()
+        readiness = _normalize_readiness(response.json())
+        checks.update(readiness["checks"])
+        return {"state": readiness["state"], "checks": checks}
+    except Exception as exc:
+        checks["readiness"] = {"state": "unknown", "detail": str(exc)[:100]}
+        return {"state": "degraded", "checks": checks}
+
+
+def _normalize_readiness(payload: object) -> dict:
+    """Keep third-party Agent readiness responses inside our public contract."""
+    if not isinstance(payload, dict):
+        return {"state": "degraded", "checks": {}}
+    state = payload.get("state")
+    checks = payload.get("checks")
+    return {
+        "state": state if state in {"ready", "degraded"} else "degraded",
+        "checks": {
+            name: check
+            for name, check in (checks.items() if isinstance(checks, dict) else [])
+            if isinstance(name, str) and isinstance(check, dict)
+        },
+    }
 
 
 def _make_sdk_message(

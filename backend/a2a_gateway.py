@@ -2,9 +2,32 @@ from __future__ import annotations
 
 import uuid
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
-from backend.a2a_client import send_message_to_agent
+from backend.a2a_client import send_message_to_agent, stream_message_to_agent
+
+
+_SENSITIVE_KEYS = {
+    "authorization", "cookie", "kubeconfig", "password", "private_key",
+    "secret", "token", "api_key", "apikey", "access_token", "refresh_token",
+}
+
+
+def _public_value(value: Any, *, max_text: int = 20_000) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: "[REDACTED]" if str(key).lower() in _SENSITIVE_KEYS
+            else _public_value(item, max_text=max_text)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_public_value(item, max_text=max_text) for item in value]
+    if isinstance(value, tuple):
+        return [_public_value(item, max_text=max_text) for item in value]
+    if isinstance(value, str) and len(value) > max_text:
+        return f"{value[:max_text]}\n… [truncated {len(value) - max_text} characters]"
+    return value
 
 
 class SDKTransport:
@@ -30,6 +53,21 @@ class SDKTransport:
             "task_id": result.get("task_id") or task_id or "",
             "artifacts": result.get("artifacts", []),
         }
+
+    async def stream(
+        self,
+        *,
+        agent: dict[str, Any],
+        message: str,
+        context_id: str,
+        task_id: str | None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        # A new streamed request starts a new remote task. Approval continuation
+        # remains on the blocking path until the SDK supports task-id streaming.
+        async for event in stream_message_to_agent(
+            agent["url"], message, context_id
+        ):
+            yield event
 
 
 class A2AGateway:
@@ -106,6 +144,48 @@ class A2AGateway:
             "task_id": actual_task_id,
             "approval": approval,
         }
+
+    async def delegate_stream(
+        self,
+        run_id: str,
+        agent: dict[str, Any],
+        message: str,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Expose only public remote execution events, with blocking fallback."""
+        agent_id = agent["id"]
+        binding = self.repository.get_remote_binding(run_id, agent_id)
+        context_id = binding["context_id"] if binding else f"ctx_{uuid.uuid4().hex}"
+        remote_task_id = ""
+
+        stream = getattr(self.transport, "stream", None)
+        if stream is None:
+            yield await self.delegate(run_id, agent, message)
+            return
+
+        async for upstream in stream(
+            agent=agent,
+            message=message,
+            context_id=context_id,
+            task_id=None,
+        ):
+            event = dict(upstream)
+            if event.get("task_id"):
+                remote_task_id = str(event["task_id"])
+                self.repository.upsert_remote_binding(
+                    run_id=run_id,
+                    agent_id=agent_id,
+                    context_id=context_id,
+                    task_id=remote_task_id,
+                )
+            if event.get("type") == "tool_call":
+                event["args"] = _public_value(event.get("args", {}))
+            elif event.get("type") == "tool_result":
+                event["result"] = _public_value(event.get("result", ""))
+            event["agent_id"] = agent_id
+            event["context_id"] = context_id
+            if remote_task_id:
+                event["task_id"] = remote_task_id
+            yield event
 
     @staticmethod
     def _find_pending_action(artifacts: list[dict]) -> dict | None:

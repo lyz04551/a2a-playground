@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import * as api from '../api/api'
 import { streamRun } from '../api/runStream'
-import { emptyRunState, reduceRunEvent } from '../state/runEvents'
+import { emptyRunState, reduceRunEvent, restoreRunEventState } from '../state/runEvents'
 import { restoreWorkspaceState, selectLatestConversationRun } from '../components/workspace/workspaceState'
 
 function reducer(state, action) {
   if (action.type === 'reset') return { ...emptyRunState, messages: action.messages || [] }
   if (action.type === 'event') return reduceRunEvent(state, action.event)
   if (action.type === 'user-message') return { ...state, messages: [...state.messages, action.message] }
-  if (action.type === 'restore') return { ...emptyRunState, run: action.run || null, messages: action.messages || [], approvals: action.approvals || [], rawEvents: action.rawEvents || [], tasksById: Object.fromEntries((action.tasks || []).map(task => [task.id, task])), taskOrder: (action.tasks || []).map(task => task.id) }
+  if (action.type === 'restore') return restoreRunEventState(action)
   return state
 }
 

@@ -40,6 +40,10 @@ class RunService:
                         self._active_tasks[run_id] = current
                 yield event
         finally:
+            if run_id is not None:
+                run = self.repository.get_run(run_id)
+                if run is not None and run["status"] == "running":
+                    self.cancel(run_id)
             if run_id is not None and self._active_tasks.get(run_id) is current:
                 self._active_tasks.pop(run_id, None)
 
@@ -338,6 +342,8 @@ class RunService:
             return "completed"
         if event.type == RunEventType.TASK_FAILED:
             return "failed"
+        if event.type == RunEventType.TASK_BLOCKED:
+            return "blocked"
         if event.type in {
             RunEventType.APPROVAL_REQUIRED,
             RunEventType.TASK_STATUS_CHANGED,

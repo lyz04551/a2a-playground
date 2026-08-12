@@ -3,7 +3,7 @@ import { InboxOutlined, LoadingOutlined, ReloadOutlined } from '@ant-design/icon
 import ToolActivity from './ToolActivity'
 import MessageActions from './MessageActions'
 
-export default function MessageTimeline({ messages = [], loading = false, error, onRetry, onArtifactOpen, language = 'zh-CN' }) {
+export default function MessageTimeline({ messages = [], loading = false, stage, error, onRetry, onArtifactOpen, language = 'zh-CN' }) {
   const zh = language === 'zh-CN'
   if (loading && messages.length === 0) return <div className="workspace-state" role="status"><LoadingOutlined /> {zh ? '正在加载会话…' : 'Loading conversation…'}</div>
   if (error) return <div className="workspace-state workspace-state--error" role="alert">{error}<button type="button" onClick={onRetry}><ReloadOutlined /> {zh ? '重试' : 'Retry'}</button></div>
@@ -19,7 +19,7 @@ export default function MessageTimeline({ messages = [], loading = false, error,
           {message.artifacts?.map(artifact => <button className="workspace-artifact" type="button" key={artifact.id} onClick={() => onArtifactOpen?.(artifact)}>Artifact: {artifact.name || artifact.id}</button>)}
         </li>
       ))}
-      {loading && <li className="workspace-state" role="status"><LoadingOutlined /> {zh ? 'Agent 正在响应…' : 'Agent is responding…'}</li>}
+      {loading && <li className="workspace-state workspace-stage" role="status"><LoadingOutlined /><span><strong>{(zh ? stage?.textZh : stage?.textEn) || (zh ? 'Agent 正在响应…' : 'Agent is responding…')}</strong>{stage?.active?.length > 0 && <small>{stage.active.map(item => `${item.agentName}${item.objective ? ` · ${item.objective}` : ''}`).join(' ｜ ')}</small>}</span></li>}
     </ol>
   )
 }

@@ -626,6 +626,29 @@ class SQLiteRepository:
                 )
         return self.get_approval(approval_id)
 
+    def claim_approval_decision(
+        self, approval_id: str, decision: str
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically record a decision and report whether this caller won."""
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("decision must be approved or rejected")
+        with self.engine.begin() as connection:
+            changed = connection.execute(
+                update(approvals)
+                .where(
+                    approvals.c.id == approval_id,
+                    approvals.c.status == "pending",
+                )
+                .values(status=decision)
+            ).rowcount == 1
+            current = connection.execute(
+                select(approvals).where(approvals.c.id == approval_id)
+            ).mappings().one()
+            if not changed and current["status"] != decision:
+                raise ValueError("approval already has a conflicting decision")
+            approval = dict(current)
+        return approval, changed
+
     def has_migration(self, migration_id: str) -> bool:
         with self.engine.connect() as connection:
             return (

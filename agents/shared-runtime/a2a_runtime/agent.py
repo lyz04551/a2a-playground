@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import asyncio
 from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import Any
@@ -35,24 +36,43 @@ class RuntimeMCPAgent:
         *,
         mcp_client: K8sMCPClient | None = None,
         model=None,
+        run_timeout: float | None = None,
     ):
         self.config = config
-        self.prompt = prompt
+        self.prompt = (
+            f"{prompt.rstrip()}\n\n"
+            "工具调用规则：先规划完成任务所需的最小证据集；可并行调用不同工具；"
+            "除非上次调用失败或数据明确失效，不要用相同参数重复调用同一工具；"
+            "证据足以回答后立即停止调用并输出结论。"
+        )
         self.mcp_client = mcp_client or K8sMCPClient(config.mcp_url)
         self._model = model
+        self.run_timeout = run_timeout or float(
+            os.getenv("AGENT_RUN_TIMEOUT", "90")
+        )
+        self.max_steps = int(os.getenv("AGENT_MAX_STEPS", "30"))
+        self.max_tool_calls = int(os.getenv("AGENT_MAX_TOOL_CALLS", "40"))
         self._graph = None
         self._tools_loaded = False
+        self._dependency_error = ""
         self._pending_by_context: dict[str, PendingAction] = {}
+        self._tool_adapter: MCPToolAdapter | None = None
 
     async def ensure_ready(self) -> None:
         if self._tools_loaded:
             return
-        definitions = await self.mcp_client.list_tools()
-        tools = MCPToolAdapter(
+        try:
+            definitions = await self.mcp_client.list_tools()
+        except Exception as exc:
+            self._dependency_error = str(exc)
+            raise
+        self._tool_adapter = MCPToolAdapter(
             self.mcp_client,
             ToolPolicy(self.config.tool_policy),
             agent_id=self.config.agent_id,
-        ).build_tools(definitions)
+            max_calls=self.max_tool_calls,
+        )
+        tools = self._tool_adapter.build_tools(definitions)
         model = self._model or ChatOpenAI(
             model=os.getenv("LLM_MODEL", "deepseek-chat"),
             openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
@@ -69,6 +89,32 @@ class RuntimeMCPAgent:
             checkpointer=MemorySaver(),
         )
         self._tools_loaded = True
+        self._dependency_error = ""
+
+    def readiness(self) -> dict[str, Any]:
+        mcp_state = "ok" if self._tools_loaded else "error"
+        return {
+            "state": "ready" if self._tools_loaded else "degraded",
+            "checks": {
+                "llm": {"state": "ok" if self._model or os.getenv("DEEPSEEK_API_KEY") else "unknown"},
+                "mcp": {"state": mcp_state, "detail": self._dependency_error},
+                "kubernetes": {"state": "ok" if self._tools_loaded else "unknown"},
+            },
+        }
+
+    async def warm_up(self, timeout: float = 0.25) -> bool:
+        """Best-effort startup probe; requests retry initialization lazily."""
+        try:
+            await asyncio.wait_for(self.ensure_ready(), timeout=timeout)
+            return True
+        except TimeoutError:
+            if not self._dependency_error:
+                self._dependency_error = f"MCP warm-up timed out after {timeout:.2f}s"
+            return False
+        except Exception as exc:
+            if not self._dependency_error:
+                self._dependency_error = str(exc)
+            return False
 
     async def shutdown(self) -> None:
         await self.mcp_client.disconnect()
@@ -92,44 +138,74 @@ class RuntimeMCPAgent:
             )
             return
 
-        graph_config = {"configurable": {"thread_id": context_id}}
+        graph_config = {
+            "configurable": {"thread_id": context_id},
+            "recursion_limit": self.max_steps,
+        }
+        if self._tool_adapter is not None:
+            self._tool_adapter.reset_budget(context_id)
         seen_tool_calls: set[str] = set()
+        seen_tool_results: set[str] = set()
         try:
-            async for state in self._graph.astream(
-                {"messages": [("user", query)]},
-                graph_config,
-                stream_mode="values",
-            ):
-                messages = state.get("messages", [])
-                if not messages:
-                    continue
-                last = messages[-1]
-                if isinstance(last, AIMessage) and last.tool_calls:
-                    for call in last.tool_calls:
-                        if call["id"] in seen_tool_calls:
-                            continue
-                        seen_tool_calls.add(call["id"])
-                        yield RuntimeEvent(
-                            type=RuntimeEventType.TOOL_CALL,
-                            content=call["name"],
-                            data={
-                                "id": call["id"],
-                                "tool": call["name"],
-                                "arguments": call.get("args", {}),
-                            },
-                        )
-                elif isinstance(last, ToolMessage):
-                    yield RuntimeEvent(
-                        type=RuntimeEventType.TOOL_RESULT,
-                        content=str(last.content),
-                        data={
-                            "tool_call_id": last.tool_call_id,
-                            "result": str(last.content),
-                        },
+            previous = self._graph.get_state(graph_config)
+            for message in previous.values.get("messages", []):
+                if isinstance(message, AIMessage):
+                    seen_tool_calls.update(
+                        str(call["id"]) for call in message.tool_calls
                     )
+                elif isinstance(message, ToolMessage):
+                    seen_tool_results.add(str(message.tool_call_id or ""))
+        except (AttributeError, KeyError, TypeError, ValueError):
+            # A new context may not have a checkpoint yet.
+            pass
+        try:
+            async with asyncio.timeout(self.run_timeout):
+                async for state in self._graph.astream(
+                    {"messages": [("user", query)]},
+                    graph_config,
+                    stream_mode="values",
+                ):
+                    messages = state.get("messages", [])
+                    if not messages:
+                        continue
+                    for message in messages:
+                        if isinstance(message, AIMessage) and message.tool_calls:
+                            for call in message.tool_calls:
+                                if call["id"] in seen_tool_calls:
+                                    continue
+                                seen_tool_calls.add(call["id"])
+                                yield RuntimeEvent(
+                                    type=RuntimeEventType.TOOL_CALL,
+                                    content=call["name"],
+                                    data={
+                                        "id": call["id"],
+                                        "tool": call["name"],
+                                        "arguments": call.get("args", {}),
+                                    },
+                                )
+                        elif isinstance(message, ToolMessage):
+                            call_id = str(message.tool_call_id or "")
+                            if call_id in seen_tool_results:
+                                continue
+                            seen_tool_results.add(call_id)
+                            yield RuntimeEvent(
+                                type=RuntimeEventType.TOOL_RESULT,
+                                content=str(message.content),
+                                data={
+                                    "tool_call_id": call_id,
+                                    "result": str(message.content),
+                                },
+                            )
         except ApprovalRequired as exc:
             self._pending_by_context[context_id] = exc.pending_action
             yield RuntimeEvent.approval_required(exc.pending_action)
+            return
+        except TimeoutError:
+            yield RuntimeEvent(
+                type=RuntimeEventType.ERROR,
+                content=f"Agent execution timed out after {self.run_timeout:g}s",
+                is_task_complete=True,
+            )
             return
 
         state = self._graph.get_state(graph_config)
@@ -155,6 +231,22 @@ class RuntimeMCPAgent:
         self, context_id: str, approval: dict[str, Any]
     ) -> AsyncIterable[RuntimeEvent]:
         pending = self._pending_by_context.get(context_id)
+        if pending is None:
+            try:
+                pending = PendingAction.from_call(
+                    approval_id=str(approval.get("approval_id") or ""),
+                    agent_id=str(approval.get("agent_id") or ""),
+                    tool_name=str(approval.get("tool_name") or ""),
+                    arguments=dict(approval.get("arguments") or {}),
+                )
+            except (TypeError, ValueError):
+                pending = None
+            if (
+                pending is None
+                or pending.agent_id != self.config.agent_id
+                or pending.action_digest != approval.get("action_digest")
+            ):
+                pending = None
         if pending is None or pending.approval_id != approval.get("approval_id"):
             yield RuntimeEvent(
                 type=RuntimeEventType.ERROR,

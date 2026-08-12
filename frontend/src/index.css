@@ -326,6 +326,7 @@
 .trace-step > div { min-width: 0; }
 .trace-step strong { display: block; color: #475569; font-size: 11px; }
 .trace-step code { display: block; overflow: hidden; margin-top: 4px; color: #94a3b8; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.trace-meta { display: block; margin-top: 3px; color: #64748b; font-size: 10px; overflow-wrap: anywhere; }
 .trace-ok { color: var(--color-primary); }
 .trace-failed { color: #ef4444; }
 .trace-working { color: var(--color-orchestration); }

@@ -149,7 +149,8 @@ def _failure_text(event: Mapping[str, Any]) -> str:
 
 
 def _normalized_state(value: Any) -> str:
-    return str(value or "").replace("_", "-").lower()
+    raw = getattr(value, "value", value)
+    return str(raw or "").replace("_", "-").lower()
 
 
 def _is_failed_state(value: Any) -> bool:
@@ -234,7 +235,10 @@ class DirectExecutionStrategy(_RunBoundStrategy):
             )
 
         try:
-            output = self._gateway.delegate(
+            delegate = getattr(
+                self._gateway, "delegate_stream", self._gateway.delegate
+            )
+            output = delegate(
                 self._context.run_id,
                 agent,
                 command.message,
@@ -461,6 +465,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
         child_number = 0
         by_call_id: dict[str, _Delegation] = {}
         by_task_id: dict[str, _Delegation] = {}
+        by_logical_id: dict[str, _Delegation] = {}
         by_agent: defaultdict[str, list[_Delegation]] = defaultdict(list)
         accumulated = ""
         awaiting_approval = False
@@ -470,17 +475,24 @@ class AutoExecutionStrategy(_RunBoundStrategy):
             *,
             tool_call_id: str = "",
             tool_call: Mapping[str, Any] | None = None,
+            logical_task_id: str = "",
         ) -> _Delegation:
             nonlocal child_number
             child_number += 1
             delegation = _Delegation(
-                task_id=f"{root_task_id}:delegation:{child_number}",
+                task_id=(
+                    f"{root_task_id}:plan:{logical_task_id}"
+                    if logical_task_id
+                    else f"{root_task_id}:delegation:{child_number}"
+                ),
                 agent_id=agent_id,
                 tool_call_id=tool_call_id,
                 buffered_tool_call=tool_call,
             )
             by_agent[agent_id].append(delegation)
             by_task_id[delegation.task_id] = delegation
+            if logical_task_id:
+                by_logical_id[logical_task_id] = delegation
             if tool_call_id:
                 by_call_id[tool_call_id] = delegation
             return delegation
@@ -577,7 +589,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                     )
                 explicit_matches.append(match)
             if task_id:
-                match = by_task_id.get(task_id)
+                match = by_task_id.get(task_id) or by_logical_id.get(task_id)
                 if match is None:
                     raise _UpstreamProtocolError(
                         "approval references an unknown delegated task"
@@ -683,11 +695,14 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                             tool_call=upstream,
                         )
                     else:
+                        logical_task_id = str(upstream.get("task_id") or "")
+                        delegation = by_logical_id.get(logical_task_id)
                         yield builder.create(
                             RunEventType.TOOL_CALLED,
-                            task_id=root_task_id,
-                            parent_task_id=None,
+                            task_id=(delegation.task_id if delegation else root_task_id),
+                            parent_task_id=(root_task_id if delegation else None),
                             data={
+                                **({"agent_id": delegation.agent_id} if delegation else {}),
                                 "tool_call_id": tool_call_id,
                                 "tool": tool,
                                 "arguments": arguments,
@@ -699,9 +714,14 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                         raise _UpstreamProtocolError(
                             "routing event omitted agent_id"
                         )
-                    delegation = unrouted_for_agent(agent_id)
+                    logical_task_id = str(upstream.get("task_id") or "")
+                    delegation = by_logical_id.get(logical_task_id)
                     if delegation is None:
-                        delegation = new_delegation(agent_id)
+                        delegation = unrouted_for_agent(agent_id)
+                    if delegation is None:
+                        delegation = new_delegation(
+                            agent_id, logical_task_id=logical_task_id
+                        )
                     delegation.routed = True
                     for event in announce(delegation, upstream):
                         yield event
@@ -740,25 +760,180 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                                 RunEventType.TASK_COMPLETED,
                                 task_id=delegation.task_id,
                                 parent_task_id=root_task_id,
-                                data={
-                                    "agent_id": delegation.agent_id
-                                },
+                                data={"agent_id": delegation.agent_id},
                             )
                     elif upstream.get("tool") == "send_task":
                         raise _UpstreamProtocolError(
                             "send_task result has no matching call"
                         )
                     else:
+                        logical_task_id = str(upstream.get("task_id") or "")
+                        logical_delegation = by_logical_id.get(logical_task_id)
                         yield builder.create(
                             RunEventType.TOOL_COMPLETED,
-                            task_id=root_task_id,
-                            parent_task_id=None,
+                            task_id=(logical_delegation.task_id if logical_delegation else root_task_id),
+                            parent_task_id=(root_task_id if logical_delegation else None),
                             data={
+                                **({"agent_id": logical_delegation.agent_id} if logical_delegation else {}),
                                 "tool_call_id": tool_call_id,
                                 "tool": upstream.get("tool", ""),
                                 "result": upstream.get("result", ""),
                             },
                         )
+                elif event_type == "plan_created":
+                    plan_tasks = []
+                    for item in upstream.get("tasks", []):
+                        if not isinstance(item, Mapping):
+                            continue
+                        logical_id = str(item.get("id") or "")
+                        agent_id = str(item.get("agent_id") or "")
+                        if logical_id and logical_id not in by_logical_id:
+                            new_delegation(
+                                agent_id,
+                                logical_task_id=logical_id,
+                            )
+                        plan_tasks.append({
+                            **dict(item),
+                            "id": f"{root_task_id}:plan:{logical_id}",
+                            "depends_on": [
+                                f"{root_task_id}:plan:{dependency}"
+                                for dependency in item.get("depends_on", [])
+                            ],
+                        })
+                    yield builder.create(
+                        RunEventType.HOST_PLAN_CREATED,
+                        task_id=root_task_id,
+                        parent_task_id=None,
+                        data={
+                            "summary": upstream.get("summary", ""),
+                            "tasks": plan_tasks,
+                        },
+                    )
+                elif event_type == "context_prepared":
+                    logical_task_id = str(upstream.get("task_id") or "")
+                    agent_id = str(upstream.get("agent_id") or "")
+                    delegation = by_logical_id.get(logical_task_id)
+                    if delegation is None:
+                        delegation = new_delegation(
+                            agent_id, logical_task_id=logical_task_id
+                        )
+                    yield builder.create(
+                        RunEventType.TASK_CONTEXT_PREPARED,
+                        task_id=delegation.task_id,
+                        parent_task_id=root_task_id,
+                        data={
+                            "agent_id": agent_id,
+                            "depends_on": upstream.get("depends_on", []),
+                        },
+                    )
+                elif event_type == "task_started":
+                    delegation = by_logical_id.get(
+                        str(upstream.get("task_id") or "")
+                    )
+                    if delegation is None:
+                        raise _UpstreamProtocolError(
+                            "task_started references an unknown plan task"
+                        )
+                    yield builder.create(
+                        RunEventType.TASK_STARTED,
+                        task_id=delegation.task_id,
+                        parent_task_id=root_task_id,
+                        data={"agent_id": delegation.agent_id},
+                    )
+                elif event_type == "task_retry_scheduled":
+                    delegation = by_logical_id.get(
+                        str(upstream.get("task_id") or "")
+                    )
+                    if delegation is None:
+                        raise _UpstreamProtocolError(
+                            "retry references an unknown plan task"
+                        )
+                    yield builder.create(
+                        RunEventType.TASK_RETRY_SCHEDULED,
+                        task_id=delegation.task_id,
+                        parent_task_id=root_task_id,
+                        data={
+                            "agent_id": delegation.agent_id,
+                            "attempt": upstream.get("attempt"),
+                            "reason": upstream.get("reason", ""),
+                        },
+                    )
+                elif event_type == "plan_revised":
+                    delegation = by_logical_id.get(
+                        str(upstream.get("task_id") or "")
+                    )
+                    if delegation is None:
+                        raise _UpstreamProtocolError(
+                            "plan revision references an unknown task"
+                        )
+                    replacement = str(
+                        upstream.get("replacement_agent_id") or ""
+                    )
+                    delegation.agent_id = replacement or delegation.agent_id
+                    yield builder.create(
+                        RunEventType.HOST_PLAN_REVISED,
+                        task_id=delegation.task_id,
+                        parent_task_id=root_task_id,
+                        data={
+                            "agent_id": delegation.agent_id,
+                            "replacement_agent_id": replacement,
+                            "reason": upstream.get("reason", ""),
+                        },
+                    )
+                elif event_type == "task_evaluated":
+                    delegation = by_logical_id.get(
+                        str(upstream.get("task_id") or "")
+                    )
+                    if delegation is None:
+                        raise _UpstreamProtocolError(
+                            "evaluation references an unknown plan task"
+                        )
+                    yield builder.create(
+                        RunEventType.TASK_EVALUATED,
+                        task_id=delegation.task_id,
+                        parent_task_id=root_task_id,
+                        data={
+                            "agent_id": upstream.get(
+                                "agent_id", delegation.agent_id
+                            ),
+                            "outcome": upstream.get("outcome", ""),
+                            "reason": upstream.get("reason", ""),
+                        },
+                    )
+                elif event_type in {"task_completed", "task_failed", "task_blocked"}:
+                    delegation = by_logical_id.get(
+                        str(upstream.get("task_id") or "")
+                    )
+                    if delegation is None:
+                        raise _UpstreamProtocolError(
+                            "terminal event references an unknown plan task"
+                        )
+                    delegation.terminal = True
+                    normalized_type = {
+                        "task_completed": RunEventType.TASK_COMPLETED,
+                        "task_failed": RunEventType.TASK_FAILED,
+                        "task_blocked": RunEventType.TASK_BLOCKED,
+                    }[event_type]
+                    yield builder.create(
+                        normalized_type,
+                        task_id=delegation.task_id,
+                        parent_task_id=root_task_id,
+                        data={
+                            "agent_id": upstream.get(
+                                "agent_id", delegation.agent_id
+                            ),
+                            "result": upstream.get("result", ""),
+                            "error": upstream.get("error", ""),
+                            "reason": upstream.get("reason", ""),
+                        },
+                    )
+                elif event_type == "synthesis_started":
+                    yield builder.create(
+                        RunEventType.HOST_SYNTHESIS_STARTED,
+                        task_id=root_task_id,
+                        parent_task_id=None,
+                        data={},
+                    )
                 elif event_type == "approval_required":
                     approval = upstream.get("approval")
                     if not isinstance(approval, Mapping):
@@ -799,7 +974,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                     return
                 elif event_type == "done":
                     if any(
-                        not item.routed
+                        not item.routed and not item.terminal
                         for items in by_agent.values()
                         for item in items
                     ):

@@ -9,9 +9,17 @@ class ApprovalService:
         self.gateway = gateway
 
     async def decide(self, approval_id: str, decision: str) -> dict:
-        approval = self.repository.decide_approval(
+        approval, claimed = self.repository.claim_approval_decision(
             approval_id, decision
         )
+        if not claimed:
+            return {
+                "approval": approval,
+                "result": {
+                    "state": "completed",
+                    "text": "审批已处理，未重复执行。",
+                },
+            }
         agent = self.repository.get_agent(approval["agent_id"])
         if agent is None:
             raise ValueError("approval agent is no longer registered")
@@ -19,7 +27,10 @@ class ApprovalService:
             {
                 "type": "approval_decision",
                 "approval_id": approval["id"],
+                "agent_id": approval["agent_id"],
                 "decision": decision,
+                "tool_name": approval["tool_name"],
+                "arguments": approval["arguments"],
                 "action_digest": approval["action_digest"],
             },
             ensure_ascii=False,

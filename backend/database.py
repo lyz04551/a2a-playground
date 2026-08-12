@@ -12,8 +12,9 @@ from backend.persistence.repository import SQLiteRepository
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
+DEFAULT_DATABASE_PATH = DATA_DIR / "playground-local.db"
 DATABASE_PATH = Path(
-    os.getenv("PLAYGROUND_DB_PATH", str(DATA_DIR / "playground.db"))
+    os.getenv("PLAYGROUND_DB_PATH", str(DEFAULT_DATABASE_PATH))
 )
 repository = SQLiteRepository(DATABASE_PATH)
 repository.initialize()

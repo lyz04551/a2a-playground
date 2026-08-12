@@ -55,7 +55,7 @@ unchanged as backups.
 │   React + Ant Design     │ SSE  │   FastAPI Backend        │ A2A  │   Remote Agent   │
 │   (Vite 5)               │<────>│   (Python / uvicorn)     │<────>│   (A2A Protocol) │
 │                          │ HTTP │                          │JSON  │                  │
-│   Port 5174              │      │   Port 8050              │ RPC  │   Ports vary     │
+│   Port 5173              │      │   Port 8050              │ RPC  │   Ports vary     │
 └──────────────────────────┘      └──────────────────────────┘      └──────────────────┘
                                          │
                                          v
@@ -125,21 +125,19 @@ cd samples/python/agents/travel_planner_agent && uv run
 cd samples/python/agents/langgraph && uv run app
 ```
 
-### 2. Start the Playground
+### 2. Start the Backend and Frontend
 
 ```bash
-cd a2a-playground
+# Backend (from the project root)
+PLAYGROUND_ALLOW_PRIVATE_AGENTS=true backend/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8050
 
-# Configure DeepSeek API key
-echo 'DEEPSEEK_API_KEY="sk-your-key-here"' > backend/.env
-
-# Run everything
-bash run.sh
+# Frontend (in another terminal)
+npm --prefix frontend run dev -- --host 127.0.0.1
 ```
 
 ### 3. Open the UI
 
-Open [http://127.0.0.1:5174](http://127.0.0.1:5174) in your browser.
+Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
 
 ### Manual Setup
 
@@ -152,7 +150,7 @@ PLAYGROUND_ALLOW_PRIVATE_AGENTS=true backend/.venv/bin/python3 -m uvicorn backen
 # Frontend
 cd frontend
 npm install
-npx vite --host 127.0.0.1 --port 5174
+npx vite --host 127.0.0.1 --port 5173
 ```
 
 ---
@@ -249,7 +247,6 @@ All endpoints accept `POST` with `Content-Type: application/json`.
 
 ```
 a2a-playground/
-├── run.sh                    # One-click startup
 ├── DESIGN.md                 # Chinese design document
 ├── README.md                 # This file
 ├── backend/
@@ -287,13 +284,30 @@ a2a-playground/
 | `PLAYGROUND_CORS_ORIGINS` | No | Comma-separated allowed frontend origins |
 | `PLAYGROUND_ALLOW_PRIVATE_AGENTS` | No | Allow private/loopback Agent addresses for trusted local networks |
 | `PLAYGROUND_DB_BUSY_TIMEOUT_MS` | No | SQLite lock wait, default `5000` ms |
+| `HOST_MAX_TASKS` | No | Maximum Auto-mode plan nodes, default `6` |
+| `HOST_MAX_CONCURRENCY` | No | Maximum parallel Agent delegations, default `3` |
+| `HOST_MAX_ATTEMPTS` | No | Attempts per Agent before replacement, default `2` |
+
+### Auto-mode orchestration
+
+Direct mode always delegates to the single Agent selected by the user. Auto
+mode analyzes the request, creates a bounded dependency plan, runs independent
+read-only tasks concurrently, passes source-labeled findings to dependent
+tasks, evaluates results, and then synthesizes one answer. A transient or
+insufficient result is retried once before Host tries one compatible
+replacement Agent. Independent successful results are retained when another
+branch fails.
+
+Registered Agents do not call each other directly; Host owns context transfer
+and scheduling. Any mutation remains paused behind the existing approval flow,
+including mutations proposed after read-only diagnosis or security review.
 
 #### Default configuration
 
 | Setting | Value |
 |---------|-------|
 | Backend port | 8050 |
-| Frontend port | 5174 |
+| Frontend port | 5173 |
 | DeepSeek model | `deepseek-chat` |
 | DeepSeek base URL | `https://api.deepseek.com/v1` |
 | A2A SDK | `>=0.3.25` |
@@ -311,7 +325,7 @@ a2a-playground/
 | No streaming response | Agent doesn't support SSE | Falls back to blocking mode |
 | Port in use | Previous instance still running | `lsof -ti:8050 \| xargs kill -9` |
 | LangGraph errors | Missing dependencies | Check `langgraph`, `langchain-openai` installed |
-| 404 on API calls | Backend not running | Run `bash run.sh` or start manually |
+| 404 on API calls | Backend not running | Start Backend on port 8050 |
 | Multi-agent empty agents | Wrong API format | Fixed in latest version, refresh page |
 
 ---
