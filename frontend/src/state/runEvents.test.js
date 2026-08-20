@@ -171,3 +171,70 @@ test('restores task details and results by replaying persisted events', () => {
   assert.equal(state.tasksById.ops.objective, '检查集群')
   assert.equal(state.tasksById.ops.result, '集群健康')
 })
+
+test('keeps each agent output and host summary in separate replayable state', () => {
+  let state = reduceRunEvent(emptyRunState, event('host.plan_created', 1, {
+    tasks: [
+      { id: 'security', agent_id: 'security', objective: '安全检查' },
+      { id: 'change', agent_id: 'orchestrator', objective: '创建资源' },
+    ],
+  }, { task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.delta', 2, {
+    content: '安全', agent_id: 'security',
+  }, { task_id: 'security', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.completed', 3, {
+    content: '安全检查通过', agent_id: 'security',
+  }, { task_id: 'security', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.completed', 4, {
+    content: '部署和验证均已完成',
+  }, { task_id: 'root', parent_task_id: null }))
+
+  assert.equal(state.tasksById.security.output, '安全检查通过')
+  assert.equal(state.tasksById.change.output, undefined)
+  assert.equal(state.hostSummary, '部署和验证均已完成')
+
+  const restored = restoreRunEventState({ rawEvents: state.rawEvents })
+  assert.equal(restored.tasksById.security.output, '安全检查通过')
+  assert.equal(restored.hostSummary, '部署和验证均已完成')
+})
+
+test('appends react decision rounds and only their newly introduced tasks', () => {
+  let state = reduceRunEvent(emptyRunState, event('host.round_started', 1, {
+    round: 1,
+  }, { task_id: 'root' }))
+  state = reduceRunEvent(state, event('host.decision_created', 2, {
+    round: 1,
+    action: 'delegate',
+    reason: '并行执行安全和容量检查',
+    tasks: [
+      { id: 'security', agent_id: 'security', objective: '安全检查' },
+      { id: 'capacity', agent_id: 'capacity', objective: '容量检查' },
+    ],
+  }, { task_id: 'root' }))
+  state = reduceRunEvent(state, event('host.round_completed', 3, {
+    round: 1,
+  }, { task_id: 'root' }))
+  state = reduceRunEvent(state, event('host.round_started', 4, {
+    round: 2,
+  }, { task_id: 'root' }))
+  state = reduceRunEvent(state, event('host.decision_created', 5, {
+    round: 2,
+    action: 'delegate',
+    reason: '检查通过后创建资源',
+    tasks: [
+      { id: 'orchestrator', agent_id: 'orchestrator', objective: '创建 nginx' },
+    ],
+  }, { task_id: 'root' }))
+
+  assert.deepEqual(state.roundOrder, [1, 2])
+  assert.deepEqual(state.roundsByNumber[1].taskIds, ['security', 'capacity'])
+  assert.equal(state.roundsByNumber[1].status, 'completed')
+  assert.deepEqual(state.roundsByNumber[2].taskIds, ['orchestrator'])
+  assert.deepEqual(state.taskOrder, ['security', 'capacity', 'orchestrator'])
+  assert.equal(state.tasksById.security.round, 1)
+  assert.equal(state.tasksById.orchestrator.round, 2)
+
+  const restored = restoreRunEventState({ rawEvents: state.rawEvents })
+  assert.deepEqual(restored.roundOrder, [1, 2])
+  assert.deepEqual(restored.taskOrder, state.taskOrder)
+})

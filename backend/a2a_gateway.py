@@ -143,6 +143,9 @@ class A2AGateway:
             "context_id": result.get("context_id") or context_id,
             "task_id": actual_task_id,
             "approval": approval,
+            "specialist_output": self._find_artifact_json(
+                result.get("artifacts", []), "specialist_result"
+            ),
         }
 
     async def delegate_stream(
@@ -181,6 +184,13 @@ class A2AGateway:
                 event["args"] = _public_value(event.get("args", {}))
             elif event.get("type") == "tool_result":
                 event["result"] = _public_value(event.get("result", ""))
+            specialist_output = self._find_artifact_json(
+                event.get("artifacts", []), "specialist_result"
+            )
+            if specialist_output is not None:
+                event["specialist_output"] = _public_value(
+                    specialist_output
+                )
             event["agent_id"] = agent_id
             event["context_id"] = context_id
             if remote_task_id:
@@ -189,8 +199,16 @@ class A2AGateway:
 
     @staticmethod
     def _find_pending_action(artifacts: list[dict]) -> dict | None:
+        return A2AGateway._find_artifact_json(
+            artifacts, "pending_action"
+        )
+
+    @staticmethod
+    def _find_artifact_json(
+        artifacts: list[dict], name: str
+    ) -> dict | None:
         for artifact in artifacts:
-            if artifact.get("name") != "pending_action":
+            if artifact.get("name") != name:
                 continue
             for part in artifact.get("parts", []):
                 root = part.get("root", part)
@@ -198,7 +216,9 @@ class A2AGateway:
                 if not text:
                     continue
                 try:
-                    return json.loads(text)
+                    value = json.loads(text)
                 except json.JSONDecodeError:
                     continue
+                if isinstance(value, dict):
+                    return value
         return None

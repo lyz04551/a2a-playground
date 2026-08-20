@@ -10,10 +10,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy requirements
 COPY backend/requirements.txt .
 
-# Install google-adk first (it pins langgraph to old version)
-RUN pip install --no-cache-dir "google-adk[extensions]>=2.4.0" 2>/dev/null || true
-
-# Then install core deps (langgraph>=1.2.9 will override google-adk's old langgraph)
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code

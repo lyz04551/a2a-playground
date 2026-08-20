@@ -8,6 +8,9 @@ export const emptyRunState = {
   messages: [],
   approvals: [],
   artifacts: [],
+  hostSummary: '',
+  roundsByNumber: {},
+  roundOrder: [],
   seenEventIds: [],
   lastSequence: 0,
   status: 'idle',
@@ -102,6 +105,70 @@ function reduceNormalizedEvent(state, event) {
     return { ...state, run: { ...state.run, id: event.run_id || state.run?.id, status: 'interrupted', ...data } }
   }
   if (event.type === 'host.planning') return { ...state, run: { ...state.run, id: event.run_id, status: 'planning', ...data } }
+  if (event.type === 'host.round_started') {
+    const round = data.round
+    if (round === undefined || round === null) return state
+    return {
+      ...state,
+      roundsByNumber: {
+        ...state.roundsByNumber,
+        [round]: { ...(state.roundsByNumber[round] || {}), round, status: 'working', taskIds: state.roundsByNumber[round]?.taskIds || [] },
+      },
+      roundOrder: state.roundOrder.includes(round) ? state.roundOrder : [...state.roundOrder, round],
+    }
+  }
+  if (event.type === 'host.decision_created') {
+    const round = data.round
+    const tasks = data.tasks || []
+    const tasksById = { ...state.tasksById }
+    const taskOrder = [...state.taskOrder]
+    for (const task of tasks) {
+      tasksById[task.id] = {
+        ...(tasksById[task.id] || {}),
+        id: task.id,
+        parentTaskId: event.task_id,
+        agentId: task.agent_id,
+        label: task.objective || task.id,
+        objective: task.objective || task.id,
+        input: task.input || '',
+        completionCriteria: task.completion_criteria || [],
+        risk: task.risk,
+        maxAttempts: task.max_attempts,
+        dependsOn: task.depends_on || [],
+        round,
+        status: tasksById[task.id]?.status || 'queued',
+      }
+      if (!taskOrder.includes(task.id)) taskOrder.push(task.id)
+    }
+    return {
+      ...state,
+      tasksById,
+      taskOrder,
+      roundsByNumber: {
+        ...state.roundsByNumber,
+        [round]: {
+          ...(state.roundsByNumber[round] || {}),
+          round,
+          action: data.action,
+          reason: data.reason || '',
+          status: data.action === 'delegate' ? 'working' : data.action,
+          taskIds: tasks.map(task => task.id),
+        },
+      },
+      roundOrder: state.roundOrder.includes(round) ? state.roundOrder : [...state.roundOrder, round],
+    }
+  }
+  if (event.type === 'host.round_completed') {
+    const round = data.round
+    if (round === undefined || round === null) return state
+    return {
+      ...state,
+      roundsByNumber: {
+        ...state.roundsByNumber,
+        [round]: { ...(state.roundsByNumber[round] || {}), round, status: 'completed' },
+      },
+    }
+  }
   if (event.type === 'host.plan_created') {
     const tasks = data.tasks || []
     const tasksById = { ...state.tasksById }
@@ -201,7 +268,20 @@ function reduceNormalizedEvent(state, event) {
     const content = event.type === 'message.delta'
       ? `${current?.content || ''}${data.content || data.text || ''}`
       : (data.content || data.text || current?.content || '')
-    return { ...state, messages: upsertById(state.messages, { ...current, id, role: data.role || current?.role || 'agent', content, taskId: event.task_id, completed: event.type === 'message.completed' }) }
+    let next = state
+    if (event.parent_task_id !== null && event.task_id) {
+      const task = state.tasksById[event.task_id]
+      const output = event.type === 'message.delta'
+        ? `${task?.streamingOutput || ''}${data.content || data.text || ''}`
+        : content
+      next = updateTask(state, event, {
+        streamingOutput: output,
+        ...(event.type === 'message.completed' ? { output } : {}),
+      })
+    } else if (event.type === 'message.completed') {
+      next = { ...state, hostSummary: content }
+    }
+    return { ...next, messages: upsertById(next.messages, { ...current, id, role: data.role || current?.role || 'agent', content, taskId: event.task_id, completed: event.type === 'message.completed' }) }
   }
   if (event.type === 'approval.required') {
     const approval = data.approval || data
@@ -253,13 +333,17 @@ export function adaptRunStateForLegacy(state) {
 export function reduceRunEvent(state, incomingEvent) {
   const event = normalizeLegacyRunEvent(incomingEvent)
   if (!event || state.seenEventIds.includes(event.event_id)) return state
-  const seenEventIds = [...state.seenEventIds, event.event_id].slice(-MAX_SEEN_EVENT_IDS)
-  const reduced = reduceNormalizedEvent(state, event)
+  const startsNewRun = event.type === 'run.started' && event.run_id !== state.run?.id
+  const baseState = startsNewRun
+    ? { ...emptyRunState, messages: state.messages }
+    : state
+  const seenEventIds = [...baseState.seenEventIds, event.event_id].slice(-MAX_SEEN_EVENT_IDS)
+  const reduced = reduceNormalizedEvent(baseState, event)
   const rawEvent = { ...event, timestamp: normalizeTimestamp(event.timestamp) }
-  const rawEvents = [...(state.rawEvents || []), rawEvent]
+  const rawEvents = [...(baseState.rawEvents || []), rawEvent]
     .sort((left, right) => (left.sequence || 0) - (right.sequence || 0))
     .slice(-MAX_RAW_EVENTS)
-  const normalized = { ...reduced, rawEvents, seenEventIds, lastSequence: Math.max(state.lastSequence, event.sequence || 0) }
+  const normalized = { ...reduced, rawEvents, seenEventIds, lastSequence: Math.max(baseState.lastSequence, event.sequence || 0) }
   return { ...normalized, ...adaptRunStateForLegacy(normalized) }
 }
 

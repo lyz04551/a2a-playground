@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import ToolNode, create_react_agent
 
-from .config import AgentRuntimeConfig
+from .config import AgentRuntimeConfig, load_llm_config
 from .mcp_client import K8sMCPClient
 from .models import ApprovalRequired, PendingAction
 from .streaming import RuntimeEvent, RuntimeEventType
@@ -45,7 +45,9 @@ class RuntimeMCPAgent:
             "除非上次调用失败或数据明确失效，不要用相同参数重复调用同一工具；"
             "证据足以回答后立即停止调用并输出结论。"
         )
-        self.mcp_client = mcp_client or K8sMCPClient(config.mcp_url)
+        self.mcp_client = mcp_client or K8sMCPClient(
+            config.mcp_url, transport=config.mcp_transport
+        )
         self._model = model
         self.run_timeout = run_timeout or float(
             os.getenv("AGENT_RUN_TIMEOUT", "90")
@@ -73,12 +75,11 @@ class RuntimeMCPAgent:
             max_calls=self.max_tool_calls,
         )
         tools = self._tool_adapter.build_tools(definitions)
+        llm = load_llm_config("AGENT")
         model = self._model or ChatOpenAI(
-            model=os.getenv("LLM_MODEL", "deepseek-chat"),
-            openai_api_key=os.getenv("DEEPSEEK_API_KEY", ""),
-            openai_api_base=os.getenv(
-                "DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"
-            ),
+            model=llm.model,
+            openai_api_key=llm.api_key,
+            openai_api_base=llm.base_url,
             temperature=0,
             streaming=True,
         )
@@ -96,7 +97,7 @@ class RuntimeMCPAgent:
         return {
             "state": "ready" if self._tools_loaded else "degraded",
             "checks": {
-                "llm": {"state": "ok" if self._model or os.getenv("DEEPSEEK_API_KEY") else "unknown"},
+                "llm": {"state": "ok" if self._model or load_llm_config("AGENT").configured else "unknown"},
                 "mcp": {"state": mcp_state, "detail": self._dependency_error},
                 "kubernetes": {"state": "ok" if self._tools_loaded else "unknown"},
             },
@@ -215,8 +216,17 @@ class RuntimeMCPAgent:
             content = str(messages[-1].content or "")
         yield RuntimeEvent.completed(
             content=content or "处理完成，但未生成文本响应。",
-            artifact_name=f"{self.config.agent_id}_result",
-            data={"text": content},
+            artifact_name="specialist_result",
+            data={
+                "status": "completed",
+                "summary": content,
+                "findings": [],
+                "resources": [],
+                "evidence": [],
+                "recommendations": [],
+                "continuation": {"allowed": None, "reason": ""},
+                "limitations": [],
+            },
         )
 
     @staticmethod
@@ -258,8 +268,15 @@ class RuntimeMCPAgent:
             self._pending_by_context.pop(context_id, None)
             yield RuntimeEvent.completed(
                 content="用户已拒绝该变更，未执行任何写操作。",
-                artifact_name="approval_rejected",
-                data=pending.model_dump(),
+                artifact_name="specialist_result",
+                data={
+                    "status": "blocked",
+                    "summary": "用户已拒绝该变更，未执行任何写操作。",
+                    "continuation": {
+                        "allowed": False,
+                        "reason": "approval rejected",
+                    },
+                },
             )
             return
         if approval.get("action_digest") != pending.action_digest:
@@ -275,10 +292,19 @@ class RuntimeMCPAgent:
         self._pending_by_context.pop(context_id, None)
         yield RuntimeEvent.completed(
             content=result,
-            artifact_name="execution_result",
+            artifact_name="specialist_result",
             data={
-                "pending_action": pending.model_dump(),
-                "result": result,
+                "status": "completed",
+                "summary": str(result),
+                "evidence": [{
+                    "tool": pending.tool_name,
+                    "arguments": pending.arguments,
+                    "result": result,
+                }],
+                "continuation": {
+                    "allowed": True,
+                    "reason": "approved MCP action completed",
+                },
             },
         )
 

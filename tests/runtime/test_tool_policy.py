@@ -37,12 +37,13 @@ def test_mutation_returns_approval_required():
     assert decision.action is PolicyAction.APPROVAL_REQUIRED
 
 
-def test_global_dangerous_tool_deny_overrides_agent_configuration():
+def test_explicit_global_deny_overrides_agent_configuration():
     policy = ToolPolicy(
         ToolPolicyConfig(
             allow=["run_command_in_k8s_pod"],
             approval_required=["run_command_in_k8s_pod"],
-        )
+        ),
+        global_deny=["run_command_in_k8s_pod"],
     )
 
     decision = policy.classify(

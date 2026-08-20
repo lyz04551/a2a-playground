@@ -1,0 +1,28 @@
+agent_id: k8s-helm
+name: K8s Helm Agent
+description: Kubernetes Helm release inspection, installation, and uninstallation.
+read_only: false
+risk_level: write_approval
+limitations:
+  - Helm installation and uninstallation require approval
+priority: 38
+port: 8055
+public_url: ${AGENT_PUBLIC_URL}
+mcp_url: ${K8S_MCP_URL}
+skills:
+  - id: helm.release_manage
+    name: Helm Release Management
+    description: List, install, and uninstall Helm releases.
+    tags: [kubernetes, helm, chart, release, install, uninstall]
+    examples:
+      - Install a chart with reviewed values after approval.
+tool_policy:
+  allow:
+    - helm_list_releases
+    - list_k8s_namespace
+    - list_k8s_resource
+    - get_k8s_resource
+  deny: []
+  approval_required:
+    - helm_install_chart
+    - helm_uninstall_release

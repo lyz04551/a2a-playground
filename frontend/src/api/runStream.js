@@ -101,6 +101,11 @@ export async function streamRun(command, handlers = {}, options = {}) {
   let reconnects = 0
 
   connection: while (true) {
+    handlers.onConnectionChange?.({
+      state: reconnects > 0 ? 'reconnecting' : 'connecting',
+      attempt: reconnects,
+      afterSequence: lastSequence,
+    })
     const body = reconnects === 0
       ? command
       : { ...command, run_id: runId, after_sequence: lastSequence }
@@ -132,6 +137,11 @@ export async function streamRun(command, handlers = {}, options = {}) {
       handlers.onError?.(error)
       throw error
     }
+    handlers.onConnectionChange?.({
+      state: reconnects > 0 ? 'recovered' : 'connected',
+      attempt: reconnects,
+      afterSequence: lastSequence,
+    })
 
     const parser = createSSEParser(event => {
       if (!boundedRemember(seenEventIds, event?.event_id, dedupeLimit)) return
@@ -157,6 +167,7 @@ export async function streamRun(command, handlers = {}, options = {}) {
       parser.push(chunk.value)
     }
     parser.finish()
+    handlers.onConnectionChange?.({ state: 'completed', attempt: reconnects, afterSequence: lastSequence })
     handlers.onComplete?.({ lastSequence })
     return { lastSequence }
   }

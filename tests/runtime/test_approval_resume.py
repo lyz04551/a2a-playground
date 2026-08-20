@@ -55,7 +55,8 @@ async def test_approved_exact_action_executes_once_and_clears_pending():
     events = [event async for event in agent.stream(message, "ctx-1")]
 
     assert events[-1].type is RuntimeEventType.COMPLETED
-    assert events[-1].artifact_name == "execution_result"
+    assert events[-1].artifact_name == "specialist_result"
+    assert events[-1].data["continuation"]["allowed"] is True
     assert client.calls == [
         ("scale_k8s_deployment", {"name": "api", "replicas": 2})
     ]

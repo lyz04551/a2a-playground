@@ -1,3 +1,5 @@
+import { formatAgentOutput } from './agentOutput.js'
+
 function printable(value) {
   if (value == null || value === '') return ''
   return typeof value === 'string' ? value : JSON.stringify(value, null, 2)
@@ -35,7 +37,7 @@ export function buildTaskDetails(task = {}, tasks = [], agents = []) {
     const dependency = tasks.find(item => item.id === id)
     return dependency?.objective || dependency?.label || id
   })
-  let resultText = printable(task.result)
+  let resultText = formatAgentOutput(task.result)
   if (!resultText && ['working', 'delegated', 'retrying', 'queued'].includes(task.status)) resultText = '任务仍在执行，尚未返回结果。'
   if (!resultText && task.status === 'failed') resultText = printable(task.error || task.reason) || '任务执行失败。'
   if (!resultText && task.status === 'blocked') resultText = task.blockedReason || task.reason || '任务因依赖不可用而阻塞。'

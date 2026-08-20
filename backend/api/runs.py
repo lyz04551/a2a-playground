@@ -16,6 +16,7 @@ from backend.approvals.service import ApprovalService
 from backend.models import ApiResponse
 from backend.orchestration.commands import RunCommand
 from backend.orchestration.events import RunEvent
+from backend.llm_config import load_llm_config
 
 
 def encode_sse(event: RunEvent) -> str:
@@ -65,6 +66,7 @@ def create_router(service) -> APIRouter:
 
             async def event_stream():
                 cursor = after_sequence
+                generation = service._event_generations.get(reconnect_run_id, 0)
                 while True:
                     events = service.events(reconnect_run_id, cursor)
                     for event in events:
@@ -72,10 +74,13 @@ def create_router(service) -> APIRouter:
                         yield encode_sse(event)
                     run = service.get(reconnect_run_id)
                     if run is None or run["status"] in {
-                        "completed", "failed", "cancelled", "approval_required"
+                        "completed", "failed", "cancelled", "interrupted", "approval_required"
                     }:
                         return
-                    await asyncio.sleep(0.1)
+                    next_generation = await service.wait_for_events(reconnect_run_id, generation)
+                    if next_generation == generation:
+                        yield ": heartbeat\n\n"
+                    generation = next_generation
         else:
             queue: asyncio.Queue = asyncio.Queue()
 
@@ -115,8 +120,21 @@ def create_router(service) -> APIRouter:
         return ApiResponse(result=run)
 
     @router.post("/api/runs/list")
-    async def runs_list():
-        return ApiResponse(result=service.list())
+    async def runs_list(data: dict | None = None):
+        data = data or {}
+        if "page" not in data and "page_size" not in data and "pageSize" not in data:
+            return ApiResponse(result=service.list())
+        try:
+            page = max(1, int(data.get("page", 1)))
+            size = min(100, max(1, int(data.get("page_size", data.get("pageSize", 20)))))
+        except (TypeError, ValueError):
+            return _error("page and page_size must be integers")
+        total = service.repository.count_runs()
+        return ApiResponse(result={
+            "items": service.list(limit=size, offset=(page - 1) * size),
+            "page": page, "page_size": size, "total": total,
+            "has_more": page * size < total,
+        })
 
     @router.post("/api/runs/events")
     async def runs_events(data: dict[str, Any]):
@@ -148,11 +166,15 @@ def create_router(service) -> APIRouter:
 
     @router.post("/api/system/status")
     async def system_status():
+        model = load_llm_config("HOST")
         return ApiResponse(
             result={
-                "model": {
-                    "configured": bool(os.getenv("DEEPSEEK_API_KEY", "")),
-                }
+                "model": {"configured": model.configured},
+                "model_details": {
+                    key: value
+                    for key, value in model.public().items()
+                    if key != "configured"
+                },
             }
         )
 
@@ -187,6 +209,16 @@ def create_approval_router(
             approval = result["approval"]
             execution = result.get("result", {})
             result_text = execution.get("text", "")
+            run = run_service.repository.get_run(approval["run_id"]) or {}
+            if run.get("mode") == "auto":
+                resumed_events = await run_service.resume_after_approval(
+                    approval, execution
+                )
+                result["resumed_events"] = [
+                    event.model_dump(mode="json")
+                    for event in resumed_events
+                ]
+                return ApiResponse(result=result)
             if (
                 approval["status"] == "approved"
                 and execution.get("state") != "failed"

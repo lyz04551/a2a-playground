@@ -1,0 +1,53 @@
+agent_id: k8s-infrastructure
+name: K8s Infrastructure Agent
+description: Kubernetes node maintenance, cluster registry, StorageClass, and IngressClass operations.
+read_only: false
+risk_level: write_approval
+limitations:
+  - infrastructure mutations require approval
+priority: 35
+port: 8054
+public_url: ${AGENT_PUBLIC_URL}
+mcp_url: ${K8S_MCP_URL}
+skills:
+  - id: node.maintain
+    name: Kubernetes Node Maintenance
+    description: Inspect, cordon, drain, taint, uncordon, and untaint nodes.
+    tags: [kubernetes, node, cordon, drain, taint]
+    examples:
+      - Drain a node for planned maintenance after approval.
+  - id: storage.configure
+    name: Kubernetes Infrastructure Class Configuration
+    description: Inspect storage usage and configure default StorageClass or IngressClass.
+    tags: [kubernetes, storageclass, ingressclass]
+    examples:
+      - Set the default StorageClass after checking current usage.
+  - id: cluster.registry
+    name: Kubernetes Cluster Registry
+    description: List, register, and unregister Kubernetes clusters.
+    tags: [kubernetes, cluster, registration, kubeconfig]
+    examples:
+      - Register a new cluster using an approved kubeconfig.
+tool_policy:
+  allow:
+    - list_k8s_clusters
+    - list_k8s_node
+    - list_k8s_resource
+    - get_k8s_node_ip_usage
+    - get_k8s_node_resource_usage
+    - get_k8s_pod_count_running_on_node
+    - get_k8s_storageclass_pv_count
+    - get_k8s_storageclass_pvc_count
+    - get_k8s_top_node
+    - describe_k8s_resource
+  deny: []
+  approval_required:
+    - cordon_k8s_node
+    - drain_k8s_node
+    - taint_k8s_node
+    - uncordon_k8s_node
+    - untaint_k8s_node
+    - set_default_k8s_ingressclass
+    - set_k8s_default_storageclass
+    - register_k8s_cluster
+    - unregister_k8s_cluster

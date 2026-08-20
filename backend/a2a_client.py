@@ -320,7 +320,6 @@ async def send_message_to_agent(agent_url: str, text: str, conversation_id: str,
         async for event in client.send_message(sdk_msg):
             if isinstance(event, Message):
                 accumulated += _get_text_from_part(event)
-                state = "completed"
             elif isinstance(event, tuple):
                 task, update = event
                 if task:
@@ -333,6 +332,8 @@ async def send_message_to_agent(agent_url: str, text: str, conversation_id: str,
                 if task and task.status:
                     state = task.status.state.value
                 accumulated += _extract_text_from_task(task)
+        if state == "unknown" and accumulated:
+            state = "completed"
         return {
             "text": accumulated,
             "state": state,
@@ -370,6 +371,7 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
         sdk_msg = _make_sdk_message(text, conversation_id)
         task_id = ""
         accumulated = ""
+        artifacts = []
         try:
             async for event in client.send_message(sdk_msg):
                 if isinstance(event, Message):
@@ -381,6 +383,10 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                     task: Task = event[0]
                     update = event[1]
                     task_id = task.id
+                    artifacts = [
+                        artifact.model_dump(by_alias=True)
+                        for artifact in (task.artifacts or [])
+                    ]
                     state = task.status.state if task.status else "unknown"
                     if isinstance(update, TaskStatusUpdateEvent):
                         msg = update.status.message
@@ -435,7 +441,12 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                             accumulated += artifact_text
                             yield {"type": "text", "text": artifact_text, "state": state, "task_id": task_id}
                         yield {"type": "status", "state": state, "task_id": task_id}
-            yield {"type": "done", "task_id": task_id, "text": accumulated}
+            yield {
+                "type": "done",
+                "task_id": task_id,
+                "text": accumulated,
+                "artifacts": artifacts,
+            }
         except Exception as e:
             err = str(e)
             if "400" in err or "SSE" in err or "Content-Type" in err or "event-stream" in err or "Method not found" in err:

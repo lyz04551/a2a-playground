@@ -1,12 +1,13 @@
-import React from 'react'
-import { ConfigProvider, theme } from 'antd'
+import React, { lazy, Suspense } from 'react'
+import { ConfigProvider, Spin, theme } from 'antd'
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom'
-import AgentsPage from './pages/AgentsPage'
-import EventsPage from './pages/EventsPage'
-import WorkspacePage from './pages/WorkspacePage'
-import DashboardPage from './pages/DashboardPage'
 import AppShell from './components/shell/AppShell'
 import { useConsoleSettings } from './context/ConsoleSettingsContext'
+
+const AgentsPage = lazy(() => import('./pages/AgentsPage'))
+const EventsPage = lazy(() => import('./pages/EventsPage'))
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage'))
+const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 
 export default function App() {
   const { settings } = useConsoleSettings()
@@ -35,17 +36,19 @@ export default function App() {
       },
     }}>
       <AppShell>
-        <Routes>
-          <Route path="/" element={<Navigate to="/dashboard" replace />} />
-          <Route path="/dashboard" element={<DashboardPage />} />
-          <Route path="/workspace" element={<WorkspacePage />} />
-          <Route path="/agents" element={<AgentsPage />} />
-          <Route path="/events" element={<EventsPage />} />
-          <Route path="/chat" element={<Navigate to="/workspace?mode=direct" replace />} />
-          <Route path="/chat/:agentId" element={<LegacyChatRedirect />} />
-          <Route path="/multi" element={<Navigate to="/workspace?mode=auto" replace />} />
-          <Route path="*" element={<Navigate to="/workspace" replace />} />
-        </Routes>
+        <Suspense fallback={<div className="route-loading"><Spin size="large" /></div>}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/dashboard" replace />} />
+            <Route path="/dashboard" element={<DashboardPage />} />
+            <Route path="/workspace" element={<WorkspacePage />} />
+            <Route path="/agents" element={<AgentsPage />} />
+            <Route path="/events" element={<EventsPage />} />
+            <Route path="/chat" element={<Navigate to="/workspace?mode=direct" replace />} />
+            <Route path="/chat/:agentId" element={<LegacyChatRedirect />} />
+            <Route path="/multi" element={<Navigate to="/workspace?mode=auto" replace />} />
+            <Route path="*" element={<Navigate to="/workspace" replace />} />
+          </Routes>
+        </Suspense>
       </AppShell>
     </ConfigProvider>
   )

@@ -8,9 +8,83 @@ from backend.host.orchestration.engine import HostOrchestrationEngine
 from backend.host.orchestration.models import (
     DelegationResult,
     Evaluation,
+    HostDecision,
     HostPlan,
+    HostRunState,
     PlannedTask,
 )
+
+
+def test_delegation_result_accepts_structured_specialist_output():
+    result = DelegationResult(
+        state="completed",
+        text="安全检查通过",
+        output={
+            "status": "completed",
+            "summary": "安全检查通过",
+            "continuation": {
+                "allowed": True,
+                "reason": "no blockers",
+            },
+        },
+    )
+
+    assert result.output is not None
+    assert result.output.summary == "安全检查通过"
+    assert result.output.continuation.allowed is True
+    assert result.output.findings == []
+
+
+@pytest.mark.anyio
+async def test_explicit_structured_block_prevents_dependent_task():
+    plan = HostPlan(
+        summary="guarded change",
+        tasks=[
+            planned("security", "security"),
+            planned("change", "orchestrator", depends_on=("security",)),
+        ],
+    )
+
+    class StructuredDecisions(FakeDecisions):
+        async def evaluate(self, task, result):
+            if (
+                result.output is not None
+                and result.output.continuation.allowed is False
+            ):
+                return Evaluation(
+                    outcome="blocked",
+                    reason=result.output.continuation.reason,
+                )
+            return await super().evaluate(task, result)
+
+    calls = []
+
+    async def delegate(run_id, agent_id, prompt):
+        calls.append(agent_id)
+        return DelegationResult(
+            state="completed",
+            text="发现高风险配置",
+            output={
+                "summary": "发现高风险配置",
+                "continuation": {
+                    "allowed": False,
+                    "reason": "privileged container",
+                },
+            },
+        )
+
+    events = await collect(HostOrchestrationEngine(
+        FakeRegistry("security", "orchestrator"),
+        StructuredDecisions(plan),
+        delegate,
+    ))
+
+    assert calls == ["security"]
+    assert any(
+        event["type"] == "task_blocked"
+        and event["task_id"] == "change"
+        for event in events
+    )
 
 
 def planned(
@@ -90,6 +164,150 @@ class ResultAwareDecisions(FakeDecisions):
 
 async def collect(engine):
     return [event async for event in engine.stream("user request", "run-1")]
+
+
+@pytest.mark.anyio
+async def test_react_next_round_observes_results_before_deciding_again():
+    class ReactDecisions:
+        def __init__(self):
+            self.states = []
+
+        async def decide_next(self, request, agents, state):
+            self.states.append(state.model_copy(deep=True))
+            if state.round == 1:
+                return HostDecision(
+                    action="delegate",
+                    reason="Run independent preflight checks",
+                    tasks=[
+                        planned("security-1", "security"),
+                        planned("capacity-1", "capacity"),
+                    ],
+                )
+            return HostDecision(
+                action="clarify",
+                reason="The target namespace is missing",
+                response="是否允许创建 production namespace？",
+            )
+
+        async def evaluate(self, task, result):
+            if result.output and result.output.continuation.allowed is False:
+                return Evaluation(
+                    outcome="blocked",
+                    reason=result.output.continuation.reason,
+                )
+            return Evaluation(outcome="sufficient", reason="evidence returned")
+
+    decisions = ReactDecisions()
+    calls = []
+
+    async def delegate(run_id, agent_id, prompt):
+        calls.append(agent_id)
+        if agent_id == "security":
+            return DelegationResult(
+                state="completed",
+                text="production namespace does not exist",
+                output={
+                    "summary": "namespace missing",
+                    "continuation": {
+                        "allowed": False,
+                        "reason": "production namespace does not exist",
+                    },
+                },
+            )
+        return DelegationResult(state="completed", text="capacity available")
+
+    events = await collect(HostOrchestrationEngine(
+        FakeRegistry("security", "capacity", "orchestrator"),
+        decisions,
+        delegate,
+    ))
+
+    assert set(calls) == {"security", "capacity"}
+    assert set(decisions.states[1].observations) == {
+        "security-1", "capacity-1"
+    }
+    assert [event["type"] for event in events if "round" in event["type"]] == [
+        "round_started", "round_completed", "round_started"
+    ]
+    assert not any(event["type"] == "task_blocked" for event in events)
+    assert any(
+        event["type"] == "task_completed"
+        and event["task_id"] == "security-1"
+        and event["evaluation"]["outcome"] == "blocked"
+        for event in events
+    )
+    assert not any(
+        event["type"] == "task_failed"
+        and event["task_id"] == "security-1"
+        for event in events
+    )
+    assert events[-2] == {
+        "type": "text",
+        "text": "是否允许创建 production namespace？",
+        "host_action": "clarify",
+    }
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.anyio
+async def test_react_tasks_in_one_round_execute_concurrently():
+    both_started = asyncio.Event()
+    started = 0
+
+    class ReactDecisions:
+        async def decide_next(self, request, agents, state):
+            if state.round == 1:
+                return HostDecision(
+                    action="delegate",
+                    reason="Parallel checks",
+                    tasks=[planned("one", "one"), planned("two", "two")],
+                )
+            return HostDecision(
+                action="complete",
+                reason="Both checks completed",
+                response="All checks completed",
+            )
+
+        async def evaluate(self, task, result):
+            return Evaluation(outcome="sufficient", reason="complete")
+
+    async def delegate(run_id, agent_id, prompt):
+        nonlocal started
+        started += 1
+        if started == 2:
+            both_started.set()
+        await asyncio.wait_for(both_started.wait(), timeout=0.5)
+        return DelegationResult(state="completed", text=agent_id)
+
+    events = await collect(HostOrchestrationEngine(
+        FakeRegistry("one", "two"), ReactDecisions(), delegate
+    ))
+
+    assert sum(event["type"] == "task_completed" for event in events) == 2
+    assert events[-2]["text"] == "All checks completed"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("action", ["direct_response", "clarification"])
+async def test_host_only_decision_never_delegates_evaluates_or_synthesizes(action):
+    class HostOnlyDecisions(FakeDecisions):
+        async def evaluate(self, task, result):
+            raise AssertionError("host-only decisions must not evaluate child work")
+
+        async def synthesize(self, request, plan, results):
+            raise AssertionError("the planned Host response is already final")
+
+    response = "你好！有什么可以帮助你的？" if action == "direct_response" else "请问你希望检查哪个集群？"
+    decisions = HostOnlyDecisions(HostPlan(action=action, summary="host handles request", response=response, tasks=[]))
+
+    async def delegate(*args):
+        raise AssertionError("host-only decisions must not delegate")
+
+    events = await collect(HostOrchestrationEngine(FakeRegistry("ops"), decisions, delegate))
+
+    assert [event["type"] for event in events] == ["plan_created", "text", "done"]
+    assert events[0]["action"] == action
+    assert events[1]["text"] == response
 
 
 @pytest.mark.anyio
@@ -375,6 +593,7 @@ async def test_failed_predecessor_blocks_descendant_but_keeps_independent_result
             planned("failed", "only-agent"),
             planned("independent", "healthy"),
             planned("dependent", "healthy", depends_on=("failed",)),
+            planned("grandchild", "healthy", depends_on=("dependent",)),
         ],
     )
     calls = []
@@ -399,11 +618,16 @@ async def test_failed_predecessor_blocks_descendant_but_keeps_independent_result
         and event["task_id"] == "dependent"
         for event in events
     )
+    assert any(
+        event["type"] == "task_blocked"
+        and event["task_id"] == "grandchild"
+        for event in events
+    )
     assert decisions.synthesis_results["independent"].text == "useful"
 
 
 @pytest.mark.anyio
-async def test_approval_blocks_only_dependent_branch():
+async def test_approval_pauses_dependent_branch_without_marking_it_blocked():
     plan = HostPlan(
         summary="approval",
         tasks=[
@@ -434,7 +658,73 @@ async def test_approval_blocks_only_dependent_branch():
         and event["task_id"] == "independent"
         for event in events
     )
-    assert any(
+    assert not any(
         event["type"] == "task_blocked" and event["task_id"] == "verify"
         for event in events
     )
+    assert not any(
+        event["type"] in {"synthesis_started", "done"}
+        for event in events
+    )
+
+
+@pytest.mark.anyio
+async def test_resume_continues_same_plan_after_approved_result():
+    plan = HostPlan(
+        summary="guarded deployment",
+        tasks=[
+            planned("security", "security"),
+            planned(
+                "change", "orchestrator", depends_on=("security",)
+            ),
+            planned("verify", "ops", depends_on=("change",)),
+        ],
+    )
+    calls = []
+
+    async def delegate(run_id, agent_id, prompt):
+        calls.append(agent_id)
+        if agent_id == "orchestrator":
+            return DelegationResult(
+                state="approval_required", approval={"id": "approval-1"}
+            )
+        return DelegationResult(
+            state="completed", text=f"{agent_id} complete"
+        )
+
+    engine = HostOrchestrationEngine(
+        FakeRegistry("security", "orchestrator", "ops"),
+        ResultAwareDecisions(plan),
+        delegate,
+    )
+    first = [
+        event async for event in engine.stream("deploy nginx", "run-1")
+    ]
+    assert calls == ["security", "orchestrator"]
+    assert any(event["type"] == "approval_required" for event in first)
+
+    resumed = [
+        event async for event in engine.stream(
+            "deploy nginx",
+            "run-1",
+            plan=plan,
+            initial_results={
+                "security": DelegationResult(
+                    state="completed", text="security complete"
+                ),
+                "change": DelegationResult(
+                    state="completed", text="resource created"
+                ),
+            },
+            initial_successful={"security", "change"},
+        )
+    ]
+
+    assert calls == ["security", "orchestrator", "ops"]
+    assert any(
+        event["type"] == "task_completed"
+        and event["task_id"] == "verify"
+        for event in resumed
+    )
+    assert any(event["type"] == "synthesis_started" for event in resumed)
+    assert resumed[-1]["type"] == "done"

@@ -189,6 +189,8 @@ async def test_system_status_reports_model_configuration_without_secret(
     tmp_path, monkeypatch, key, configured
 ):
     app, _repository, _service = make_app(tmp_path)
+    monkeypatch.delenv("HOST_LLM_API_KEY", raising=False)
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
     monkeypatch.setenv("DEEPSEEK_API_KEY", key)
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),

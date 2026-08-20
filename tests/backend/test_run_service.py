@@ -5,6 +5,7 @@ import pytest
 
 from backend.orchestration.commands import RunCommand
 from backend.orchestration.events import RunEventType
+from backend.orchestration.events import RunEvent
 from backend.persistence.repository import SQLiteRepository
 from backend.registry.service import AgentRegistry
 
@@ -52,6 +53,109 @@ def make_service(tmp_path, events):
 
 async def collect(stream):
     return [event async for event in stream]
+
+
+def test_service_persists_react_checkpoint_from_round_event(tmp_path):
+    repository, service = make_service(tmp_path, [])
+    repository.create_run(
+        "run-react",
+        "conversation-react",
+        "running",
+        {"mode": "auto", "root_task_id": "root-react"},
+    )
+    checkpoint = {
+        "goal": "deploy nginx",
+        "round": 2,
+        "decisions": [],
+        "observations": {},
+        "successful": [],
+        "task_fingerprints": [],
+        "pending_approval_task_id": None,
+        "total_tasks": 2,
+    }
+    event = RunEvent.create(
+        event_type=RunEventType.HOST_ROUND_COMPLETED,
+        run_id="run-react",
+        conversation_id="conversation-react",
+        sequence=1,
+        task_id="root-react",
+        data={"round": 2, "checkpoint": checkpoint},
+    )
+
+    service._apply_checkpoint_event(event)
+
+    assert repository.get_run("run-react")["host_state"] == checkpoint
+
+
+def test_service_rebuilds_react_checkpoint_with_approved_task_result(tmp_path):
+    repository, service = make_service(tmp_path, [])
+    task_payload = {
+        "id": "change",
+        "agent_id": "orchestrator",
+        "objective": "Create nginx",
+        "completion_criteria": ["Deployment created"],
+        "risk": "write",
+        "workflow_role": "mutation",
+    }
+    approval_result = {
+        "state": "completed",
+        "text": "Deployment created",
+    }
+    repository.create_run(
+        "run-react",
+        "conversation-react",
+        "approval_required",
+        {
+            "mode": "auto",
+            "root_task_id": "root-react",
+            "host_state": {
+                "goal": "deploy nginx",
+                "round": 2,
+                "decisions": [],
+                "observations": {
+                    "change": {
+                        "task": task_payload,
+                        "result": {
+                            "state": "approval_required",
+                            "approval": {"id": "approval-1"},
+                        },
+                        "evaluation": {
+                            "outcome": "blocked",
+                            "reason": "approval required",
+                        },
+                        "actual_agent_id": "orchestrator",
+                    }
+                },
+                "successful": [],
+                "task_fingerprints": ["write-fingerprint"],
+                "pending_approval_task_id": "change",
+                "total_tasks": 1,
+            },
+        },
+    )
+    repository.create_task({
+        "id": "root-react",
+        "run_id": "run-react",
+        "parent_task_id": None,
+        "agent_id": "host",
+        "status": "working",
+    })
+    repository.create_task({
+        "id": "root-react:plan:change",
+        "logical_id": "change",
+        "run_id": "run-react",
+        "parent_task_id": "root-react",
+        "agent_id": "orchestrator",
+        "status": "completed",
+        "delegation_result": approval_result,
+    })
+
+    checkpoint = service._host_checkpoint("run-react")
+
+    assert checkpoint["state"].pending_approval_task_id is None
+    assert checkpoint["state"].observations["change"].result.text == "Deployment created"
+    assert checkpoint["state"].observations["change"].evaluation.outcome == "sufficient"
+    assert "change" in checkpoint["state"].successful
 
 
 @pytest.mark.anyio
@@ -289,3 +393,152 @@ async def test_cancel_stops_active_execution_and_cleans_registry(tmp_path):
     assert [item.type for item in service.events(event.run_id)].count(
         RunEventType.RUN_CANCELLED
     ) == 1
+
+
+@pytest.mark.anyio
+async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
+    tmp_path,
+):
+    repository, service = make_service(tmp_path, [])
+
+    class ResumingHost:
+        async def resume_message_stream(
+            self, text, session_id, *, plan, results, successful
+        ):
+            yield {
+                "type": "plan_created",
+                "summary": plan.summary,
+                "tasks": [
+                    {
+                        **task.model_dump(),
+                        **(
+                            {"checkpoint_state": results[task.id].state}
+                            if task.id in results
+                            else {}
+                        ),
+                    }
+                    for task in plan.tasks
+                ],
+            }
+            yield {
+                "type": "routing",
+                "task_id": "verify",
+                "agent_id": "ops",
+            }
+            yield {
+                "type": "task_started",
+                "task_id": "verify",
+                "agent_id": "ops",
+            }
+            yield {
+                "type": "task_completed",
+                "task_id": "verify",
+                "agent_id": "ops",
+                "result": "nginx Pod Ready",
+                "delegation_result": {
+                    "state": "completed",
+                    "text": "nginx Pod Ready",
+                },
+            }
+            yield {"type": "synthesis_started"}
+            yield {"type": "text", "text": "部署和验证均已完成"}
+            yield {"type": "done"}
+
+    service.auto_host = ResumingHost()
+    repository.create_run(
+        "run-auto",
+        "conv-auto",
+        "approval_required",
+        {
+            "mode": "auto",
+            "request": "部署 nginx",
+            "root_task_id": "root",
+            "host_plan": {
+                "summary": "guarded deployment",
+                "tasks": [
+                    {
+                        "id": "root:plan:security",
+                        "logical_id": "security",
+                        "logical_depends_on": [],
+                        "agent_id": "security",
+                        "objective": "security review",
+                        "completion_criteria": ["review complete"],
+                    },
+                    {
+                        "id": "root:plan:change",
+                        "logical_id": "change",
+                        "logical_depends_on": ["security"],
+                        "agent_id": "orchestrator",
+                        "objective": "create nginx",
+                        "completion_criteria": ["resource created"],
+                    },
+                    {
+                        "id": "root:plan:verify",
+                        "logical_id": "verify",
+                        "logical_depends_on": ["change"],
+                        "agent_id": "ops",
+                        "objective": "verify nginx",
+                        "completion_criteria": ["Pod Ready"],
+                    },
+                ],
+            },
+        },
+    )
+    repository.create_task({
+        "id": "root",
+        "run_id": "run-auto",
+        "parent_task_id": None,
+        "agent_id": "host",
+        "status": "approval_required",
+    })
+    for logical_id, agent_id, status, result in (
+        ("security", "security", "completed", {
+            "state": "completed", "text": "security passed"
+        }),
+        ("change", "orchestrator", "approval_required", {
+            "state": "approval_required", "text": ""
+        }),
+        ("verify", "ops", "pending", None),
+    ):
+        repository.create_task({
+            "id": f"root:plan:{logical_id}",
+            "run_id": "run-auto",
+            "parent_task_id": "root",
+            "agent_id": agent_id,
+            "status": status,
+            "logical_id": logical_id,
+            **({"delegation_result": result} if result else {}),
+        })
+
+    events = await service.resume_after_approval(
+        {
+            "id": "approval-1",
+            "run_id": "run-auto",
+            "agent_id": "orchestrator",
+            "status": "approved",
+        },
+        {
+            "state": "completed",
+            "text": "nginx Deployment created",
+            "specialist_output": {
+                "summary": "nginx Deployment created",
+                "continuation": {"allowed": True},
+            },
+        },
+    )
+
+    assert repository.get_run("run-auto")["status"] == "completed"
+    assert repository.get_task("root:plan:change")["status"] == "completed"
+    assert repository.get_task("root:plan:verify")["status"] == "completed"
+    assert any(
+        event.type == RunEventType.MESSAGE_COMPLETED
+        and event.task_id == "root:plan:verify"
+        and event.data["content"] == "nginx Pod Ready"
+        for event in events
+    )
+    assert any(
+        event.type == RunEventType.MESSAGE_COMPLETED
+        and event.task_id == "root"
+        and event.data["content"] == "部署和验证均已完成"
+        for event in events
+    )

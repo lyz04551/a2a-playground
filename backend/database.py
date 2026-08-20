@@ -37,12 +37,16 @@ def delete_agent(agent_id: str) -> bool:
     return repository.delete_agent(agent_id)
 
 
-def list_conversations() -> list[dict]:
-    return repository.list_conversations()
+def list_conversations(*, limit: int | None = None, offset: int = 0) -> list[dict]:
+    return repository.list_conversations(limit=limit, offset=offset)
 
 
-def list_conversations_by_agent(agent_id: str) -> list[dict]:
-    return repository.list_conversations(agent_id)
+def list_conversations_by_agent(agent_id: str, *, limit: int | None = None, offset: int = 0) -> list[dict]:
+    return repository.list_conversations(agent_id, limit=limit, offset=offset)
+
+
+def count_conversations(agent_id: str | None = None) -> int:
+    return repository.count_conversations(agent_id)
 
 
 def get_conversation(conversation_id: str) -> Optional[dict]:
@@ -82,9 +86,13 @@ def get_message(message_id: str) -> Optional[dict]:
 
 
 def list_events(
-    conversation_id: Optional[str] = None,
+    conversation_id: Optional[str] = None, *, limit: int | None = None, offset: int = 0,
 ) -> list[dict]:
-    return repository.list_events(conversation_id)
+    return repository.list_events(conversation_id, limit=limit, offset=offset)
+
+
+def count_events(conversation_id: Optional[str] = None) -> int:
+    return repository.count_events(conversation_id)
 
 
 def add_event(event: dict) -> dict:

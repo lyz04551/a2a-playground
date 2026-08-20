@@ -1,13 +1,9 @@
 """LangGraph Host Manager — bridges the LangGraph host agent with the playground backend."""
 
-import json
 import logging
-import uuid
 from typing import AsyncIterable, Optional
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
-from backend.host.langgraph.agent import LangGraphHostAgent, RemoteAgentConnections
+from backend.host.langgraph.agent import LangGraphHostAgent
 from backend.host.langgraph.decisions import LangGraphDecisionPort
 from backend.host.orchestration.engine import HostOrchestrationEngine
 from backend.host.orchestration.models import DelegationResult
@@ -38,6 +34,7 @@ class LangGraphHostManager:
             max_concurrency=settings.host_max_concurrency,
             max_tasks=settings.host_max_tasks,
             max_attempts=settings.host_max_attempts,
+            max_rounds=settings.host_max_rounds,
         )
 
     def register_agents_from_db(self, agents: list[dict]):
@@ -81,6 +78,26 @@ class LangGraphHostManager:
         async for event in self._engine.stream(text, session_id):
             yield event
 
+    async def resume_message_stream(
+        self,
+        text: str,
+        session_id: str,
+        *,
+        state=None,
+        plan=None,
+        results=None,
+        successful=None,
+    ) -> AsyncIterable[dict]:
+        async for event in self._engine.stream(
+            text,
+            session_id,
+            state=state,
+            plan=plan,
+            initial_results=results,
+            initial_successful=successful,
+        ):
+            yield event
+
     async def _delegate_task(
         self, run_id: str, agent_id: str, message: str, on_event
     ) -> DelegationResult:
@@ -91,12 +108,14 @@ class LangGraphHostManager:
             )
         response = {"state": "completed", "text": ""}
         accumulated = ""
+        specialist_output = None
         async for event in self._gateway.delegate_stream(run_id, agent, message):
             event_type = str(event.get("type") or "")
             if event_type in {"tool_call", "tool_result", "status"}:
                 await on_event(event)
             if event_type == "text":
                 accumulated += str(event.get("text") or "")
+                await on_event(event)
             elif event_type == "done":
                 response = event
                 response["text"] = str(event.get("text") or accumulated)
@@ -104,20 +123,26 @@ class LangGraphHostManager:
                 response = {"state": "failed", "error": event.get("text")}
             elif not event_type:
                 response = event
+            if event.get("specialist_output") is not None:
+                specialist_output = event["specialist_output"]
         state = str(response.get("state") or "").replace("_", "-").lower()
         if response.get("approval") or state == "input-required":
             return DelegationResult(
                 state="approval_required",
                 text=str(response.get("text") or ""),
+                output=specialist_output,
                 approval=response.get("approval"),
             )
         if state in {"failed", "error", "rejected", "cancelled", "canceled"}:
             return DelegationResult(
                 state="failed",
+                output=specialist_output,
                 error=str(response.get("error") or response.get("text") or "remote execution failed"),
             )
         return DelegationResult(
-            state="completed", text=str(response.get("text") or "")
+            state="completed",
+            text=str(response.get("text") or ""),
+            output=specialist_output,
         )
 
 

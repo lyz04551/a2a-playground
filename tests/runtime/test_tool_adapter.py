@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from a2a_runtime.config import ToolPolicyConfig
-from a2a_runtime.models import ApprovalRequired
+from a2a_runtime.models import ApprovalRequired, PolicyAction
 from a2a_runtime.tool_adapter import MCPToolAdapter, schema_to_model
 from a2a_runtime.tool_policy import ToolPolicy
 
@@ -166,3 +166,23 @@ def test_denied_tools_are_not_exposed_to_the_model():
     )
 
     assert [tool.name for tool in tools] == ["get_k8s_pod_logs"]
+
+
+@pytest.mark.parametrize(
+    "tool_name",
+    [
+        "drain_k8s_node",
+        "register_k8s_cluster",
+        "unregister_k8s_cluster",
+        "helm_uninstall_release",
+        "run_command_in_k8s_pod",
+        "upload_file_to_k8s_pod",
+        "delete_pod_file",
+    ],
+)
+def test_agent_can_approval_gate_every_live_mutating_tool(tool_name):
+    policy = ToolPolicy(
+        ToolPolicyConfig(approval_required=[tool_name])
+    )
+
+    assert policy.classify(tool_name).action is PolicyAction.APPROVAL_REQUIRED

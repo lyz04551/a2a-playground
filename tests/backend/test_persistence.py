@@ -119,3 +119,38 @@ def test_sqlite_enables_wal_and_common_lookup_indexes(tmp_path):
         ("orchestration_tasks", "ix_tasks_run_status"),
         ("approvals", "ix_approvals_run_status"),
     } <= indexes
+
+
+def test_repository_merges_run_and_task_checkpoint_data(tmp_path):
+    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository.initialize()
+    repository.create_run(
+        "run-1", "conv-1", "running", {"title": "deploy nginx"}
+    )
+    repository.create_task({
+        "id": "task-1",
+        "run_id": "run-1",
+        "parent_task_id": None,
+        "agent_id": "host",
+        "status": "working",
+        "objective": "deploy",
+    })
+
+    repository.update_run_data(
+        "run-1", {"host_plan": {"summary": "guarded deployment"}}
+    )
+    repository.update_task_data(
+        "task-1",
+        {
+            "logical_task_id": "security-review",
+            "delegation_result": {"state": "completed"},
+        },
+    )
+
+    run = repository.get_run("run-1")
+    task = repository.get_task("task-1")
+    assert run["title"] == "deploy nginx"
+    assert run["host_plan"]["summary"] == "guarded deployment"
+    assert task["objective"] == "deploy"
+    assert task["logical_task_id"] == "security-review"
+    assert task["delegation_result"] == {"state": "completed"}

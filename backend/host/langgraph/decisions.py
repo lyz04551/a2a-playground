@@ -9,10 +9,16 @@ from pydantic import BaseModel, ValidationError
 from backend.host.orchestration.models import (
     DelegationResult,
     Evaluation,
+    HostDecision,
     HostPlan,
+    HostRunState,
     PlannedTask,
 )
-from backend.host.orchestration.validation import validate_plan
+from backend.host.orchestration.validation import (
+    PlanValidationError,
+    validate_decision,
+    validate_plan,
+)
 
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -22,6 +28,65 @@ class LangGraphDecisionPort:
     def __init__(self, model):
         self._model = model
 
+    async def decide_next(
+        self,
+        request: str,
+        agents: list[dict],
+        state: HostRunState,
+    ) -> HostDecision:
+        compact_state = state.model_dump(mode="json")
+        for observation in compact_state.get("observations", {}).values():
+            result = observation.get("result", {})
+            result["text"] = str(result.get("text") or "")[:2000]
+        payload = {
+            "request": request,
+            "available_agents": agents,
+            "state": compact_state,
+        }
+        instruction = """Choose exactly one next Host action from the persisted state.
+
+- delegate: create one to three independent tasks for the current round. Tasks in
+  this decision run in parallel. Do not speculate about future rounds.
+- clarify: ask one essential question when the observations show that user intent
+  or authority is missing.
+- request_approval: pause for an explicitly described write approval.
+- complete: answer only when the goal is satisfied and any mutation was verified.
+- stop: terminate when continuing is unsafe or impossible.
+
+Base the decision on structured observations, not keywords. Use only available
+Agent IDs and declared capabilities. Never repeat semantic work or a rejected
+write. A Kubernetes mutation requires a successful Security precheck observation;
+after mutation, obtain an Ops verification observation before completing. Return
+only a concise public reason. Do not reveal hidden chain-of-thought."""
+        try:
+            profiles = {agent["id"]: agent for agent in agents}
+            for semantic_attempt in range(2):
+                decision = await self._invoke_structured(
+                    HostDecision, instruction, payload
+                )
+                try:
+                    return validate_decision(decision, profiles, state)
+                except PlanValidationError as exc:
+                    if semantic_attempt:
+                        raise
+                    payload = {
+                        **payload,
+                        "previous_decision_error": str(exc),
+                        "previous_decision": decision.model_dump(
+                            mode="json"
+                        ),
+                        "correction": (
+                            "Choose a different action that satisfies the "
+                            "deterministic guardrail. Do not repeat the "
+                            "rejected decision."
+                        ),
+                    }
+            raise AssertionError("unreachable semantic decision loop")
+        except Exception as exc:
+            raise RuntimeError(
+                "Unable to create a valid Host decision"
+            ) from exc
+
     async def create_plan(
         self, request: str, agents: list[dict]
     ) -> HostPlan:
@@ -29,13 +94,30 @@ class LangGraphDecisionPort:
         try:
             plan = await self._invoke_structured(
                 HostPlan,
-                """Create a bounded Host orchestration plan as JSON.
-Use one task for simple requests and multiple tasks only when necessary.
+                """Choose exactly one Host action and return it as JSON.
+
+- direct_response: respond directly when no registered Agent capability, external
+  observation, or execution is needed. Put the complete user-facing answer in response
+  and return an empty tasks list.
+- clarification: ask one concise question when essential information is missing and
+  different answers would materially change the work. Put that question in response
+  and return an empty tasks list.
+- delegate: use registered Agents when their specialist capability, external evidence,
+  or execution is needed. Leave response empty and create one task for simple work,
+  using multiple tasks only when necessary.
+
+Decide from the request and available capabilities; do not classify by fixed keywords.
 Independent tasks may share no dependencies; serial tasks must name their
 dependencies. Use only stable agent IDs from available_agents. Never assign
 write work to a read-only Agent. The Host performs the final synthesis, so do
 not create a task whose sole purpose is combining or summarizing other task
-results. Maximum six tasks and two attempts each.""",
+results. Every delegated task must declare the most specific required_skill
+from the selected Agent card, relevant required_tags, and a workflow_role.
+For a Kubernetes deployment mutation, create a Security Agent precheck task
+using its declared security skill, then a mutation task depending on it with
+risk set to write, then an Ops verification task depending on the mutation.
+An Ops resource-conflict check does not replace the Security Agent precheck.
+Maximum six tasks and two attempts each.""",
                 payload,
             )
             profiles = {agent["id"]: agent for agent in agents}
@@ -46,6 +128,27 @@ results. Maximum six tasks and two attempts each.""",
     async def evaluate(
         self, task: PlannedTask, result: DelegationResult
     ) -> Evaluation:
+        if result.state == "approval_required":
+            return Evaluation(
+                outcome="blocked", reason="approval required"
+            )
+        if result.state == "failed":
+            return Evaluation(
+                outcome="failed",
+                reason=result.error or "delegated Agent failed",
+            )
+        if (
+            result.output is not None
+            and result.output.continuation.allowed is False
+        ):
+            return Evaluation(
+                outcome="blocked",
+                reason=(
+                    result.output.continuation.reason
+                    or result.output.summary
+                    or "specialist Agent blocked continuation"
+                ),
+            )
         return await self._invoke_structured(
             Evaluation,
             """Evaluate the Agent result against the completion criteria.

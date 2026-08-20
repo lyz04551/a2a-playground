@@ -1,0 +1,35 @@
+agent_id: k8s-capacity-planner
+name: K8s Capacity Planner
+description: Kubernetes CPU, memory, IP, Pod density, requests, limits, and HPA capacity analysis.
+read_only: true
+risk_level: read_only
+limitations:
+  - reports current snapshots when historical metrics are unavailable
+priority: 12
+port: 8057
+public_url: ${AGENT_PUBLIC_URL}
+mcp_url: ${K8S_MCP_URL}
+skills:
+  - id: cluster.capacity_plan
+    name: Kubernetes Capacity Planning
+    description: Analyze resource hotspots, Pod density, IP pressure, requests, limits, and HPA coverage.
+    tags: [kubernetes, capacity, cpu, memory, hpa, scheduling]
+    examples:
+      - Assess whether the cluster has capacity for another workload.
+tool_policy:
+  allow:
+    - list_k8s_clusters
+    - list_k8s_namespace
+    - list_k8s_node
+    - list_k8s_pod
+    - get_k8s_top_node
+    - get_k8s_top_pod
+    - get_k8s_node_resource_usage
+    - get_k8s_node_ip_usage
+    - get_k8s_pod_count_running_on_node
+    - get_k8s_pod_resource_usage
+    - get_k8s_deployment_hpa_list
+    - list_k8s_resource
+    - get_k8s_resource
+  deny: []
+  approval_required: []

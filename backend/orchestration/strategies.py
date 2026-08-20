@@ -433,6 +433,7 @@ class _Delegation:
     routed: bool = False
     terminal: bool = False
     awaiting_approval: bool = False
+    output: str = ""
 
 
 class AutoExecutionStrategy(_RunBoundStrategy):
@@ -655,6 +656,36 @@ class AutoExecutionStrategy(_RunBoundStrategy):
             )
             return events
 
+        def register_structured_tasks(
+            items: object,
+        ) -> list[dict[str, Any]]:
+            normalized = []
+            for item in items if isinstance(items, list) else []:
+                if not isinstance(item, Mapping):
+                    continue
+                logical_id = str(item.get("id") or "")
+                agent_id = str(item.get("agent_id") or "")
+                if logical_id and logical_id not in by_logical_id:
+                    delegation = new_delegation(
+                        agent_id,
+                        logical_task_id=logical_id,
+                    )
+                    if item.get("checkpoint_state") in {
+                        "completed", "failed"
+                    }:
+                        delegation.terminal = True
+                normalized.append({
+                    **dict(item),
+                    "logical_id": logical_id,
+                    "logical_depends_on": list(item.get("depends_on", [])),
+                    "id": f"{root_task_id}:plan:{logical_id}",
+                    "depends_on": [
+                        f"{root_task_id}:plan:{dependency}"
+                        for dependency in item.get("depends_on", [])
+                    ],
+                })
+            return normalized
+
         yield builder.create(
             RunEventType.HOST_PLANNING,
             task_id=root_task_id,
@@ -780,26 +811,47 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                                 "result": upstream.get("result", ""),
                             },
                         )
+                elif event_type == "round_started":
+                    yield builder.create(
+                        RunEventType.HOST_ROUND_STARTED,
+                        task_id=root_task_id,
+                        parent_task_id=None,
+                        data={
+                            "round": upstream.get("round"),
+                            "checkpoint": upstream.get("checkpoint"),
+                        },
+                    )
+                elif event_type == "decision_created":
+                    decision_tasks = register_structured_tasks(
+                        upstream.get("tasks", [])
+                    )
+                    yield builder.create(
+                        RunEventType.HOST_DECISION_CREATED,
+                        task_id=root_task_id,
+                        parent_task_id=None,
+                        data={
+                            "round": upstream.get("round"),
+                            "action": upstream.get("action", ""),
+                            "reason": upstream.get("reason", ""),
+                            "tasks": decision_tasks,
+                            "checkpoint": upstream.get("checkpoint"),
+                        },
+                    )
+                elif event_type == "round_completed":
+                    yield builder.create(
+                        RunEventType.HOST_ROUND_COMPLETED,
+                        task_id=root_task_id,
+                        parent_task_id=None,
+                        data={
+                            "round": upstream.get("round"),
+                            "task_ids": upstream.get("task_ids", []),
+                            "checkpoint": upstream.get("checkpoint"),
+                        },
+                    )
                 elif event_type == "plan_created":
-                    plan_tasks = []
-                    for item in upstream.get("tasks", []):
-                        if not isinstance(item, Mapping):
-                            continue
-                        logical_id = str(item.get("id") or "")
-                        agent_id = str(item.get("agent_id") or "")
-                        if logical_id and logical_id not in by_logical_id:
-                            new_delegation(
-                                agent_id,
-                                logical_task_id=logical_id,
-                            )
-                        plan_tasks.append({
-                            **dict(item),
-                            "id": f"{root_task_id}:plan:{logical_id}",
-                            "depends_on": [
-                                f"{root_task_id}:plan:{dependency}"
-                                for dependency in item.get("depends_on", [])
-                            ],
-                        })
+                    plan_tasks = register_structured_tasks(
+                        upstream.get("tasks", [])
+                    )
                     yield builder.create(
                         RunEventType.HOST_PLAN_CREATED,
                         task_id=root_task_id,
@@ -914,6 +966,19 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                         "task_failed": RunEventType.TASK_FAILED,
                         "task_blocked": RunEventType.TASK_BLOCKED,
                     }[event_type]
+                    result_text = str(
+                        upstream.get("result") or delegation.output or ""
+                    )
+                    if result_text:
+                        yield builder.create(
+                            RunEventType.MESSAGE_COMPLETED,
+                            task_id=delegation.task_id,
+                            parent_task_id=root_task_id,
+                            data={
+                                "agent_id": delegation.agent_id,
+                                "content": result_text,
+                            },
+                        )
                     yield builder.create(
                         normalized_type,
                         task_id=delegation.task_id,
@@ -925,6 +990,10 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                             "result": upstream.get("result", ""),
                             "error": upstream.get("error", ""),
                             "reason": upstream.get("reason", ""),
+                            "delegation_result": upstream.get(
+                                "delegation_result"
+                            ),
+                            "evaluation": upstream.get("evaluation"),
                         },
                     )
                 elif event_type == "synthesis_started":
@@ -954,18 +1023,38 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                         data={
                             "agent_id": delegation.agent_id,
                             "approval": dict(approval),
+                            "delegation_result": upstream.get(
+                                "delegation_result"
+                            ),
+                            "evaluation": upstream.get("evaluation"),
                         },
                     )
                 elif event_type == "text":
                     content = str(upstream.get("text") or "")
                     if content:
-                        accumulated += content
-                        yield builder.create(
-                            RunEventType.MESSAGE_DELTA,
-                            task_id=root_task_id,
-                            parent_task_id=None,
-                            data={"content": content},
+                        logical_task_id = str(
+                            upstream.get("task_id") or ""
                         )
+                        delegation = by_logical_id.get(logical_task_id)
+                        if delegation is not None:
+                            delegation.output += content
+                            yield builder.create(
+                                RunEventType.MESSAGE_DELTA,
+                                task_id=delegation.task_id,
+                                parent_task_id=root_task_id,
+                                data={
+                                    "agent_id": delegation.agent_id,
+                                    "content": content,
+                                },
+                            )
+                        else:
+                            accumulated += content
+                            yield builder.create(
+                                RunEventType.MESSAGE_DELTA,
+                                task_id=root_task_id,
+                                parent_task_id=None,
+                                data={"content": content},
+                            )
                 elif event_type == "error":
                     for event in failure_events(
                         _failure_text(upstream)

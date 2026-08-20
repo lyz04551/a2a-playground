@@ -1,28 +1,38 @@
 agent_id: k8s-ops
 name: K8s Ops Agent
-description: Read-only Kubernetes diagnostics, logs, events, health, and resource inspection.
-read_only: true
-risk_level: read_only
+description: Kubernetes inspection, diagnostics, logs, events, resource usage, and approved Pod debugging.
+read_only: false
+risk_level: write_approval
 limitations:
-  - cannot mutate cluster resources
+  - Pod mutations and command execution require approval
 priority: 20
 port: 8052
 public_url: ${AGENT_PUBLIC_URL}
 mcp_url: ${K8S_MCP_URL}
 skills:
-  - id: pod.diagnose
-    name: Kubernetes Diagnostics
-    description: Diagnose pods, deployments, nodes, events, logs, and resource pressure.
-    tags: [kubernetes, diagnostics, logs, monitoring]
+  - id: cluster.inspect
+    name: Kubernetes Cluster Inspection
+    description: Inspect clusters, resources, events, logs, and resource pressure.
+    tags: [kubernetes, operations, inspection, events, logs]
     examples:
-      - Diagnose why a Pod is in CrashLoopBackOff.
       - Check the health and resource usage of a namespace.
+  - id: pod.debug
+    name: Kubernetes Pod Debugging
+    description: Inspect Pod relationships and perform explicitly approved command or file operations.
+    tags: [kubernetes, pod, debugging, exec, files]
+    examples:
+      - Inspect Pod logs, files, services, endpoints, and storage links.
 tool_policy:
   allow:
     - list_k8s_*
     - get_k8s_*
     - get_pod_*
     - describe_k8s_*
-  deny:
-    - get_k8s_pod_linked_env
-  approval_required: []
+    - list_files_in_k8s_pod
+    - list_pod_all_files
+  deny: []
+  approval_required:
+    - run_command_in_k8s_pod
+    - upload_file_to_k8s_pod
+    - delete_pod_file
+    - delete_k8s_pod

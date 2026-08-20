@@ -9,9 +9,14 @@ The current architecture keeps every Kubernetes specialist as an independent
 
 | Service | Stable ID | Responsibility | MCP policy |
 |---|---|---|---|
-| K8s Ops | `k8s-ops` | Logs, events, diagnostics, health | Read-only |
-| K8s Orchestrator | `k8s-orchestrator` | Plans and approved mutations | Every write requires approval |
+| K8s Incident Responder | `k8s-incident-responder` | Evidence-driven incident diagnosis | Read-only |
+| K8s Capacity Planner | `k8s-capacity-planner` | CPU, memory, IP, Pod density and HPA planning | Read-only |
+| K8s GPU Specialist | `k8s-gpu-specialist` | GPU workload generation, deployment and diagnosis | Writes require approval |
+| K8s Ops | `k8s-ops` | Inspection and approved Pod debugging | Writes require approval |
+| K8s Resource Orchestrator | `k8s-orchestrator` | Creates and manages Kubernetes resources | Every write requires approval |
 | K8s Security | `k8s-security` | Workload, RBAC, image and network assessment | Read-only |
+| K8s Infrastructure | `k8s-infrastructure` | Node, class and cluster registry operations | Writes require approval |
+| K8s Helm | `k8s-helm` | Helm release lifecycle | Writes require approval |
 
 The LangGraph Host lives in the backend and delegates only through A2A. It routes
 with stable IDs and reuses each child Agent's A2A context inside an orchestration
@@ -25,26 +30,32 @@ status, and artifacts. Direct single-Agent chat remains supported.
 ### One-command startup
 
 ```bash
-cp .env.example .env
-# Add DEEPSEEK_API_KEY to .env
+# For Docker Compose, create a root .env from the service examples:
+cp backend/.env.example .env
+# Add any AGENT_LLM_* values you want from agents/k8s-ops/.env.example,
+# then fill the Host and Agent API keys locally.
 docker compose up --build
 ```
 
-Open `http://localhost:5173`. Compose starts the frontend, backend, and three
-independent A2A Agent servers on ports 8051–8053. The backend discovers them through
+Open `http://localhost:5173`. Compose starts the frontend, backend, and eight
+independent A2A Agent servers on ports 8051–8058. The backend discovers them through
 their Agent Cards and stores data in `/app/data/playground.db`.
+
+The backend has no startup dependency on these local Agents. It remains healthy with
+zero or partial local Agents, and arbitrary external A2A servers can be registered at
+runtime through the Agent API or UI.
 
 The existing JSON files are imported into SQLite once on first startup and remain
 unchanged as backups.
 
 ### Safety model
 
-- Read-only Ops and Security tools execute automatically.
+- Read-only inspection tools execute automatically.
 - Kubernetes mutations stop the A2A task in `input_required`.
 - The Playground shows the exact tool, target, arguments, and action digest.
 - Approval resumes the same Agent run; changed arguments require a new approval.
-- Pod exec, file mutation, cluster registration, node drain, force deletion, and
-  Helm uninstall are denied by the MVP global policy.
+- Pod exec/file operations, cluster registry changes, node maintenance, resource
+  deletion and Helm mutations are exposed only by their owning Agent and require approval.
 
 ---
 
@@ -60,7 +71,7 @@ unchanged as backups.
                                          │
                                          v
                                  ┌──────────────────┐     ┌─────────────────────┐
-                                 │  JSON File DB     │     │  Host Agent         │
+                                 │  SQLite DB        │     │  Host Agent         │
                                  │  (data/*.json)    │     │  LangGraph / ADK    │
                                  └──────────────────┘     │  + DeepSeek Chat     │
                                                           └─────────────────────┘
@@ -76,7 +87,7 @@ unchanged as backups.
 | **Single Chat** | Chat with individual agents, SSE streaming responses |
 | **Multi-Agent Chat** | Host Agent routes requests to the best sub-agent via LLM |
 | **Tool Visibility** | Tool calls (send_task, list_remote_agents) shown in chat |
-| **Persistent History** | Conversations, messages, and events saved to JSON files |
+| **Persistent History** | Conversations, messages, runs, approvals, and events saved transactionally in SQLite |
 | **Task Events** | Full event log with tool_call, tool_result, routing events |
 | **Pagination** | Agent cards paginated (9 per page) |
 
@@ -238,8 +249,7 @@ All endpoints accept `POST` with `Content-Type: application/json`.
 | `POST /api/host/agents` | `{}` | List agents available for routing |
 | `POST /api/host/send` | `{"content": "..."}` | Keyword-based routing, blocking |
 | `POST /api/host/send-stream` | `{"content": "..."}` | Keyword-based routing, SSE |
-| `POST /api/host-adk/send` | `{"content": "..."}` | Google ADK routing, SSE |
-| `POST /api/host-lg/send` | `{"content": "..."}` | **LangGraph routing, SSE (recommended)** |
+| `POST /api/runs/stream` | `{"mode":"auto","message":"..."}` | Unified Host orchestration with versioned SSE |
 
 ---
 
@@ -262,7 +272,8 @@ a2a-playground/
 └── frontend/
     ├── src/
     │   ├── App.jsx            # Layout + routing
-    │   ├── api/api.js         # API client (HTTP + SSE)
+    │   ├── api/api.js         # JSON API client
+    │   ├── api/runStream.js   # Versioned Run SSE client with replay/reconnect
     │   └── pages/
     │       ├── AgentsPage.jsx     # Agent management
     │       ├── ChatPage.jsx       # Single agent chat
@@ -279,7 +290,15 @@ a2a-playground/
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `DEEPSEEK_API_KEY` | Yes | API key for Host Agent route decisions |
+| `HOST_LLM_API_KEY` | Yes | Host Agent OpenAI-compatible API key |
+| `HOST_LLM_BASE_URL` | Yes | Host model endpoint, for example DeepSeek or a local vLLM `/v1` URL |
+| `HOST_LLM_MODEL` | Yes | Host model name |
+| `HOST_LLM_PROVIDER` | No | Display label such as `deepseek` or `vllm` |
+| `AGENT_LLM_API_KEY` | Yes | K8s specialist Agents' independent API key |
+| `AGENT_LLM_BASE_URL` | Yes | K8s specialist Agents' OpenAI-compatible endpoint |
+| `AGENT_LLM_MODEL` | Yes | K8s specialist Agents' model name |
+| `K8S_MCP_URL` | Yes | MCP endpoint; use `/mcp` for Streamable HTTP or `/sse` for legacy HTTP+SSE |
+| `MCP_TRANSPORT` | No | `streamable_http` or `sse`; defaults to `sse` |
 | `PLAYGROUND_API_KEY` | No | Bearer token required by `/api/*` except `/api/ping` when set |
 | `PLAYGROUND_CORS_ORIGINS` | No | Comma-separated allowed frontend origins |
 | `PLAYGROUND_ALLOW_PRIVATE_AGENTS` | No | Allow private/loopback Agent addresses for trusted local networks |
@@ -287,6 +306,10 @@ a2a-playground/
 | `HOST_MAX_TASKS` | No | Maximum Auto-mode plan nodes, default `6` |
 | `HOST_MAX_CONCURRENCY` | No | Maximum parallel Agent delegations, default `3` |
 | `HOST_MAX_ATTEMPTS` | No | Attempts per Agent before replacement, default `2` |
+
+Host and K8s Agents are configured independently. Both accept OpenAI-compatible
+endpoints. The legacy `DEEPSEEK_API_KEY` and `DEEPSEEK_BASE_URL` variables remain
+supported as code-level fallbacks for existing non-Compose deployments.
 
 ### Auto-mode orchestration
 

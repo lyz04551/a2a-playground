@@ -5,6 +5,7 @@ from sqlalchemy import (
     Column,
     ForeignKey,
     Index,
+    Integer,
     MetaData,
     String,
     Table,
@@ -52,9 +53,15 @@ events = Table(
     Column("conversation_id", String, nullable=False),
     Column("task_id", String, nullable=False),
     Column("event_type", String, nullable=False),
+    Column("run_id", String, nullable=True),
+    Column("sequence", Integer, nullable=True),
+    Column("created_at", String, nullable=True),
     Column("data", JSON, nullable=False),
 )
 Index("ix_events_conversation_type", events.c.conversation_id, events.c.event_type)
+Index("ix_events_run_sequence", events.c.run_id, events.c.sequence, unique=True)
+Index("ix_events_conversation_created", events.c.conversation_id, events.c.created_at)
+Index("ix_events_type_created", events.c.event_type, events.c.created_at)
 
 runs = Table(
     "orchestration_runs",

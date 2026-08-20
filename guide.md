@@ -2,11 +2,11 @@
 
 本文以当前代码为准，包含完整启动、健康检查、多智能体执行流程、回归测试和常见故障排查。
 
-## 1. 先启动三个 Agent、Backend 和 Frontend
+## 1. 启动 Backend、可选 Agent 和 Frontend
 
 以下命令都在项目根目录执行。首次运行前先按照第 4、6 节配置 `.env` 并安装依赖。
 
-### 终端 1：K8s Orchestrator Agent
+### 终端 1：K8s 资源编排 Agent
 
 ```bash
 agents/.venv/bin/python agents/k8s-orchestrator/main.py
@@ -24,11 +24,22 @@ agents/.venv/bin/python agents/k8s-ops/main.py
 agents/.venv/bin/python agents/k8s-security/main.py
 ```
 
-### 终端 4：Backend
+其他可选 Agent：
+
+```bash
+agents/.venv/bin/python agents/k8s-infrastructure/main.py
+agents/.venv/bin/python agents/k8s-helm/main.py
+agents/.venv/bin/python agents/k8s-incident-responder/main.py
+agents/.venv/bin/python agents/k8s-capacity-planner/main.py
+agents/.venv/bin/python agents/k8s-gpu-specialist/main.py
+```
+
+### Backend
 
 ```bash
 export PLAYGROUND_ALLOW_PRIVATE_AGENTS=true
-export BOOTSTRAP_AGENTS='[{"id":"k8s-ops","url":"http://127.0.0.1:8052","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://127.0.0.1:8051","risk_level":"write_approval"},{"id":"k8s-security","url":"http://127.0.0.1:8053","risk_level":"read_only"}]'
+# 可选：只填写当前希望预注册且已经可访问的 Agent；也可以不设置。
+export BOOTSTRAP_AGENTS='[]'
 
 backend/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8050
 ```
@@ -39,7 +50,7 @@ backend/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 805
 npm --prefix frontend run dev -- --host 127.0.0.1
 ```
 
-启动后访问 <http://127.0.0.1:5173>。推荐按三个 Agent → Backend → Frontend 的顺序启动，确保 Backend 启动时可以自动注册 Agent。
+启动后访问 <http://127.0.0.1:5173>。Backend 不依赖本地 Agent，可在零 Agent 时先启动；之后可从 Agent 页面注册本地或外部 A2A Server。
 
 ## 2. 服务与端口
 
@@ -47,9 +58,14 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 | --- | ---: | --- |
 | Frontend | 5173 | Vite 开发服务器 |
 | Backend | 8050 | FastAPI、Host Agent、Run/Event/Approval API |
-| K8s Orchestrator Agent | 8051 | 规划和需要审批的写操作 |
+| K8s 资源编排 Agent | 8051 | 通过 MCP 创建和管理 Kubernetes 资源，写操作需要审批 |
 | K8s Ops Agent | 8052 | 集群运行状态与运维诊断 |
 | K8s Security Agent | 8053 | RBAC、配置和安全风险审计 |
+| K8s Infrastructure Agent | 8054 | 节点、默认类和集群注册管理 |
+| K8s Helm Agent | 8055 | Helm release 生命周期 |
+| K8s Incident Responder | 8056 | 故障证据链诊断 |
+| K8s Capacity Planner | 8057 | 集群容量规划 |
+| K8s GPU Specialist | 8058 | GPU/大模型工作负载管理 |
 
 主要页面：
 
@@ -65,7 +81,7 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 - Python 3.11 或更高版本。
 - Node.js 18 或更高版本。
 - 可用的 DeepSeek/OpenAI 兼容模型服务。
-- 可选：可访问的 Kubernetes MCP SSE 服务。
+- 可选：可访问的 Kubernetes MCP Streamable HTTP 或旧 SSE 服务。
 - 可选：Docker 和 Docker Compose。
 
 项目目录：
@@ -76,14 +92,21 @@ cd /Users/liyangzhong/Documents/GitHub/a2a-samples/a2a-playground1
 
 ## 4. 环境变量
 
-Backend 从启动目录的 `.env` 或当前 Shell 环境读取配置。三个 Agent 还会分别读取自己目录下的 `.env`。
+Backend 从启动目录的 `.env` 或当前 Shell 环境读取配置。每个 Agent 还会分别读取自己目录下的 `.env`。
 
-Backend 可使用项目根目录 `.env`：
+Backend 直接启动时复制独立示例：
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+`backend/.env` 示例：
 
 ```dotenv
-DEEPSEEK_API_KEY=your-key
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-chat
+HOST_LLM_PROVIDER=deepseek
+HOST_LLM_API_KEY=your-host-key
+HOST_LLM_BASE_URL=https://api.deepseek.com/v1
+HOST_LLM_MODEL=deepseek-chat
 
 PLAYGROUND_ALLOW_PRIVATE_AGENTS=true
 ```
@@ -97,28 +120,47 @@ PLAYGROUND_ALLOW_PRIVATE_AGENTS=true
 
 只有需要覆盖默认值时，才把这些变量写入 `.env`。
 
-每个 Agent 目录的 `.env` 至少配置：
+每个 Agent 都有独立示例，按需分别复制：
+
+```bash
+cp agents/k8s-ops/.env.example agents/k8s-ops/.env
+cp agents/k8s-security/.env.example agents/k8s-security/.env
+cp agents/k8s-orchestrator/.env.example agents/k8s-orchestrator/.env
+cp agents/k8s-infrastructure/.env.example agents/k8s-infrastructure/.env
+cp agents/k8s-helm/.env.example agents/k8s-helm/.env
+cp agents/k8s-incident-responder/.env.example agents/k8s-incident-responder/.env
+cp agents/k8s-capacity-planner/.env.example agents/k8s-capacity-planner/.env
+cp agents/k8s-gpu-specialist/.env.example agents/k8s-gpu-specialist/.env
+```
+
+每份 Agent `.env` 至少配置：
 
 ```dotenv
-DEEPSEEK_API_KEY=your-key
-DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
-LLM_MODEL=deepseek-chat
-K8S_MCP_URL=http://your-mcp-host:9096/sse
+AGENT_LLM_PROVIDER=vllm
+AGENT_LLM_API_KEY=your-agent-key
+AGENT_LLM_BASE_URL=http://your-vllm-host:4000/v1
+AGENT_LLM_MODEL=your-openai-compatible-model
+K8S_MCP_URL=http://10.2.0.57:9096/mcp
+MCP_TRANSPORT=streamable_http
 ```
 
-对应文件：
+新版 Streamable HTTP MCP Server 应改为：
 
-```text
-agents/k8s-orchestrator/.env
-agents/k8s-ops/.env
-agents/k8s-security/.env
+```dotenv
+K8S_MCP_URL=http://your-mcp-host:9096/mcp
+MCP_TRANSPORT=streamable_http
 ```
+
+`MCP_TRANSPORT` 只接受 `sse` 和 `streamable_http`；未配置时默认使用
+`sse`。客户端不会自动探测或回退，请确保 endpoint 与 transport 匹配。
+
+每个 `agents/k8s-*` 目录都使用自己的 `.env`，可以单独配置、启动或迁移。
 
 不要将真实 API Key 提交到 Git。
 
 ## 5. 可选方式：Docker Compose 启动全部服务
 
-Docker Compose 会启动三个 Agent、Backend 和 Frontend：
+Docker Compose 会启动八个可选本地 Agent、Backend 和 Frontend。Backend 与 Agent 没有启动依赖：
 
 ```bash
 docker compose up --build
@@ -137,7 +179,7 @@ docker compose down
 
 ## 6. 首次安装依赖
 
-三个 Agent 共用 `agents/.venv`：
+八个 Agent 共用 `agents/.venv`：
 
 ```bash
 python3 -m venv agents/.venv
@@ -150,7 +192,7 @@ Backend 使用独立虚拟环境：
 ```bash
 python3 -m venv backend/.venv
 backend/.venv/bin/pip install --upgrade pip
-backend/.venv/bin/pip install fastapi uvicorn httpx pydantic python-dotenv a2a-sdk langgraph langchain-openai langchain-core google-adk
+backend/.venv/bin/pip install fastapi uvicorn httpx pydantic python-dotenv a2a-sdk langgraph langchain-openai langchain-core
 ```
 
 安装前端依赖：
@@ -161,7 +203,7 @@ npm --prefix frontend install
 
 ## 7. 手动启动命令说明
 
-### 7.1 启动三个 Agent
+### 7.1 启动所需 Agent
 
 分别在三个终端执行：
 

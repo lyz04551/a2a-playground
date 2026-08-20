@@ -485,6 +485,69 @@ async def test_auto_places_remote_tool_events_under_the_planned_agent_task():
 
 
 @pytest.mark.anyio
+async def test_auto_keeps_agent_output_on_child_task_and_host_summary_on_root():
+    host = FakeHostManager([
+        {
+            "type": "plan_created",
+            "summary": "inspect",
+            "tasks": [{
+                "id": "inspect",
+                "agent_id": "ops",
+                "objective": "Inspect workload",
+                "depends_on": [],
+            }],
+        },
+        {"type": "routing", "task_id": "inspect", "agent_id": "ops"},
+        {
+            "type": "text",
+            "task_id": "inspect",
+            "agent_id": "ops",
+            "text": "Pod is healthy",
+        },
+        {
+            "type": "task_completed",
+            "task_id": "inspect",
+            "agent_id": "ops",
+            "result": "Pod is healthy",
+        },
+        {"type": "synthesis_started"},
+        {"type": "text", "text": "Host summary"},
+        {"type": "done"},
+    ])
+
+    events = await _collect(
+        _auto_strategy(host), RunCommand(mode="auto", message="Inspect")
+    )
+
+    child_id = "task-host:plan:inspect"
+    child_messages = [
+        event for event in events
+        if event.task_id == child_id
+        and event.type in {
+            RunEventType.MESSAGE_DELTA,
+            RunEventType.MESSAGE_COMPLETED,
+        }
+    ]
+    root_messages = [
+        event for event in events
+        if event.task_id == "task-host"
+        and event.type in {
+            RunEventType.MESSAGE_DELTA,
+            RunEventType.MESSAGE_COMPLETED,
+        }
+    ]
+
+    assert [event.data["content"] for event in child_messages] == [
+        "Pod is healthy",
+        "Pod is healthy",
+    ]
+    assert [event.data["content"] for event in root_messages] == [
+        "Host summary",
+        "Host summary",
+    ]
+
+
+@pytest.mark.anyio
 async def test_auto_uses_pending_delegation_for_approval_before_routing():
     host = FakeHostManager(
         [
@@ -917,6 +980,7 @@ async def test_auto_normalizes_structured_orchestration_lifecycle():
         RunEventType.TASK_DELEGATED,
         RunEventType.TASK_STARTED,
         RunEventType.TASK_EVALUATED,
+        RunEventType.MESSAGE_COMPLETED,
         RunEventType.TASK_COMPLETED,
         RunEventType.HOST_SYNTHESIS_STARTED,
         RunEventType.MESSAGE_DELTA,
@@ -1030,3 +1094,58 @@ async def test_auto_accepts_blocked_plan_task_that_was_never_routed():
     assert any(event.type == RunEventType.TASK_BLOCKED for event in events)
     assert any(event.type == RunEventType.MESSAGE_COMPLETED for event in events)
     assert events[-1].type == RunEventType.TASK_COMPLETED
+
+
+@pytest.mark.anyio
+async def test_auto_normalizes_incremental_react_round_events():
+    host = FakeHostManager([
+        {"type": "round_started", "round": 1, "checkpoint": {"round": 1}},
+        {
+            "type": "decision_created",
+            "round": 1,
+            "action": "delegate",
+            "reason": "parallel checks",
+            "tasks": [
+                {"id": "security", "agent_id": "security", "objective": "review"},
+                {"id": "capacity", "agent_id": "capacity", "objective": "check capacity"},
+            ],
+            "checkpoint": {"round": 1, "decisions": []},
+        },
+        {"type": "context_prepared", "task_id": "security", "agent_id": "security"},
+        {"type": "routing", "task_id": "security", "agent_id": "security"},
+        {"type": "task_started", "task_id": "security", "agent_id": "security"},
+        {"type": "task_completed", "task_id": "security", "agent_id": "security", "result": "safe"},
+        {"type": "context_prepared", "task_id": "capacity", "agent_id": "capacity"},
+        {"type": "routing", "task_id": "capacity", "agent_id": "capacity"},
+        {"type": "task_started", "task_id": "capacity", "agent_id": "capacity"},
+        {"type": "task_completed", "task_id": "capacity", "agent_id": "capacity", "result": "enough"},
+        {"type": "round_completed", "round": 1, "checkpoint": {"round": 1}},
+        {"type": "round_started", "round": 2, "checkpoint": {"round": 2}},
+        {
+            "type": "decision_created",
+            "round": 2,
+            "action": "stop",
+            "reason": "namespace missing",
+            "tasks": [],
+            "checkpoint": {"round": 2},
+        },
+        {"type": "text", "text": "namespace missing"},
+        {"type": "done"},
+    ])
+
+    events = await _collect(
+        _auto_strategy(host), RunCommand(mode="auto", message="Deploy")
+    )
+
+    types = [event.type for event in events]
+    assert types.count(RunEventType.HOST_ROUND_STARTED) == 2
+    assert types.count(RunEventType.HOST_DECISION_CREATED) == 2
+    assert types.count(RunEventType.HOST_ROUND_COMPLETED) == 1
+    decisions = [
+        event for event in events
+        if event.type == RunEventType.HOST_DECISION_CREATED
+    ]
+    assert [task["logical_id"] for task in decisions[0].data["tasks"]] == [
+        "security", "capacity"
+    ]
+    assert decisions[1].data["tasks"] == []

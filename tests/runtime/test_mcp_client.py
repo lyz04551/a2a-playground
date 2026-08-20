@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 import pytest
 import httpx
 from langchain_core.messages import AIMessage, ToolMessage
 
 from a2a_runtime.mcp_client import K8sMCPClient
+import a2a_runtime.mcp_client as mcp_client_module
 from a2a_runtime.agent import RuntimeMCPAgent
 from a2a_runtime.config import AgentRuntimeConfig
 from a2a_runtime.streaming import RuntimeEventType
@@ -32,6 +34,88 @@ class FakeSession:
 
         return Response()
 
+
+class FakeClientSession:
+    initialized = []
+
+    def __init__(self, read, write):
+        self.read = read
+        self.write = write
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def initialize(self):
+        self.initialized.append((self.read, self.write))
+
+
+@pytest.mark.anyio
+async def test_client_uses_legacy_sse_transport(monkeypatch):
+    calls = []
+
+    @asynccontextmanager
+    async def fake_sse_client(**kwargs):
+        calls.append(kwargs)
+        yield "sse-read", "sse-write"
+
+    @asynccontextmanager
+    async def unexpected_streamable_client(**_kwargs):
+        raise AssertionError("streamable transport must not be selected")
+        yield
+
+    FakeClientSession.initialized.clear()
+    monkeypatch.setattr(mcp_client_module, "sse_client", fake_sse_client)
+    monkeypatch.setattr(
+        mcp_client_module,
+        "streamablehttp_client",
+        unexpected_streamable_client,
+        raising=False,
+    )
+    monkeypatch.setattr(mcp_client_module, "ClientSession", FakeClientSession)
+    client = K8sMCPClient("http://mcp.invalid/sse", transport="sse")
+
+    await client.connect()
+
+    assert calls[0]["url"] == "http://mcp.invalid/sse"
+    assert FakeClientSession.initialized == [("sse-read", "sse-write")]
+    await client.disconnect()
+
+
+@pytest.mark.anyio
+async def test_client_uses_streamable_http_transport(monkeypatch):
+    calls = []
+
+    @asynccontextmanager
+    async def unexpected_sse_client(**_kwargs):
+        raise AssertionError("legacy SSE transport must not be selected")
+        yield
+
+    @asynccontextmanager
+    async def fake_streamable_client(**kwargs):
+        calls.append(kwargs)
+        yield "http-read", "http-write", lambda: "session-id"
+
+    FakeClientSession.initialized.clear()
+    monkeypatch.setattr(mcp_client_module, "sse_client", unexpected_sse_client)
+    monkeypatch.setattr(
+        mcp_client_module,
+        "streamablehttp_client",
+        fake_streamable_client,
+        raising=False,
+    )
+    monkeypatch.setattr(mcp_client_module, "ClientSession", FakeClientSession)
+    client = K8sMCPClient(
+        "http://mcp.invalid/mcp", transport="streamable_http"
+    )
+
+    await client.connect()
+
+    assert calls[0]["url"] == "http://mcp.invalid/mcp"
+    assert FakeClientSession.initialized == [("http-read", "http-write")]
+    await client.disconnect()
 
 @pytest.mark.anyio
 async def test_client_normalizes_tool_catalog_and_text_result():

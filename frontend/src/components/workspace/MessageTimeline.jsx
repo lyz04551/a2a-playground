@@ -2,6 +2,7 @@ import React from 'react'
 import { InboxOutlined, LoadingOutlined, ReloadOutlined } from '@ant-design/icons'
 import ToolActivity from './ToolActivity'
 import MessageActions from './MessageActions'
+import { formatAgentOutput } from './agentOutput'
 
 export default function MessageTimeline({ messages = [], loading = false, stage, error, onRetry, onArtifactOpen, language = 'zh-CN' }) {
   const zh = language === 'zh-CN'
@@ -14,7 +15,7 @@ export default function MessageTimeline({ messages = [], loading = false, stage,
       {messages.map(message => (
         <li className={`workspace-message workspace-message--${message.role || 'agent'}`} key={message.id}>
           <header><strong>{message.agentName || (message.role === 'user' ? (zh ? '你' : 'You') : 'Agent')}</strong><span>{message.status && <small>{message.status}</small>}<MessageActions content={message.content} language={language} /></span></header>
-          <div className="workspace-message__body">{message.content}</div>
+          <div className="workspace-message__body">{message.role === 'user' ? message.content : formatAgentOutput(message.content)}</div>
           {message.toolCalls?.map(tool => <ToolActivity key={tool.id || tool.tool} tool={tool.tool} status={tool.status} input={tool.arguments || tool.args} output={tool.output || message.toolResults?.[tool.id]} error={tool.error} duration={tool.duration} />)}
           {message.artifacts?.map(artifact => <button className="workspace-artifact" type="button" key={artifact.id} onClick={() => onArtifactOpen?.(artifact)}>Artifact: {artifact.name || artifact.id}</button>)}
         </li>

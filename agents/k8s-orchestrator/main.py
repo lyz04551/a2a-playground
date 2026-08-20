@@ -19,7 +19,8 @@ from a2a_runtime import (
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 os.environ.setdefault("AGENT_PUBLIC_URL", "http://127.0.0.1:8051")
-os.environ.setdefault("K8S_MCP_URL", "http://10.2.0.57:9096/sse")
+os.environ.setdefault("K8S_MCP_URL", "http://10.2.0.57:9096/mcp")
+os.environ.setdefault("MCP_TRANSPORT", "streamable_http")
 
 config = load_agent_config(BASE_DIR / "agent.yaml")
 agent = RuntimeMCPAgent(config, load_prompt(BASE_DIR / "prompt.md"))

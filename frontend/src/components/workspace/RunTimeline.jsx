@@ -9,6 +9,8 @@ import {
   RobotOutlined,
 } from '@ant-design/icons'
 import { buildToolDetails, groupToolCalls } from './taskDetails'
+import { buildRoundTimeline } from './roundTimeline'
+import { formatAgentOutput } from './agentOutput'
 
 function StatusIcon({ status }) {
   if (status === 'completed') return <CheckCircleFilled />
@@ -77,26 +79,33 @@ function ToolActivity({ tools, zh }) {
   )
 }
 
-export default function RunTimeline({ run = {}, tasks = [], onTaskSelect, selectedTaskId, language = 'en-US' }) {
+export default function RunTimeline({ run = {}, tasks = [], rounds = [], onTaskSelect, selectedTaskId, language = 'en-US' }) {
   const zh = language.startsWith('zh')
   const visibleTasks = tasks.filter(task => (
     task.agentId || task.agentName || task.objective
   ))
+  const timelineItems = buildRoundTimeline(visibleTasks, rounds)
   return (
     <ol className="run-timeline" aria-label="Host to Agent execution timeline">
       <li className="run-timeline__node is-host">
         <span className="run-timeline__rail"><NodeIndexOutlined /></span>
         <div><strong>Host Agent</strong><small>{run.status || 'idle'}</small></div>
       </li>
-      {visibleTasks.map(task => (
-        <React.Fragment key={task.id}>
-          <li className={`run-timeline__node is-agent status-${task.status || 'queued'}`}>
+      {timelineItems.map(item => item.kind === 'decision' ? (
+        <li className={`run-timeline__node is-decision status-${item.round.status || 'working'}`} key={item.id}>
+          <span className="run-timeline__rail"><NodeIndexOutlined /></span>
+          <section><strong>{zh ? `Host 第 ${item.round.round} 轮决策` : `Host decision round ${item.round.round}`}</strong><span>{item.round.reason}</span><small>{item.round.status || item.round.action}</small></section>
+        </li>
+      ) : (
+        <React.Fragment key={item.id}>
+          <li className={`run-timeline__node is-agent status-${item.task.status || 'queued'}`}>
             <span className="run-timeline__rail"><RobotOutlined /></span>
-            <button type="button" className={`run-timeline__task${selectedTaskId === task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(task)} aria-label={`Open details for ${task.objective || task.label || task.id}`}><strong>{task.agentName || task.agentId || 'Agent task'}</strong><span>{task.objective || task.label || task.id}</span><small><StatusIcon status={task.status} /> {task.status || 'queued'} · {formatDuration(task.durationMs)}</small>{task.error && <code>{typeof task.error === 'string' ? task.error : task.error.message || JSON.stringify(task.error)}</code>}</button>
+            <button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {item.task.status || 'queued'} · {formatDuration(item.task.durationMs)}</small>{(item.task.output || item.task.streamingOutput || item.task.result) && <pre className="run-timeline__agent-output">{formatAgentOutput(item.task.output || item.task.streamingOutput || item.task.result)}</pre>}{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}</button>
           </li>
-          {(task.tools || []).length > 0 && <ToolActivity tools={task.tools} zh={zh} />}
+          {(item.task.tools || []).length > 0 && <ToolActivity tools={item.task.tools} zh={zh} />}
         </React.Fragment>
       ))}
+      {run.hostSummary && <li className="run-timeline__node is-host-summary"><span className="run-timeline__rail"><NodeIndexOutlined /></span><section><strong>{zh ? 'Host 最终总结' : 'Host final summary'}</strong><pre>{formatAgentOutput(run.hostSummary)}</pre></section></li>}
     </ol>
   )
 }

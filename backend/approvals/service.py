@@ -42,11 +42,14 @@ class ApprovalService:
             **result,
             "text": self._execution_text(result),
         }
+        run = self.repository.get_run(approval["run_id"]) or {}
         run_status = (
             "approval_required"
             if result.get("approval")
             else "failed"
             if result.get("state") == "failed"
+            else "approval_required"
+            if run.get("mode") == "auto"
             else "completed"
         )
         self.repository.update_run_status(
@@ -57,7 +60,10 @@ class ApprovalService:
     @staticmethod
     def _execution_text(result: dict) -> str:
         for artifact in reversed(result.get("artifacts", [])):
-            if artifact.get("name") != "execution_result":
+            if artifact.get("name") not in {
+                "execution_result",
+                "specialist_result",
+            }:
                 continue
             for part in artifact.get("parts", []):
                 root = part.get("root", part)
@@ -68,7 +74,10 @@ class ApprovalService:
                     payload = json.loads(text)
                 except json.JSONDecodeError:
                     return text
-                value = payload.get("result", payload.get("text", ""))
+                value = payload.get(
+                    "result",
+                    payload.get("summary", payload.get("text", "")),
+                )
                 if isinstance(value, str):
                     try:
                         decoded = json.loads(value)

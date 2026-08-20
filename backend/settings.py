@@ -17,14 +17,16 @@ class AppSettings:
         "http://localhost:5173",
     )
     allow_private_agents: bool = False
-    host_max_tasks: int = 6
+    host_max_tasks: int = 12
+    host_max_rounds: int = 8
     host_max_concurrency: int = 3
     host_max_attempts: int = 2
 
     @classmethod
     def from_env(cls) -> "AppSettings":
         origins = os.getenv("PLAYGROUND_CORS_ORIGINS", "")
-        host_max_tasks = _bounded_env("HOST_MAX_TASKS", 6, 1, 6)
+        host_max_tasks = _bounded_env("HOST_MAX_TASKS", 12, 1, 30)
+        host_max_rounds = _bounded_env("HOST_MAX_ROUNDS", 8, 1, 20)
         host_max_concurrency = _bounded_env(
             "HOST_MAX_CONCURRENCY", 3, 1, 5
         )
@@ -40,6 +42,7 @@ class AppSettings:
                 "PLAYGROUND_ALLOW_PRIVATE_AGENTS", ""
             ).lower() in {"1", "true", "yes"},
             host_max_tasks=host_max_tasks,
+            host_max_rounds=host_max_rounds,
             host_max_concurrency=host_max_concurrency,
             host_max_attempts=host_max_attempts,
         )

@@ -65,6 +65,16 @@ class StreamingTransport(FakeTransport):
             "text": "finished",
             "state": "completed",
             "task_id": "remote-1",
+            "artifacts": [{
+                "name": "specialist_result",
+                "parts": [{
+                    "text": json.dumps({
+                        "status": "completed",
+                        "summary": "node is healthy",
+                        "continuation": {"allowed": True},
+                    }),
+                }],
+            }],
         }
 
 
@@ -153,3 +163,8 @@ async def test_gateway_stream_redacts_public_tool_events_and_saves_binding(tmp_p
     assert events[1]["result"] == {"password": "[REDACTED]", "count": 3}
     binding = repository.get_remote_binding("run-1", "ops")
     assert binding["task_id"] == "remote-1"
+    assert events[-1]["specialist_output"] == {
+        "status": "completed",
+        "summary": "node is healthy",
+        "continuation": {"allowed": True},
+    }

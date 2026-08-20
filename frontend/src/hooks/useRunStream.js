@@ -4,6 +4,8 @@ import { streamRun } from '../api/runStream'
 import { emptyRunState, reduceRunEvent, restoreRunEventState } from '../state/runEvents'
 import { restoreWorkspaceState, selectLatestConversationRun } from '../components/workspace/workspaceState'
 
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled'])
+
 function reducer(state, action) {
   if (action.type === 'reset') return { ...emptyRunState, messages: action.messages || [] }
   if (action.type === 'event') return reduceRunEvent(state, action.event)
@@ -20,16 +22,17 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [lastCommand, setLastCommand] = useState(null)
+  const [connection, setConnection] = useState({ state: 'idle', attempt: 0 })
   const abortRef = useRef(null)
 
   const beginNewConversation = useCallback((nextMode = mode, nextAgentId = selectedAgentId) => {
     abortRef.current?.abort()
     setConversationId(null); setMode(nextMode); setSelectedAgentId(nextAgentId)
-    setError(''); dispatch({ type: 'reset' })
+    setError(''); setConnection({ state: 'idle', attempt: 0 }); dispatch({ type: 'reset' })
   }, [mode, selectedAgentId])
 
   const restoreConversation = useCallback(async (id) => {
-    setLoading(true); setError('')
+    setLoading(true); setError(''); setConnection({ state: 'restoring', attempt: 0 })
     try {
       const conversation = await api.getConversation(id)
       const runs = await api.listRuns()
@@ -48,7 +51,8 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
       }
       setConversationId(context.conversationId); setMode(context.mode); setSelectedAgentId(context.selectedAgentId)
       dispatch({ type: 'restore', run, approvals, tasks, rawEvents: context.rawEvents || [], messages: conversation.messages || [] })
-    } catch (cause) { setError(cause.message || 'Unable to restore this conversation.') }
+      setConnection({ state: run && !TERMINAL_RUN_STATUSES.has(run.status) ? 'recovered' : 'idle', attempt: 0 })
+    } catch (cause) { setError(cause.message || 'Unable to restore this conversation.'); setConnection({ state: 'interrupted', attempt: 0 }) }
     finally { setLoading(false) }
   }, [])
 
@@ -57,7 +61,7 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
     if (!message || loading) return
     const command = { conversation_id: conversationId || undefined, mode, message }
     if (mode === 'direct') command.target_agent_id = selectedAgentId
-    setError(''); setLoading(true); setLastCommand(command)
+    setError(''); setLoading(true); setLastCommand(command); setConnection({ state: 'connecting', attempt: 0 })
     dispatch({ type: 'user-message', message: { id: `local:${Date.now()}`, role: 'user', content: message } })
     const controller = new AbortController(); abortRef.current = controller
     try {
@@ -67,11 +71,14 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
           dispatch({ type: 'event', event })
         },
         onError: cause => setError(cause.message || 'The run stream was interrupted.'),
+        onReconnect: ({ attempt }) => setConnection({ state: 'reconnecting', attempt }),
+        onConnectionChange: next => setConnection(next),
       }, { signal: controller.signal })
     } catch (cause) {
       if (cause.name !== 'AbortError') {
         const errorMessage = cause.message || 'Unable to start the run.'
         setError(errorMessage)
+        setConnection({ state: 'interrupted', attempt: 0 })
         dispatch({ type: 'event', event: {
           version: 1,
           event_id: `stream-interrupted:${Date.now()}`,
@@ -91,9 +98,18 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
   const retry = useCallback(() => lastCommand && send(lastCommand.message), [lastCommand, send])
   const cancel = useCallback(async () => {
     abortRef.current?.abort()
-    if (state.run?.id) await api.cancelRun(state.run.id)
-  }, [state.run?.id])
+    if (state.run?.id) {
+      await api.cancelRun(state.run.id)
+      dispatch({ type: 'event', event: {
+        version: 1, event_id: `local-cancel:${Date.now()}`, sequence: Number.MAX_SAFE_INTEGER,
+        run_id: state.run.id, conversation_id: conversationId || 'pending', task_id: null,
+        parent_task_id: null, type: 'run.cancelled', timestamp: new Date().toISOString(), data: {},
+      } })
+    }
+    setLoading(false); setConnection({ state: 'idle', attempt: 0 })
+  }, [conversationId, state.run?.id])
   useEffect(() => () => abortRef.current?.abort(), [])
 
-  return useMemo(() => ({ state, conversationId, mode, setMode, selectedAgentId, setSelectedAgentId, loading, error, send, retry, cancel, beginNewConversation, restoreConversation }), [state, conversationId, mode, selectedAgentId, loading, error, send, retry, cancel, beginNewConversation, restoreConversation])
+  const canCancel = Boolean(state.run?.id && !TERMINAL_RUN_STATUSES.has(state.run?.status))
+  return useMemo(() => ({ state, conversationId, mode, setMode, selectedAgentId, setSelectedAgentId, loading, error, connection, canCancel, send, retry, cancel, beginNewConversation, restoreConversation }), [state, conversationId, mode, selectedAgentId, loading, error, connection, canCancel, send, retry, cancel, beginNewConversation, restoreConversation])
 }

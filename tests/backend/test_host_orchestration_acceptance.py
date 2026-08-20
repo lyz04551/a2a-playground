@@ -10,6 +10,7 @@ from backend.settings import AppSettings
 def test_host_orchestration_settings_have_safe_defaults(monkeypatch):
     for name in (
         "HOST_MAX_TASKS",
+        "HOST_MAX_ROUNDS",
         "HOST_MAX_CONCURRENCY",
         "HOST_MAX_ATTEMPTS",
     ):
@@ -17,7 +18,8 @@ def test_host_orchestration_settings_have_safe_defaults(monkeypatch):
 
     settings = AppSettings.from_env()
 
-    assert settings.host_max_tasks == 6
+    assert settings.host_max_tasks == 12
+    assert settings.host_max_rounds == 8
     assert settings.host_max_concurrency == 3
     assert settings.host_max_attempts == 2
 
@@ -26,7 +28,9 @@ def test_host_orchestration_settings_have_safe_defaults(monkeypatch):
     ("name", "value"),
     [
         ("HOST_MAX_TASKS", "0"),
-        ("HOST_MAX_TASKS", "7"),
+        ("HOST_MAX_TASKS", "31"),
+        ("HOST_MAX_ROUNDS", "0"),
+        ("HOST_MAX_ROUNDS", "21"),
         ("HOST_MAX_CONCURRENCY", "0"),
         ("HOST_MAX_CONCURRENCY", "6"),
         ("HOST_MAX_ATTEMPTS", "0"),
