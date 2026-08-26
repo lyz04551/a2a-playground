@@ -11,6 +11,7 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    text,
 )
 
 
@@ -59,7 +60,13 @@ events = Table(
     Column("data", JSON, nullable=False),
 )
 Index("ix_events_conversation_type", events.c.conversation_id, events.c.event_type)
-Index("ix_events_run_sequence", events.c.run_id, events.c.sequence, unique=True)
+Index(
+    "ix_events_run_sequence",
+    events.c.run_id,
+    events.c.sequence,
+    unique=True,
+    postgresql_where=text("run_id IS NOT NULL"),
+)
 Index("ix_events_conversation_created", events.c.conversation_id, events.c.created_at)
 Index("ix_events_type_created", events.c.event_type, events.c.created_at)
 
