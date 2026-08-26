@@ -258,6 +258,37 @@ async def test_direct_turns_remote_errors_into_a_failed_task_event():
 
 
 @pytest.mark.anyio
+async def test_direct_pauses_on_final_input_required_after_approval_event():
+    approval = {
+        "id": "ap-1",
+        "agent_id": "ops",
+        "tool_name": "apply_k8s_yaml",
+        "arguments": {"cluster": "", "yaml": "kind: Deployment"},
+        "status": "pending",
+    }
+    events = await _collect(
+        _direct_strategy(FakeGateway([
+            {"type": "approval_required", "approval": approval},
+            {
+                "type": "status",
+                "state": TaskState.input_required,
+                "final": True,
+            },
+        ])),
+        RunCommand(mode="direct", target_agent_id="ops", message="Deploy"),
+    )
+
+    assert [event.type for event in events] == [
+        RunEventType.TASK_DELEGATED,
+        RunEventType.APPROVAL_REQUIRED,
+        RunEventType.TASK_STATUS_CHANGED,
+    ]
+    assert events[1].data["approval"] == approval
+    assert events[-1].data["state"] == "approval_required"
+    assert not any(event.type == RunEventType.TASK_FAILED for event in events)
+
+
+@pytest.mark.anyio
 async def test_direct_accepts_sdk_task_state_enum_as_completed():
     events = await _collect(
         _direct_strategy(FakeGateway([

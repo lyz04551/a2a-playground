@@ -87,9 +87,6 @@ AGENTS = {
     "k8s-security": (8053, 30, "read_only"),
     "k8s-infrastructure": (8054, 35, "write_approval"),
     "k8s-helm": (8055, 38, "write_approval"),
-    "k8s-incident-responder": (8056, 10, "read_only"),
-    "k8s-capacity-planner": (8057, 12, "read_only"),
-    "k8s-gpu-specialist": (8058, 15, "write_approval"),
 }
 
 WRITE_TOOLS = {
@@ -138,7 +135,7 @@ def _load_configs(monkeypatch):
     return configs
 
 
-def test_eight_agent_configs_have_stable_identity_and_routing_metadata(monkeypatch):
+def test_five_agent_configs_have_stable_identity_and_routing_metadata(monkeypatch):
     configs = _load_configs(monkeypatch)
 
     assert {config.agent_id for config in configs} == set(AGENTS)
@@ -205,9 +202,6 @@ def test_mutating_tools_are_never_directly_allowed(monkeypatch):
         ("k8s-orchestrator", "delete_k8s_resource", PolicyAction.APPROVAL_REQUIRED),
         ("k8s-infrastructure", "drain_k8s_node", PolicyAction.APPROVAL_REQUIRED),
         ("k8s-helm", "helm_uninstall_release", PolicyAction.APPROVAL_REQUIRED),
-        ("k8s-incident-responder", "get_k8s_pod_logs", PolicyAction.ALLOW),
-        ("k8s-capacity-planner", "get_k8s_top_node", PolicyAction.ALLOW),
-        ("k8s-gpu-specialist", "apply_k8s_yaml", PolicyAction.APPROVAL_REQUIRED),
     ],
 )
 def test_representative_agent_tool_boundaries(
@@ -216,4 +210,3 @@ def test_representative_agent_tool_boundaries(
     configs = {config.agent_id: config for config in _load_configs(monkeypatch)}
 
     assert ToolPolicy(configs[agent_id].tool_policy).classify(tool).action is expected
-

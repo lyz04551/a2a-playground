@@ -138,6 +138,35 @@ async def test_tool_budget_stops_mcp_calls_and_resets_for_next_task():
     assert len(client.calls) == 3
 
 
+@pytest.mark.anyio
+async def test_soft_budget_asks_model_to_reassess_but_allows_more_calls():
+    client = FakeMCPClient()
+    adapter = MCPToolAdapter(
+        client,
+        ToolPolicy(ToolPolicyConfig(allow=["get_k8s_*"])),
+        agent_id="k8s-ops",
+        soft_budget_ratio=0.4,
+        max_calls=5,
+    )
+    tool = adapter.build_tools([{
+        "name": "get_k8s_resource",
+        "description": "Read a resource",
+        "input_schema": {"type": "object", "properties": {}},
+    }])[0]
+    config = {"configurable": {"thread_id": "ctx"}}
+
+    first = await tool.ainvoke({}, config=config)
+    second = await tool.ainvoke({}, config=config)
+    third = await tool.ainvoke({}, config=config)
+
+    assert first == "called:get_k8s_resource"
+    assert second == "called:get_k8s_resource"
+    assert "已调用 3 次工具" in third
+    assert "证据是否已经足够" in third
+    assert "仍可继续调用" in third
+    assert len(client.calls) == 3
+
+
 def test_denied_tools_are_not_exposed_to_the_model():
     adapter = MCPToolAdapter(
         FakeMCPClient(),

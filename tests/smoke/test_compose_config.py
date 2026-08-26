@@ -18,11 +18,6 @@ def test_compose_defines_optional_independent_agents():
         "k8s-ops",
         "k8s-orchestrator",
         "k8s-security",
-        "k8s-infrastructure",
-        "k8s-helm",
-        "k8s-incident-responder",
-        "k8s-capacity-planner",
-        "k8s-gpu-specialist",
     }
     for name in set(services) - {"backend", "frontend"}:
         assert services[name]["healthcheck"]

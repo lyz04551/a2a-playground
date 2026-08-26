@@ -75,6 +75,19 @@ class A2AGateway:
         self.repository = repository
         self.transport = transport or SDKTransport()
 
+    def _remote_context_id(
+        self, run_id: str, agent_id: str, binding: dict | None
+    ) -> str:
+        if binding:
+            return str(binding["context_id"])
+        run = self.repository.get_run(run_id)
+        conversation_id = str(
+            (run or {}).get("conversation_id") or ""
+        )
+        if conversation_id:
+            return f"ctx_{conversation_id}_{agent_id}"
+        return f"ctx_{uuid.uuid4().hex}"
+
     async def delegate(
         self,
         run_id: str,
@@ -83,16 +96,15 @@ class A2AGateway:
     ) -> dict[str, Any]:
         agent_id = agent["id"]
         binding = self.repository.get_remote_binding(run_id, agent_id)
-        context_id = (
-            binding["context_id"]
-            if binding
-            else f"ctx_{uuid.uuid4().hex}"
+        context_id = self._remote_context_id(
+            run_id, agent_id, binding
         )
         is_task_continuation = False
         try:
             payload = json.loads(message)
             is_task_continuation = (
-                payload.get("type") == "approval_decision"
+                isinstance(payload, dict)
+                and payload.get("type") == "approval_decision"
             )
         except (TypeError, json.JSONDecodeError):
             pass
@@ -157,7 +169,9 @@ class A2AGateway:
         """Expose only public remote execution events, with blocking fallback."""
         agent_id = agent["id"]
         binding = self.repository.get_remote_binding(run_id, agent_id)
-        context_id = binding["context_id"] if binding else f"ctx_{uuid.uuid4().hex}"
+        context_id = self._remote_context_id(
+            run_id, agent_id, binding
+        )
         remote_task_id = ""
 
         stream = getattr(self.transport, "stream", None)
@@ -172,6 +186,27 @@ class A2AGateway:
             task_id=None,
         ):
             event = dict(upstream)
+            if event.get("type") == "approval_required":
+                pending = event.get("approval")
+                if isinstance(pending, dict) and pending.get("approval_id"):
+                    approval = self.repository.get_approval(
+                        str(pending["approval_id"])
+                    )
+                    if approval is None:
+                        approval = self.repository.create_approval(
+                            approval_id=str(pending["approval_id"]),
+                            run_id=run_id,
+                            agent_id=agent_id,
+                            tool_name=str(pending.get("tool_name") or ""),
+                            arguments=dict(pending.get("arguments") or {}),
+                            action_digest=str(
+                                pending.get("action_digest") or ""
+                            ),
+                        )
+                    self.repository.update_run_status(
+                        run_id, "approval_required"
+                    )
+                    event["approval"] = approval
             if event.get("task_id"):
                 remote_task_id = str(event["task_id"])
                 self.repository.upsert_remote_binding(

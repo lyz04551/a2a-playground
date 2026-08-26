@@ -1,3 +1,0 @@
--e ../shared-runtime
-python-dotenv>=1,<2
-uvicorn>=0.30,<1

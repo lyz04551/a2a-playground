@@ -45,14 +45,14 @@ release procedures. It is not part of this change.
 Each decision returns exactly one action:
 
 ```text
-delegate | clarify | request_approval | complete | stop
+delegate | clarify | complete | stop
 ```
 
 - `delegate` contains one to three new tasks that can run concurrently in the
   current round. Cross-round ordering is represented by persisted observations,
-  not speculative future tasks.
+  not speculative future tasks. Write tasks are delegated after their required
+  prechecks; the delegated Agent's tool policy creates the approval request.
 - `clarify` asks one essential question and pauses the Run.
-- `request_approval` exposes the pending write operation and pauses the Run.
 - `complete` returns a final Host synthesis.
 - `stop` returns a terminal explanation when continuation is unsafe or impossible.
 

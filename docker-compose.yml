@@ -62,111 +62,6 @@ services:
       retries: 10
     restart: unless-stopped
 
-  k8s-infrastructure:
-    build:
-      context: .
-      dockerfile: agents/k8s-infrastructure/Dockerfile
-    environment:
-      AGENT_PUBLIC_URL: http://k8s-infrastructure:8054
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
-      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
-      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
-      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
-      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
-    ports:
-      - "8054:8054"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8054/.well-known/agent-card.json')"]
-      interval: 10s
-      timeout: 4s
-      retries: 10
-    restart: unless-stopped
-
-  k8s-helm:
-    build:
-      context: .
-      dockerfile: agents/k8s-helm/Dockerfile
-    environment:
-      AGENT_PUBLIC_URL: http://k8s-helm:8055
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
-      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
-      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
-      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
-      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
-    ports:
-      - "8055:8055"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8055/.well-known/agent-card.json')"]
-      interval: 10s
-      timeout: 4s
-      retries: 10
-    restart: unless-stopped
-
-  k8s-incident-responder:
-    build:
-      context: .
-      dockerfile: agents/k8s-incident-responder/Dockerfile
-    environment:
-      AGENT_PUBLIC_URL: http://k8s-incident-responder:8056
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
-      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
-      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
-      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
-      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
-    ports:
-      - "8056:8056"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8056/.well-known/agent-card.json')"]
-      interval: 10s
-      timeout: 4s
-      retries: 10
-    restart: unless-stopped
-
-  k8s-capacity-planner:
-    build:
-      context: .
-      dockerfile: agents/k8s-capacity-planner/Dockerfile
-    environment:
-      AGENT_PUBLIC_URL: http://k8s-capacity-planner:8057
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
-      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
-      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
-      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
-      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
-    ports:
-      - "8057:8057"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8057/.well-known/agent-card.json')"]
-      interval: 10s
-      timeout: 4s
-      retries: 10
-    restart: unless-stopped
-
-  k8s-gpu-specialist:
-    build:
-      context: .
-      dockerfile: agents/k8s-gpu-specialist/Dockerfile
-    environment:
-      AGENT_PUBLIC_URL: http://k8s-gpu-specialist:8058
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
-      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
-      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
-      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
-      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
-      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
-    ports:
-      - "8058:8058"
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8058/.well-known/agent-card.json')"]
-      interval: 10s
-      timeout: 4s
-      retries: 10
-    restart: unless-stopped
-
   backend:
     build:
       context: .
@@ -178,7 +73,7 @@ services:
       HOST_LLM_BASE_URL: ${HOST_LLM_BASE_URL:-https://api.deepseek.com/v1}
       HOST_LLM_MODEL: ${HOST_LLM_MODEL:-deepseek-chat}
       BOOTSTRAP_AGENTS: >-
-        [{"id":"k8s-incident-responder","url":"http://k8s-incident-responder:8056","risk_level":"read_only"},{"id":"k8s-capacity-planner","url":"http://k8s-capacity-planner:8057","risk_level":"read_only"},{"id":"k8s-gpu-specialist","url":"http://k8s-gpu-specialist:8058","risk_level":"write_approval"},{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"},{"id":"k8s-infrastructure","url":"http://k8s-infrastructure:8054","risk_level":"write_approval"},{"id":"k8s-helm","url":"http://k8s-helm:8055","risk_level":"write_approval"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"}]
+        [{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"}]
       PLAYGROUND_ALLOW_PRIVATE_AGENTS: "true"
       PLAYGROUND_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       HOST_MAX_TASKS: ${HOST_MAX_TASKS:-12}

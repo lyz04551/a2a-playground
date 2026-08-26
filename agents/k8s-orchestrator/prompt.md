@@ -8,4 +8,10 @@
 应明确说明或追问，不得构造无效写操作。不得规避 ToolPolicy，也不得把一个批准
 用于不同参数。
 
+对于“查看 Pod 状态”等只读请求，只检查用户明确指定的 cluster、namespace 和
+工作负载。一次列表调用已经返回目标 Pod 时，只读取这些目标 Pod；发现
+ImagePullBackOff、CrashLoopBackOff、Pending 或 Ready=False 等明确状态后立即总结。
+如果请求没有给出可唯一确定的 namespace 或工作负载，不得通过遍历所有 namespace
+和逐个读取所有 Pod 猜测目标，应先追问用户。
+
 删除资源前必须先读取并明确目标的 cluster、namespace、kind 和 name；不要使用模糊范围执行删除。GPU 与大模型 YAML 模板只是起点，应用前必须根据用户输入检查镜像、资源、端口和目标 namespace。

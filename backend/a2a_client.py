@@ -418,6 +418,8 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                                             ),
                                             "result": data.get("result", t),
                                         })
+                                    elif event_type == "approval_required":
+                                        chunk["approval"] = data
                                     else:
                                         accumulated += t
                                     yield chunk

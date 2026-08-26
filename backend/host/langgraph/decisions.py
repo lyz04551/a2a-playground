@@ -46,10 +46,11 @@ class LangGraphDecisionPort:
         instruction = """Choose exactly one next Host action from the persisted state.
 
 - delegate: create one to three independent tasks for the current round. Tasks in
-  this decision run in parallel. Do not speculate about future rounds.
+  this decision run in parallel. Do not speculate about future rounds. After a
+  successful security precheck, delegate the write task to the capable Agent;
+  the Agent's write tool creates and returns the real approval request.
 - clarify: ask one essential question when the observations show that user intent
   or authority is missing.
-- request_approval: pause for an explicitly described write approval.
 - complete: answer only when the goal is satisfied and any mutation was verified.
 - stop: terminate when continuing is unsafe or impossible.
 
@@ -57,7 +58,9 @@ Base the decision on structured observations, not keywords. Use only available
 Agent IDs and declared capabilities. Never repeat semantic work or a rejected
 write. A Kubernetes mutation requires a successful Security precheck observation;
 after mutation, obtain an Ops verification observation before completing. Return
-only a concise public reason. Do not reveal hidden chain-of-thought."""
+only a concise public reason. The Host must never ask for write approval in text;
+approval is created only by a delegated Agent's write tool.
+Do not reveal hidden chain-of-thought."""
         try:
             profiles = {agent["id"]: agent for agent in agents}
             for semantic_attempt in range(2):

@@ -63,6 +63,11 @@ async def test_approved_exact_action_executes_once_and_clears_pending():
     assert "ctx-1" not in agent._pending_by_context
 
 
+@pytest.mark.parametrize("query", ["1", "true", "null", "[]", '"approve"'])
+def test_approval_parser_ignores_valid_non_object_json(query):
+    assert RuntimeMCPAgent._parse_approval(query) is None
+
+
 @pytest.mark.anyio
 async def test_changed_digest_never_executes_tool():
     client = FakeMCPClient()

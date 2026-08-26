@@ -9,9 +9,6 @@ The current architecture keeps every Kubernetes specialist as an independent
 
 | Service | Stable ID | Responsibility | MCP policy |
 |---|---|---|---|
-| K8s Incident Responder | `k8s-incident-responder` | Evidence-driven incident diagnosis | Read-only |
-| K8s Capacity Planner | `k8s-capacity-planner` | CPU, memory, IP, Pod density and HPA planning | Read-only |
-| K8s GPU Specialist | `k8s-gpu-specialist` | GPU workload generation, deployment and diagnosis | Writes require approval |
 | K8s Ops | `k8s-ops` | Inspection and approved Pod debugging | Writes require approval |
 | K8s Resource Orchestrator | `k8s-orchestrator` | Creates and manages Kubernetes resources | Every write requires approval |
 | K8s Security | `k8s-security` | Workload, RBAC, image and network assessment | Read-only |
@@ -37,8 +34,8 @@ cp backend/.env.example .env
 docker compose up --build
 ```
 
-Open `http://localhost:5173`. Compose starts the frontend, backend, and eight
-independent A2A Agent servers on ports 8051–8058. The backend discovers them through
+Open `http://localhost:5173`. Compose starts the frontend, backend, and three
+independent A2A Agent servers on ports 8051–8053. The backend discovers them through
 their Agent Cards and stores data in `/app/data/playground.db`.
 
 The backend has no startup dependency on these local Agents. It remains healthy with

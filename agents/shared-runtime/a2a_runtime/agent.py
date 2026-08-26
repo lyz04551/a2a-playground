@@ -43,7 +43,9 @@ class RuntimeMCPAgent:
             f"{prompt.rstrip()}\n\n"
             "工具调用规则：先规划完成任务所需的最小证据集；可并行调用不同工具；"
             "除非上次调用失败或数据明确失效，不要用相同参数重复调用同一工具；"
-            "证据足以回答后立即停止调用并输出结论。"
+            "每批工具结果返回后，必须先判断现有证据是否已经足以回答用户；"
+            "证据足够时立即停止调用并输出结论。继续调用前必须能指出尚缺的关键"
+            "证据，且不得擅自扩大 cluster、namespace、资源类型或对象范围。"
         )
         self.mcp_client = mcp_client or K8sMCPClient(
             config.mcp_url, transport=config.mcp_transport
@@ -54,6 +56,9 @@ class RuntimeMCPAgent:
         )
         self.max_steps = int(os.getenv("AGENT_MAX_STEPS", "30"))
         self.max_tool_calls = int(os.getenv("AGENT_MAX_TOOL_CALLS", "40"))
+        self.tool_budget_warning_ratio = float(
+            os.getenv("AGENT_TOOL_BUDGET_WARNING_RATIO", "0.6")
+        )
         self._graph = None
         self._tools_loaded = False
         self._dependency_error = ""
@@ -73,6 +78,7 @@ class RuntimeMCPAgent:
             ToolPolicy(self.config.tool_policy),
             agent_id=self.config.agent_id,
             max_calls=self.max_tool_calls,
+            soft_budget_ratio=self.tool_budget_warning_ratio,
         )
         tools = self._tool_adapter.build_tools(definitions)
         llm = load_llm_config("AGENT")
@@ -234,6 +240,8 @@ class RuntimeMCPAgent:
         try:
             payload = json.loads(query)
         except (TypeError, json.JSONDecodeError):
+            return None
+        if not isinstance(payload, dict):
             return None
         return payload if payload.get("type") == "approval_decision" else None
 

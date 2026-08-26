@@ -31,7 +31,7 @@ class PlannedTask(BaseModel):
 
 class HostDecision(BaseModel):
     action: Literal[
-        "delegate", "clarify", "request_approval", "complete", "stop"
+        "delegate", "clarify", "complete", "stop"
     ]
     reason: str = Field(min_length=1)
     response: str = ""

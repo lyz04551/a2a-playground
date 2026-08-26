@@ -29,9 +29,6 @@ agents/.venv/bin/python agents/k8s-security/main.py
 ```bash
 agents/.venv/bin/python agents/k8s-infrastructure/main.py
 agents/.venv/bin/python agents/k8s-helm/main.py
-agents/.venv/bin/python agents/k8s-incident-responder/main.py
-agents/.venv/bin/python agents/k8s-capacity-planner/main.py
-agents/.venv/bin/python agents/k8s-gpu-specialist/main.py
 ```
 
 ### Backend
@@ -63,9 +60,6 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 | K8s Security Agent | 8053 | RBAC、配置和安全风险审计 |
 | K8s Infrastructure Agent | 8054 | 节点、默认类和集群注册管理 |
 | K8s Helm Agent | 8055 | Helm release 生命周期 |
-| K8s Incident Responder | 8056 | 故障证据链诊断 |
-| K8s Capacity Planner | 8057 | 集群容量规划 |
-| K8s GPU Specialist | 8058 | GPU/大模型工作负载管理 |
 
 主要页面：
 
@@ -128,9 +122,6 @@ cp agents/k8s-security/.env.example agents/k8s-security/.env
 cp agents/k8s-orchestrator/.env.example agents/k8s-orchestrator/.env
 cp agents/k8s-infrastructure/.env.example agents/k8s-infrastructure/.env
 cp agents/k8s-helm/.env.example agents/k8s-helm/.env
-cp agents/k8s-incident-responder/.env.example agents/k8s-incident-responder/.env
-cp agents/k8s-capacity-planner/.env.example agents/k8s-capacity-planner/.env
-cp agents/k8s-gpu-specialist/.env.example agents/k8s-gpu-specialist/.env
 ```
 
 每份 Agent `.env` 至少配置：
@@ -160,7 +151,7 @@ MCP_TRANSPORT=streamable_http
 
 ## 5. 可选方式：Docker Compose 启动全部服务
 
-Docker Compose 会启动八个可选本地 Agent、Backend 和 Frontend。Backend 与 Agent 没有启动依赖：
+Docker Compose 会启动三个可选本地 Agent、Backend 和 Frontend。Infrastructure 和 Helm Agent 源码仍保留，可按前文命令手动启动。Backend 与 Agent 没有启动依赖：
 
 ```bash
 docker compose up --build
@@ -179,7 +170,7 @@ docker compose down
 
 ## 6. 首次安装依赖
 
-八个 Agent 共用 `agents/.venv`：
+五个 Agent 共用 `agents/.venv`：
 
 ```bash
 python3 -m venv agents/.venv

@@ -428,6 +428,16 @@ class HostOrchestrationEngine:
             }
             for task_id, observed in state.observations.items()
         }
+        mutation_instruction = ""
+        if task.workflow_role == "mutation":
+            mutation_instruction = (
+                "\n\nMutation execution rule:\n"
+                "The Host has already validated the required precheck. "
+                "Use the supplied target and configuration to immediately call "
+                "the exact write tool so ToolPolicy can create the formal "
+                "approval request. Do not repeat cluster health, capacity, or "
+                "security prechecks. Never ask for approval in plain text."
+            )
         return (
             f"User goal:\n{request}\n\n"
             f"Your assigned task:\n{task.objective}\n\n"
@@ -436,6 +446,7 @@ class HostOrchestrationEngine:
             f"{json.dumps(observations, ensure_ascii=False)}\n\n"
             "Completion criteria:\n- "
             + "\n- ".join(task.completion_criteria)
+            + mutation_instruction
         )
 
     async def _run_task(

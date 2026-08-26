@@ -117,10 +117,21 @@ class LangGraphHostManager:
                 accumulated += str(event.get("text") or "")
                 await on_event(event)
             elif event_type == "done":
-                response = event
-                response["text"] = str(event.get("text") or accumulated)
+                current_state = str(
+                    response.get("state") or ""
+                ).replace("_", "-").lower()
+                if current_state not in {
+                    "failed", "error", "rejected", "cancelled", "canceled",
+                    "input-required",
+                }:
+                    response = event
+                    response["text"] = str(
+                        event.get("text") or accumulated
+                    )
             elif event_type == "error":
                 response = {"state": "failed", "error": event.get("text")}
+            elif event_type == "approval_required":
+                response = event
             elif not event_type:
                 response = event
             if event.get("specialist_output") is not None:

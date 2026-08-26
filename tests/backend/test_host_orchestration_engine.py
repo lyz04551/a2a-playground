@@ -166,6 +166,19 @@ async def collect(engine):
     return [event async for event in engine.stream("user request", "run-1")]
 
 
+def test_mutation_prompt_requires_immediate_write_tool_after_precheck():
+    task = planned("deploy-nginx", "orchestrator").model_copy(
+        update={"risk": "write", "workflow_role": "mutation"}
+    )
+
+    prompt = HostOrchestrationEngine._react_task_prompt(
+        "deploy nginx", task, HostRunState(goal="deploy nginx")
+    )
+
+    assert "immediately call the exact write tool" in prompt
+    assert "Do not repeat cluster health, capacity, or security prechecks" in prompt
+
+
 @pytest.mark.anyio
 async def test_react_next_round_observes_results_before_deciding_again():
     class ReactDecisions:

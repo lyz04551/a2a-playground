@@ -11,11 +11,6 @@ EXPECTED_AGENT_SERVICES = {
     "k8s-orchestrator",
     "k8s-ops",
     "k8s-security",
-    "k8s-infrastructure",
-    "k8s-helm",
-    "k8s-incident-responder",
-    "k8s-capacity-planner",
-    "k8s-gpu-specialist",
 }
 
 
@@ -33,7 +28,7 @@ def test_compose_offers_all_local_agents_without_backend_startup_dependency():
     assert backend_dependencies.isdisjoint(EXPECTED_AGENT_SERVICES)
 
 
-def test_optional_bootstrap_catalog_has_eight_unique_local_agents():
+def test_optional_bootstrap_catalog_has_three_unique_local_agents():
     raw = _compose()["services"]["backend"]["environment"]["BOOTSTRAP_AGENTS"]
     definitions = json.loads(raw)
 

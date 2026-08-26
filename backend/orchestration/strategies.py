@@ -301,6 +301,23 @@ class DirectExecutionStrategy(_RunBoundStrategy):
                         )
                         return
                     if upstream.get("final"):
+                        if _normalized_state(state) == "input-required":
+                            if not awaiting_approval:
+                                yield failed(
+                                    "input-required status omitted approval",
+                                    state=state,
+                                )
+                                return
+                            yield builder.create(
+                                RunEventType.TASK_STATUS_CHANGED,
+                                task_id=task_id,
+                                parent_task_id=None,
+                                data={
+                                    **common_data(),
+                                    "state": "approval_required",
+                                },
+                            )
+                            return
                         if _normalized_state(state) != "completed":
                             yield failed(
                                 "upstream final status was not completed",

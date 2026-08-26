@@ -28,9 +28,6 @@
 | K8s Security | 8053 | 工作负载、RBAC、镜像和网络安全检查 |
 | K8s Infrastructure | 8054 | 节点维护、默认类和集群注册管理 |
 | K8s Helm | 8055 | Helm release 生命周期管理 |
-| K8s Incident Responder | 8056 | 基于证据链的 Kubernetes 故障诊断 |
-| K8s Capacity Planner | 8057 | CPU、内存、IP、Pod 密度和 HPA 容量规划 |
-| K8s GPU Specialist | 8058 | GPU/大模型工作负载生成、部署和诊断 |
 
 ## 调用关系
 
@@ -55,7 +52,7 @@
 Host Agent 负责选择子智能体，但工具权限由子智能体内部的共享 Runtime
 确定性执行。大模型提示词不能绕过工具策略或审批。
 
-Compose 提供八个本地 Agent 作为可选开发环境，但 Backend 不依赖它们的
+Compose 提供三个本地 Agent 作为可选开发环境，但 Backend 不依赖它们的
 启动顺序或健康状态。外部 A2A Server 只需提供标准 Agent Card 即可注册。
 
 ## 前端设计

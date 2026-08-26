@@ -27,9 +27,7 @@ def test_delegate_decision_requires_tasks():
         HostDecision(action="delegate", reason="Inspect current state", tasks=[])
 
 
-@pytest.mark.parametrize(
-    "action", ["clarify", "request_approval", "complete", "stop"]
-)
+@pytest.mark.parametrize("action", ["clarify", "complete", "stop"])
 def test_non_delegate_decision_rejects_tasks(action):
     with pytest.raises(ValidationError):
         HostDecision(
@@ -40,12 +38,19 @@ def test_non_delegate_decision_rejects_tasks(action):
         )
 
 
-@pytest.mark.parametrize(
-    "action", ["clarify", "request_approval", "complete", "stop"]
-)
+@pytest.mark.parametrize("action", ["clarify", "complete", "stop"])
 def test_non_delegate_decision_requires_response(action):
     with pytest.raises(ValidationError):
         HostDecision(action=action, reason="Explain the decision")
+
+
+def test_host_decision_rejects_text_only_approval_requests():
+    with pytest.raises(ValidationError):
+        HostDecision(
+            action="request_approval",
+            reason="The next operation is a write",
+            response="Please approve the deployment",
+        )
 
 
 def test_delegate_decision_rejects_duplicate_task_ids():
