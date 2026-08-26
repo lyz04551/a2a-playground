@@ -210,3 +210,12 @@ def test_representative_agent_tool_boundaries(
     configs = {config.agent_id: config for config in _load_configs(monkeypatch)}
 
     assert ToolPolicy(configs[agent_id].tool_policy).classify(tool).action is expected
+
+
+def test_orchestrator_prompt_clarifies_incomplete_create_requests_before_tools():
+    prompt = (
+        PROJECT_ROOT / "agents" / "k8s-orchestrator" / "prompt.md"
+    ).read_text(encoding="utf-8")
+
+    assert "资源名称、namespace 或镜像版本" in prompt
+    assert "不得调用任何工具" in prompt

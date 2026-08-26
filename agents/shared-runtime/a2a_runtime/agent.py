@@ -7,9 +7,10 @@ from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import ToolNode, create_react_agent
 
 from .config import AgentRuntimeConfig, load_llm_config
@@ -37,6 +38,8 @@ class RuntimeMCPAgent:
         mcp_client: K8sMCPClient | None = None,
         model=None,
         run_timeout: float | None = None,
+        summary_reserve_seconds: float | None = None,
+        timeout_safety_margin_seconds: float | None = None,
     ):
         self.config = config
         self.prompt = (
@@ -51,9 +54,36 @@ class RuntimeMCPAgent:
             config.mcp_url, transport=config.mcp_transport
         )
         self._model = model
-        self.run_timeout = run_timeout or float(
-            os.getenv("AGENT_RUN_TIMEOUT", "90")
+        self.run_timeout = run_timeout or float(os.getenv("AGENT_RUN_TIMEOUT", "90"))
+        configured_summary_reserve = os.getenv("AGENT_SUMMARY_RESERVE_SECONDS")
+        self.summary_reserve_seconds = (
+            summary_reserve_seconds
+            if summary_reserve_seconds is not None
+            else (
+                float(configured_summary_reserve)
+                if configured_summary_reserve is not None
+                else min(35.0, self.run_timeout * 0.2)
+            )
         )
+        configured_safety_margin = os.getenv("AGENT_TIMEOUT_SAFETY_MARGIN_SECONDS")
+        self.timeout_safety_margin_seconds = (
+            timeout_safety_margin_seconds
+            if timeout_safety_margin_seconds is not None
+            else (
+                float(configured_safety_margin)
+                if configured_safety_margin is not None
+                else min(5.0, self.run_timeout * 0.05)
+            )
+        )
+        self.investigation_timeout = (
+            self.run_timeout
+            - self.summary_reserve_seconds
+            - self.timeout_safety_margin_seconds
+        )
+        if self.investigation_timeout <= 0:
+            raise ValueError(
+                "AGENT_RUN_TIMEOUT must exceed the summary reserve and safety margin"
+            )
         self.max_steps = int(os.getenv("AGENT_MAX_STEPS", "30"))
         self.max_tool_calls = int(os.getenv("AGENT_MAX_TOOL_CALLS", "40"))
         self.tool_budget_warning_ratio = float(
@@ -89,6 +119,7 @@ class RuntimeMCPAgent:
             temperature=0,
             streaming=True,
         )
+        self._model = model
         self._graph = create_react_agent(
             model,
             tools=ToolNode(tools, handle_tool_errors=_handle_tool_error),
@@ -103,7 +134,13 @@ class RuntimeMCPAgent:
         return {
             "state": "ready" if self._tools_loaded else "degraded",
             "checks": {
-                "llm": {"state": "ok" if self._model or load_llm_config("AGENT").configured else "unknown"},
+                "llm": {
+                    "state": (
+                        "ok"
+                        if self._model or load_llm_config("AGENT").configured
+                        else "unknown"
+                    )
+                },
                 "mcp": {"state": mcp_state, "detail": self._dependency_error},
                 "kubernetes": {"state": "ok" if self._tools_loaded else "unknown"},
             },
@@ -126,9 +163,7 @@ class RuntimeMCPAgent:
     async def shutdown(self) -> None:
         await self.mcp_client.disconnect()
 
-    async def stream(
-        self, query: str, context_id: str
-    ) -> AsyncIterable[RuntimeEvent]:
+    async def stream(self, query: str, context_id: str) -> AsyncIterable[RuntimeEvent]:
         approval = self._parse_approval(query)
         if approval is not None:
             async for event in self._resume_approved(context_id, approval):
@@ -166,7 +201,7 @@ class RuntimeMCPAgent:
             # A new context may not have a checkpoint yet.
             pass
         try:
-            async with asyncio.timeout(self.run_timeout):
+            async with asyncio.timeout(self.investigation_timeout):
                 async for state in self._graph.astream(
                     {"messages": [("user", query)]},
                     graph_config,
@@ -207,11 +242,42 @@ class RuntimeMCPAgent:
             self._pending_by_context[context_id] = exc.pending_action
             yield RuntimeEvent.approval_required(exc.pending_action)
             return
-        except TimeoutError:
-            yield RuntimeEvent(
-                type=RuntimeEventType.ERROR,
-                content=f"Agent execution timed out after {self.run_timeout:g}s",
-                is_task_complete=True,
+        except (TimeoutError, GraphRecursionError) as cutoff:
+            cutoff_reason = (
+                "investigation time budget reached"
+                if isinstance(cutoff, TimeoutError)
+                else "investigation step budget reached"
+            )
+            try:
+                content = await self._force_summary(query, graph_config)
+            except TimeoutError:
+                content = self._deterministic_partial_summary(
+                    graph_config,
+                    "强制总结模型也达到时间限制",
+                )
+            except Exception as exc:
+                content = self._deterministic_partial_summary(
+                    graph_config,
+                    f"强制总结模型不可用：{exc}",
+                )
+            yield RuntimeEvent.completed(
+                content=content,
+                artifact_name="specialist_result",
+                data={
+                    "status": "partial",
+                    "summary": content,
+                    "findings": [],
+                    "resources": [],
+                    "evidence": [],
+                    "recommendations": [],
+                    "continuation": {
+                        "allowed": True,
+                        "reason": cutoff_reason,
+                    },
+                    "limitations": [
+                        "调查阶段达到时间预算，以上结论仅基于已完成的检查。"
+                    ],
+                },
             )
             return
 
@@ -234,6 +300,56 @@ class RuntimeMCPAgent:
                 "limitations": [],
             },
         )
+
+    async def _force_summary(self, query: str, graph_config: dict) -> str:
+        if self._model is None:
+            raise RuntimeError("Agent model is unavailable for forced summary")
+        evidence = self._bounded_checkpoint_evidence(graph_config)
+        prompt = (
+            "调查阶段的时间预算已经用完。禁止调用任何工具。请仅根据下面已经取得的"
+            "证据回答用户，优先说明已确认的问题、证据和建议，并明确指出哪些检查尚未"
+            "完成。不要声称执行了证据中没有出现的检查。\n\n"
+            f"用户问题：{query}\n\n已取得证据：\n{evidence}"
+        )
+        async with asyncio.timeout(self.summary_reserve_seconds):
+            response = await self._model.ainvoke([HumanMessage(content=prompt)])
+        content = str(getattr(response, "content", "") or "").strip()
+        if not content:
+            raise RuntimeError("Agent model returned an empty forced summary")
+        return content
+
+    def _deterministic_partial_summary(self, graph_config: dict, reason: str) -> str:
+        evidence = self._bounded_checkpoint_evidence(graph_config)
+        return (
+            "本次调查已达到时间预算，已停止继续调用工具。\n\n"
+            f"已取得的结果：\n{evidence[:6_000]}\n\n"
+            f"限制：{reason}。以上是部分结果；后续检查和任何尚未进入审批的写操作"
+            "均未执行。"
+        )
+
+    def _bounded_checkpoint_evidence(self, graph_config: dict) -> str:
+        try:
+            state = self._graph.get_state(graph_config)
+            messages = state.values.get("messages", [])
+        except (AttributeError, KeyError, TypeError, ValueError):
+            messages = []
+
+        chunks: list[str] = []
+        remaining = 40_000
+        for message in messages:
+            if not isinstance(message, ToolMessage):
+                continue
+            content = str(message.content or "")
+            if not content:
+                continue
+            excerpt = content[: min(6_000, remaining)]
+            chunks.append(
+                f"- 工具调用 {message.tool_call_id or 'unknown'} 的结果：{excerpt}"
+            )
+            remaining -= len(excerpt)
+            if remaining <= 0:
+                break
+        return "\n".join(chunks) or "没有可用的已完成工具结果。"
 
     @staticmethod
     def _parse_approval(query: str) -> dict[str, Any] | None:
@@ -274,6 +390,11 @@ class RuntimeMCPAgent:
             return
         if approval.get("decision") != "approved":
             self._pending_by_context.pop(context_id, None)
+            self._close_pending_tool_call(
+                context_id,
+                pending,
+                "用户拒绝了该工具调用，未执行任何写操作。",
+            )
             yield RuntimeEvent.completed(
                 content="用户已拒绝该变更，未执行任何写操作。",
                 artifact_name="specialist_result",
@@ -294,27 +415,67 @@ class RuntimeMCPAgent:
                 is_task_complete=True,
             )
             return
-        result = await self.mcp_client.call_tool(
-            pending.tool_name, pending.arguments
-        )
+        result = await self.mcp_client.call_tool(pending.tool_name, pending.arguments)
         self._pending_by_context.pop(context_id, None)
+        self._close_pending_tool_call(context_id, pending, str(result))
         yield RuntimeEvent.completed(
             content=result,
             artifact_name="specialist_result",
             data={
                 "status": "completed",
                 "summary": str(result),
-                "evidence": [{
-                    "tool": pending.tool_name,
-                    "arguments": pending.arguments,
-                    "result": result,
-                }],
+                "evidence": [
+                    {
+                        "tool": pending.tool_name,
+                        "arguments": pending.arguments,
+                        "result": result,
+                    }
+                ],
                 "continuation": {
                     "allowed": True,
                     "reason": "approved MCP action completed",
                 },
             },
         )
+
+    def _close_pending_tool_call(
+        self, context_id: str, pending: PendingAction, result: str
+    ) -> None:
+        """Append the missing tool result left behind by an approval interrupt."""
+        if self._graph is None:
+            return
+        graph_config = {"configurable": {"thread_id": context_id}}
+        state = self._graph.get_state(graph_config)
+        messages = state.values.get("messages", [])
+        completed_call_ids = {
+            str(message.tool_call_id or "")
+            for message in messages
+            if isinstance(message, ToolMessage)
+        }
+        for message in reversed(messages):
+            if not isinstance(message, AIMessage):
+                continue
+            for call in reversed(message.tool_calls):
+                call_id = str(call.get("id") or "")
+                if (
+                    call_id
+                    and call_id not in completed_call_ids
+                    and call.get("name") == pending.tool_name
+                    and call.get("args", {}) == pending.arguments
+                ):
+                    self._graph.update_state(
+                        graph_config,
+                        {
+                            "messages": [
+                                ToolMessage(
+                                    content=result,
+                                    tool_call_id=call_id,
+                                )
+                            ]
+                        },
+                        as_node="tools",
+                    )
+                    return
 
 
 def load_prompt(path: str | Path) -> str:

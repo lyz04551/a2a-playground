@@ -190,7 +190,7 @@ async def test_client_bounds_a_hung_tool_call():
 
 
 @pytest.mark.anyio
-async def test_agent_bounds_a_hung_graph_execution():
+async def test_agent_returns_deterministic_partial_result_when_summary_model_is_unavailable():
     class HungGraph:
         async def astream(self, *_args, **_kwargs):
             await asyncio.Event().wait()
@@ -210,7 +210,10 @@ async def test_agent_bounds_a_hung_graph_execution():
 
     assert len(events) == 1
     assert events[0].is_task_complete is True
-    assert "timed out" in events[0].content
+    assert events[0].type is RuntimeEventType.COMPLETED
+    assert events[0].data["status"] == "partial"
+    assert "时间预算" in events[0].content
+    assert "没有可用的已完成工具结果" in events[0].content
 
 
 @pytest.mark.anyio
