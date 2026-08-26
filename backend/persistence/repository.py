@@ -1,14 +1,12 @@
 from __future__ import annotations
 
 import uuid
-import os
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, delete, event, func, insert, inspect, select, text, update
-from sqlalchemy.dialects.sqlite import insert as sqlite_insert
-from pydantic import ValidationError
+from sqlalchemy import create_engine, delete, func, insert, select, update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.engine import make_url
 
 from backend.orchestration.events import RunEvent
 
@@ -33,91 +31,21 @@ RUN_EVENT_ENVELOPE_FIELDS = {
 }
 
 
-class SQLiteRepository:
-    def __init__(self, database_path: str | Path):
-        self.database_path = Path(database_path)
-        self.database_path.parent.mkdir(parents=True, exist_ok=True)
-        self.engine = create_engine(
-            f"sqlite:///{self.database_path}",
-            future=True,
-        )
-
-        @event.listens_for(self.engine, "connect")
-        def enable_foreign_keys(dbapi_connection, _record):
-            cursor = dbapi_connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.execute(
-                f"PRAGMA busy_timeout={int(os.getenv('PLAYGROUND_DB_BUSY_TIMEOUT_MS', '5000'))}"
-            )
-            cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.close()
+class DatabaseRepository:
+    def __init__(self, database_url: str):
+        parsed = make_url(database_url)
+        if not parsed.drivername.startswith("postgresql"):
+            raise ValueError("DATABASE_URL must use PostgreSQL")
+        self.database_url = database_url
+        self.engine = create_engine(database_url, future=True)
 
     def initialize(self) -> None:
-        if inspect(self.engine).has_table("events"):
-            self._upgrade_event_columns()
-        metadata.create_all(self.engine)
-        if not inspect(self.engine).has_table("events"):
-            raise RuntimeError("events table initialization failed")
-        self._upgrade_legacy_run_events()
+        from .migrate import upgrade_database
 
-    def _upgrade_event_columns(self) -> None:
-        existing = {column["name"] for column in inspect(self.engine).get_columns("events")}
-        additions = {
-            "run_id": "VARCHAR",
-            "sequence": "INTEGER",
-            "created_at": "VARCHAR",
-        }
-        with self.engine.begin() as connection:
-            for name, column_type in additions.items():
-                if name not in existing:
-                    connection.execute(text(f"ALTER TABLE events ADD COLUMN {name} {column_type}"))
-            rows = connection.execute(select(events.c.id, events.c.data)).mappings()
-            for row in rows:
-                payload = dict(row["data"])
-                values = {"created_at": str(payload.get("timestamp") or payload.get("created_at") or "")}
-                if RUN_EVENT_ENVELOPE_FIELDS.issubset(payload):
-                    try:
-                        envelope = RunEvent.model_validate(payload)
-                    except ValidationError:
-                        envelope = None
-                    if envelope is not None:
-                        values.update(run_id=envelope.run_id, sequence=envelope.sequence, created_at=envelope.timestamp.isoformat())
-                connection.execute(update(events).where(events.c.id == row["id"]).values(**values))
-            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_events_run_sequence ON events (run_id, sequence) WHERE run_id IS NOT NULL"))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_conversation_created ON events (conversation_id, created_at)"))
-            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_type_created ON events (event_type, created_at)"))
-
-    def _upgrade_legacy_run_events(self) -> None:
-        """Mark verified pre-discriminator RunEvent rows for the new stream."""
-        with self.engine.begin() as connection:
-            rows = connection.execute(
-                select(events).where(
-                    events.c.event_type != RUN_EVENT_DISCRIMINATOR
-                )
-            ).mappings()
-            for row in rows:
-                payload = dict(row["data"])
-                if not RUN_EVENT_ENVELOPE_FIELDS.issubset(payload):
-                    continue
-                try:
-                    run_event = RunEvent.model_validate(payload)
-                except ValidationError:
-                    continue
-                if (
-                    run_event.event_id != row["id"]
-                    or run_event.conversation_id != row["conversation_id"]
-                    or (run_event.task_id or "") != row["task_id"]
-                    or run_event.type.value != row["event_type"]
-                ):
-                    continue
-                connection.execute(
-                    update(events)
-                    .where(events.c.id == row["id"])
-                    .values(event_type=RUN_EVENT_DISCRIMINATOR)
-                )
+        upgrade_database(self.database_url)
 
     def upsert_agent(self, data: dict[str, Any]) -> dict[str, Any]:
-        statement = sqlite_insert(agents).values(
+        statement = postgresql_insert(agents).values(
             id=data["id"],
             name=data["name"],
             url=data["url"],
@@ -160,7 +88,10 @@ class SQLiteRepository:
             statement = statement.where(
                 conversations.c.agent_id == agent_id
             )
-        statement = statement.order_by(func.json_extract(conversations.c.data, "$.updated_at").desc(), conversations.c.id)
+        statement = statement.order_by(
+            conversations.c.data["updated_at"].as_string().desc(),
+            conversations.c.id,
+        )
         if limit is not None:
             statement = statement.limit(limit).offset(offset)
         with self.engine.connect() as connection:
@@ -263,21 +194,22 @@ class SQLiteRepository:
                     data=data,
                 )
             )
-            current_count = func.coalesce(
-                func.json_extract(conversations.c.data, "$.message_count"), 0
-            )
+            conversation = connection.execute(
+                select(conversations.c.data)
+                .where(conversations.c.id == data["conversation_id"])
+                .with_for_update()
+            ).scalar_one()
+            conversation = dict(conversation)
+            conversation["message_count"] = int(
+                conversation.get("message_count", 0)
+            ) + 1
+            conversation["updated_at"] = datetime.now(
+                timezone.utc
+            ).isoformat()
             connection.execute(
                 update(conversations)
                 .where(conversations.c.id == data["conversation_id"])
-                .values(
-                    data=func.json_set(
-                        conversations.c.data,
-                        "$.message_count",
-                        current_count + 1,
-                        "$.updated_at",
-                        datetime.now(timezone.utc).isoformat(),
-                    )
-                )
+                .values(data=conversation)
             )
         return dict(data)
 
@@ -552,52 +484,48 @@ class SQLiteRepository:
     def append_run_event(self, event: RunEvent) -> RunEvent:
         """Persist an event once and assign its next sequence within one transaction."""
         candidate = RunEvent.model_validate(event)
-        with self.engine.connect() as connection:
-            connection.exec_driver_sql("BEGIN IMMEDIATE")
-            try:
-                existing = connection.execute(
-                    select(events.c.data).where(
-                        events.c.id == candidate.event_id,
-                        events.c.event_type == RUN_EVENT_DISCRIMINATOR,
+        with self.engine.begin() as connection:
+            connection.execute(
+                select(
+                    func.pg_advisory_xact_lock(
+                        func.hashtext(candidate.run_id)
                     )
-                ).scalar_one_or_none()
-                if existing is not None:
-                    connection.commit()
-                    return RunEvent.model_validate(existing)
+                )
+            )
+            existing = connection.execute(
+                select(events.c.data).where(
+                    events.c.id == candidate.event_id,
+                    events.c.event_type == RUN_EVENT_DISCRIMINATOR,
+                )
+            ).scalar_one_or_none()
+            if existing is not None:
+                return RunEvent.model_validate(existing)
 
-                sequence = (
-                    connection.execute(
-                        select(
-                            func.coalesce(
-                                func.max(events.c.sequence),
-                                0,
-                            )
-                        ).where(
-                            events.c.event_type == RUN_EVENT_DISCRIMINATOR,
-                            events.c.run_id == candidate.run_id
-                        )
-                    ).scalar_one()
-                    + 1
-                )
-                persisted = candidate.model_copy(update={"sequence": sequence})
-                payload = persisted.model_dump(mode="json")
+            sequence = (
                 connection.execute(
-                    insert(events).values(
-                        id=persisted.event_id,
-                        conversation_id=persisted.conversation_id,
-                        task_id=persisted.task_id or "",
-                        event_type=RUN_EVENT_DISCRIMINATOR,
-                        run_id=persisted.run_id,
-                        sequence=persisted.sequence,
-                        created_at=persisted.timestamp.isoformat(),
-                        data=payload,
+                    select(
+                        func.coalesce(func.max(events.c.sequence), 0)
+                    ).where(
+                        events.c.event_type == RUN_EVENT_DISCRIMINATOR,
+                        events.c.run_id == candidate.run_id,
                     )
+                ).scalar_one()
+                + 1
+            )
+            persisted = candidate.model_copy(update={"sequence": sequence})
+            connection.execute(
+                insert(events).values(
+                    id=persisted.event_id,
+                    conversation_id=persisted.conversation_id,
+                    task_id=persisted.task_id or "",
+                    event_type=RUN_EVENT_DISCRIMINATOR,
+                    run_id=persisted.run_id,
+                    sequence=persisted.sequence,
+                    created_at=persisted.timestamp.isoformat(),
+                    data=persisted.model_dump(mode="json"),
                 )
-                connection.commit()
-                return persisted
-            except Exception:
-                connection.rollback()
-                raise
+            )
+            return persisted
 
     def list_run_events(
         self, run_id: str, after_sequence: int = 0
@@ -626,7 +554,7 @@ class SQLiteRepository:
         task_id: str | None,
     ) -> dict[str, Any]:
         binding_id = f"{run_id}:{agent_id}"
-        statement = sqlite_insert(remote_bindings).values(
+        statement = postgresql_insert(remote_bindings).values(
             id=binding_id,
             run_id=run_id,
             agent_id=agent_id,
@@ -770,7 +698,7 @@ class SQLiteRepository:
         with self.engine.begin() as connection:
             for row in conversation_rows:
                 connection.execute(
-                    sqlite_insert(conversations)
+                    postgresql_insert(conversations)
                     .values(
                         id=row["id"],
                         agent_id=row.get("agent_id", ""),
@@ -782,7 +710,7 @@ class SQLiteRepository:
                 )
             for row in message_rows:
                 connection.execute(
-                    sqlite_insert(messages)
+                    postgresql_insert(messages)
                     .values(
                         id=row["id"],
                         conversation_id=row["conversation_id"],
@@ -794,7 +722,7 @@ class SQLiteRepository:
                 )
             for row in event_rows:
                 connection.execute(
-                    sqlite_insert(events)
+                    postgresql_insert(events)
                     .values(
                         id=row["id"],
                         conversation_id=row.get("conversation_id", ""),

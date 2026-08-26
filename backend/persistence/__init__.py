@@ -1,4 +1,3 @@
-from .repository import SQLiteRepository
+from .repository import DatabaseRepository
 
-__all__ = ["SQLiteRepository"]
-
+__all__ = ["DatabaseRepository"]
