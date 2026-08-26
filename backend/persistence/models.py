@@ -135,10 +135,3 @@ artifacts = Table(
     Column("name", String, nullable=False),
     Column("data", JSON, nullable=False),
 )
-
-migrations = Table(
-    "migrations",
-    metadata,
-    Column("id", String, primary_key=True),
-    Column("data", JSON, nullable=False),
-)

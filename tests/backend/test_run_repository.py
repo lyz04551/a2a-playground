@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.orchestration.events import RunEvent, RunEventType
-from backend.persistence.repository import SQLiteRepository
+from tests.postgres_helpers import create_test_repository
 
 
 def _event(event_id: str) -> RunEvent:
@@ -18,7 +18,7 @@ def _event(event_id: str) -> RunEvent:
 
 
 def test_persists_a_run_task_hierarchy(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
 
     repository.create_task(
@@ -44,7 +44,7 @@ def test_persists_a_run_task_hierarchy(tmp_path):
 
 
 def test_appends_run_events_with_repository_assigned_sequences(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
 
     first = repository.append_run_event(_event("event-1"))
@@ -61,7 +61,7 @@ def test_appends_run_events_with_repository_assigned_sequences(tmp_path):
 
 
 def test_appending_a_duplicate_run_event_is_idempotent(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
 
     first = repository.append_run_event(_event("event-1"))
@@ -72,7 +72,7 @@ def test_appending_a_duplicate_run_event_is_idempotent(tmp_path):
 
 
 def test_run_events_ignore_generic_events_with_incidental_run_fields(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.add_event(
         {
@@ -94,7 +94,7 @@ def test_run_events_ignore_generic_events_with_incidental_run_fields(tmp_path):
 
 
 def test_deleting_a_conversation_preserves_live_run_event_history(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_conversation({"id": "conv-1", "agent_id": "host"})
     repository.create_run("run-1", "conv-1", "running")
@@ -112,7 +112,7 @@ def test_deleting_a_conversation_preserves_live_run_event_history(tmp_path):
 
 
 def test_lists_tasks_in_parent_before_descendant_order(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     for task_id, parent_task_id in (
         ("root", None),
@@ -139,7 +139,7 @@ def test_lists_tasks_in_parent_before_descendant_order(tmp_path):
 
 
 def test_task_updates_preserve_identity_run_and_valid_parent_links(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     for task_id, run_id, parent_task_id in (
         ("root", "run-1", None),
@@ -173,7 +173,7 @@ def test_task_updates_preserve_identity_run_and_valid_parent_links(tmp_path):
 
 
 def test_create_task_rejects_a_missing_parent(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
 
     with pytest.raises(ValueError, match="does not exist"):
@@ -188,50 +188,8 @@ def test_create_task_rejects_a_missing_parent(tmp_path):
         )
 
 
-def test_initialize_upgrades_legacy_run_events_without_touching_generic_rows(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
-    repository.initialize()
-    legacy = _event("legacy-run-event")
-    repository.add_event(
-        {
-            **legacy.model_dump(mode="json"),
-            "id": "legacy-run-event",
-            "conversation_id": "conv-1",
-            "task_id": "",
-            "event_type": "task.started",
-        }
-    )
-    repository.add_event(
-        {
-            "id": "generic-1",
-            "conversation_id": "conv-1",
-            "task_id": "",
-            "event_type": "task.started",
-            "run_id": "run-1",
-            "sequence": 99,
-        }
-    )
-
-    repository.initialize()
-    repository.initialize()
-    duplicate = repository.append_run_event(legacy)
-    next_event = repository.append_run_event(_event("event-2"))
-    repository.delete_conversation("conv-1")
-
-    assert duplicate.sequence == 1
-    assert next_event.sequence == 2
-    assert [event.event_id for event in repository.list_run_events("run-1")] == [
-        "legacy-run-event",
-        "event-2",
-    ]
-    assert [row["event_id"] for row in repository.list_events("conv-1")] == [
-        "legacy-run-event",
-        "event-2",
-    ]
-
-
 def test_generic_events_cannot_use_the_run_event_discriminator(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
 
     with pytest.raises(ValueError, match="reserved"):
@@ -252,7 +210,7 @@ def test_task_parent_validation_rejects_legacy_cycles_and_indirect_cross_run_lin
 
     from backend.persistence.models import orchestration_tasks
 
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     for task_id, run_id, parent_task_id in (
         ("a", "run-1", None),
@@ -294,7 +252,7 @@ def test_lists_a_deep_task_hierarchy_without_recursion(tmp_path):
 
     from backend.persistence.models import orchestration_tasks
 
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     parent_task_id = None
     rows = []

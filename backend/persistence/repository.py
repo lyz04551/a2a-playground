@@ -17,8 +17,6 @@ from .models import (
     conversations,
     events,
     messages,
-    metadata,
-    migrations,
     orchestration_tasks,
     remote_bindings,
     runs,
@@ -198,19 +196,22 @@ class DatabaseRepository:
                 select(conversations.c.data)
                 .where(conversations.c.id == data["conversation_id"])
                 .with_for_update()
-            ).scalar_one()
-            conversation = dict(conversation)
-            conversation["message_count"] = int(
-                conversation.get("message_count", 0)
-            ) + 1
-            conversation["updated_at"] = datetime.now(
-                timezone.utc
-            ).isoformat()
-            connection.execute(
-                update(conversations)
-                .where(conversations.c.id == data["conversation_id"])
-                .values(data=conversation)
-            )
+            ).scalar_one_or_none()
+            if conversation is not None:
+                conversation = dict(conversation)
+                conversation["message_count"] = int(
+                    conversation.get("message_count", 0)
+                ) + 1
+                conversation["updated_at"] = datetime.now(
+                    timezone.utc
+                ).isoformat()
+                connection.execute(
+                    update(conversations)
+                    .where(
+                        conversations.c.id == data["conversation_id"]
+                    )
+                    .values(data=conversation)
+                )
         return dict(data)
 
     def get_message(self, message_id: str) -> dict[str, Any] | None:
@@ -668,67 +669,3 @@ class DatabaseRepository:
                 raise ValueError("approval already has a conflicting decision")
             approval = dict(current)
         return approval, changed
-
-    def has_migration(self, migration_id: str) -> bool:
-        with self.engine.connect() as connection:
-            return (
-                connection.execute(
-                    select(migrations.c.id).where(
-                        migrations.c.id == migration_id
-                    )
-                ).scalar_one_or_none()
-                is not None
-            )
-
-    def mark_migration(
-        self, migration_id: str, data: dict[str, Any]
-    ) -> None:
-        with self.engine.begin() as connection:
-            connection.execute(
-                insert(migrations).values(id=migration_id, data=data)
-            )
-
-    def import_legacy_rows(
-        self,
-        *,
-        conversation_rows: list[dict[str, Any]],
-        message_rows: list[dict[str, Any]],
-        event_rows: list[dict[str, Any]],
-    ) -> None:
-        with self.engine.begin() as connection:
-            for row in conversation_rows:
-                connection.execute(
-                    postgresql_insert(conversations)
-                    .values(
-                        id=row["id"],
-                        agent_id=row.get("agent_id", ""),
-                        title=row.get("title", "New Chat"),
-                        type=row.get("type", "single"),
-                        data=row,
-                    )
-                    .on_conflict_do_nothing(index_elements=[conversations.c.id])
-                )
-            for row in message_rows:
-                connection.execute(
-                    postgresql_insert(messages)
-                    .values(
-                        id=row["id"],
-                        conversation_id=row["conversation_id"],
-                        role=row.get("role", "user"),
-                        content=row.get("content", ""),
-                        data=row,
-                    )
-                    .on_conflict_do_nothing(index_elements=[messages.c.id])
-                )
-            for row in event_rows:
-                connection.execute(
-                    postgresql_insert(events)
-                    .values(
-                        id=row["id"],
-                        conversation_id=row.get("conversation_id", ""),
-                        task_id=row.get("task_id", ""),
-                        event_type=row.get("event_type", ""),
-                        data=row,
-                    )
-                    .on_conflict_do_nothing(index_elements=[events.c.id])
-                )

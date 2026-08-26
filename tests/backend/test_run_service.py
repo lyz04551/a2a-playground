@@ -6,7 +6,7 @@ import pytest
 from backend.orchestration.commands import RunCommand
 from backend.orchestration.events import RunEventType
 from backend.orchestration.events import RunEvent
-from backend.persistence.repository import SQLiteRepository
+from tests.postgres_helpers import create_test_repository
 from backend.registry.service import AgentRegistry
 
 
@@ -33,7 +33,7 @@ class UnusedAutoHost:
 def make_service(tmp_path, events):
     from backend.orchestration.service import RunService
 
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.upsert_agent(
         {

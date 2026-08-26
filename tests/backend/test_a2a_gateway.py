@@ -5,7 +5,7 @@ import json
 import pytest
 
 from backend.a2a_gateway import A2AGateway
-from backend.persistence.repository import SQLiteRepository
+from tests.postgres_helpers import create_test_repository
 
 
 class FakeTransport:
@@ -102,7 +102,7 @@ class ApprovalStreamingTransport(FakeTransport):
 
 @pytest.mark.anyio
 async def test_gateway_reuses_remote_context_for_same_run_and_agent(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run("run-1", "conv-1", "running")
     transport = FakeTransport()
@@ -122,7 +122,7 @@ async def test_gateway_reuses_remote_context_for_same_run_and_agent(tmp_path):
 
 @pytest.mark.anyio
 async def test_gateway_uses_distinct_context_for_another_agent(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run("run-1", "conv-1", "running")
     gateway = A2AGateway(repository, transport=FakeTransport())
@@ -141,7 +141,7 @@ async def test_gateway_uses_distinct_context_for_another_agent(tmp_path):
 
 @pytest.mark.anyio
 async def test_gateway_reuses_agent_context_across_runs_in_one_conversation(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run("run-1", "conv-1", "running")
     repository.create_run("run-2", "conv-1", "running")
@@ -158,7 +158,7 @@ async def test_gateway_reuses_agent_context_across_runs_in_one_conversation(tmp_
 
 @pytest.mark.anyio
 async def test_approval_continuation_reuses_pending_task_id(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run("run-1", "conv-1", "running")
     transport = FakeTransport()
@@ -183,7 +183,7 @@ async def test_approval_continuation_reuses_pending_task_id(tmp_path):
 
 @pytest.mark.anyio
 async def test_gateway_stream_redacts_public_tool_events_and_saves_binding(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run("run-1", "conv-1", "running")
     gateway = A2AGateway(repository, transport=StreamingTransport())
@@ -211,7 +211,7 @@ async def test_gateway_stream_redacts_public_tool_events_and_saves_binding(tmp_p
 
 @pytest.mark.anyio
 async def test_gateway_stream_persists_and_exposes_clickable_approval(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run("run-1", "conv-1", "running")
     gateway = A2AGateway(repository, transport=ApprovalStreamingTransport())
