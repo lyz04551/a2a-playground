@@ -26,6 +26,7 @@ def test_compose_offers_all_local_agents_without_backend_startup_dependency():
     assert EXPECTED_AGENT_SERVICES <= set(services)
     backend_dependencies = set((services["backend"].get("depends_on") or {}))
     assert backend_dependencies.isdisjoint(EXPECTED_AGENT_SERVICES)
+    assert backend_dependencies == {"backend-migrate"}
 
 
 def test_optional_bootstrap_catalog_has_three_unique_local_agents():
