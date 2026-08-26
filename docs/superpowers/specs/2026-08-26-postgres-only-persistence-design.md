@@ -1,150 +1,150 @@
-# Postgres-only persistence design
+# Postgres 单数据库技术栈持久化设计
 
-## Goal
+## 目标
 
-Replace the backend's SQLite persistence and every agent's in-memory LangGraph checkpointer with Postgres-backed persistence. Docker Compose becomes the canonical local runtime. The new deployment starts with empty Postgres databases; existing SQLite and legacy JSON data are not migrated.
+将后端的 SQLite 持久化和所有 Agent 的 LangGraph 内存 checkpointer 替换为基于 Postgres 的持久化。Docker Compose 将成为标准的本地运行方式。新的部署从空的 Postgres 数据库开始，不迁移现有 SQLite 和旧版 JSON 数据。
 
-The change must preserve the current backend API, Direct conversations, Auto orchestration, approval flow, event stream, and frontend rendering behavior.
+本次改造必须保持现有后端 API、Direct 对话、Auto 编排、审批流程、事件流和前端展示行为不变。
 
-## Scope
+## 范围
 
-Included:
+包含：
 
-- Move backend business data to Postgres.
-- Remove SQLite runtime support, SQLite configuration, SQLite-specific SQL, and the legacy JSON-to-SQLite importer.
-- Add a Postgres service to Docker Compose with durable local storage and a health check.
-- Use a Postgres LangGraph checkpointer in every shared-runtime Agent.
-- Persist Agent conversation state across Agent process restarts when the same LangGraph `thread_id` is reused.
-- Add automated repository, API, Compose, and browser regression coverage.
-- Document startup, configuration, reset, and test commands.
+- 将后端业务数据迁移到 Postgres。
+- 删除 SQLite 运行时支持、SQLite 配置、SQLite 专用 SQL 和旧版 JSON 到 SQLite 的导入器。
+- 在 Docker Compose 中增加具有本地持久卷和健康检查的 Postgres 服务。
+- 所有使用共享运行时的 Agent 改用 Postgres LangGraph checkpointer。
+- 在复用相同 LangGraph `thread_id` 时，使 Agent 对话状态能够跨 Agent 进程重启恢复。
+- 增加 Repository、API、Compose 和浏览器自动化回归测试。
+- 补充启动、配置、重置和测试命令文档。
 
-Excluded:
+不包含：
 
-- Migrating existing `playground-local.db` or legacy JSON rows.
-- Making LangGraph checkpoint tables part of the backend business API.
-- Reworking the frontend user experience.
-- Replacing the existing custom approval protocol with LangGraph `interrupt` in this change.
+- 迁移已有的 `playground-local.db` 或旧版 JSON 数据。
+- 将 LangGraph checkpoint 内部表暴露为后端业务 API。
+- 重新设计前端交互体验。
+- 在本次改造中将现有自定义审批协议替换为 LangGraph `interrupt`。
 
-## Architecture
+## 架构
 
-One Postgres container hosts two logical databases:
+一个 Postgres 容器承载两个逻辑数据库：
 
-- `playground`: backend-owned business tables.
-- `langgraph`: LangGraph-owned checkpoint tables.
+- `playground`：后端负责管理的业务表。
+- `langgraph`：由 LangGraph 管理的 checkpoint 表。
 
-The backend accesses only `playground`. Agents access only `langgraph`. They use different connection URLs and credentials where practical. Backend code must not query or mutate LangGraph's internal tables.
+后端只访问 `playground`，Agent 只访问 `langgraph`。在条件允许时，两者使用不同的连接地址和账号权限。后端代码不得查询或修改 LangGraph 内部表。
 
-The stable identity chain remains:
+继续保持以下稳定标识链路：
 
 ```text
 conversation_id -> A2A context_id -> LangGraph thread_id
 ```
 
-Each Agent retains its existing Agent-qualified context ID, so multiple Agents participating in one Auto conversation do not share graph state accidentally.
+每个 Agent 继续使用包含 Agent 标识的 context ID，避免参与同一个 Auto 会话的多个 Agent 意外共享 Graph 状态。
 
-## Backend persistence
+## 后端持久化
 
-Rename the repository to a database-neutral `DatabaseRepository`, but support Postgres only at runtime. Construct its SQLAlchemy engine from the required `DATABASE_URL` environment variable. Absence of the variable, an unsupported URL scheme, or an unavailable database is a startup error with a clear message.
+将 Repository 重命名为与数据库实现无关的 `DatabaseRepository`，但运行时只支持 Postgres。通过必需的 `DATABASE_URL` 环境变量创建 SQLAlchemy Engine。如果缺少该变量、URL 协议不受支持或数据库不可访问，后端应输出明确错误并启动失败。
 
-Reuse the existing SQLAlchemy Core table definitions and public repository methods so API and orchestration callers do not change. Replace SQLite-only behavior as follows:
+复用现有 SQLAlchemy Core 表定义和 Repository 公共方法，避免修改 API 和编排层调用方。SQLite 专用实现按以下方式替换：
 
-- Use PostgreSQL `INSERT ... ON CONFLICT` for Agent upserts.
-- Remove SQLite PRAGMA, WAL, busy-timeout, file-path, and directory creation logic.
-- Replace SQLite JSON functions used for message counters and timestamps with a transactionally locked read-update-write operation. This keeps the stored JSON envelope consistent with the normalized columns without adding Postgres-specific JSON expressions throughout the repository.
-- Use PostgreSQL-compatible indexes and constraints.
-- Create and upgrade the schema through Alembic migrations instead of runtime `ALTER TABLE` inspection.
+- Agent upsert 改用 PostgreSQL `INSERT ... ON CONFLICT`。
+- 删除 SQLite PRAGMA、WAL、busy timeout、数据库文件路径和目录创建逻辑。
+- 消息数量和更新时间不再依赖 SQLite JSON 函数；改为在事务中锁定会话行，读取 JSON、合并修改并写回。这样可以保持 JSON 数据和普通列一致，同时避免在 Repository 中散布 Postgres 专用 JSON 表达式。
+- 使用兼容 PostgreSQL 的索引和约束。
+- 使用 Alembic 管理表结构创建和升级，不再在应用运行时检查表并手写 `ALTER TABLE`。
 
-Application startup runs an explicit migration command or a small migration entrypoint before serving traffic. Schema migration failure prevents the backend from becoming ready.
+应用开始提供服务前，应运行明确的迁移命令或迁移入口。数据库结构迁移失败时，后端不得进入就绪状态。
 
-## Agent checkpoints
+## Agent checkpoint
 
-The shared Agent runtime uses `AsyncPostgresSaver`, because graph execution uses asynchronous streaming. `AGENT_CHECKPOINT_DATABASE_URL` is required in the Docker Compose runtime.
+共享 Agent 运行时使用 `AsyncPostgresSaver`，因为 Graph 当前通过异步流执行。Docker Compose 运行时必须配置 `AGENT_CHECKPOINT_DATABASE_URL`。
 
-The checkpointer is opened once during Agent initialization, retained for the lifetime of the compiled graph, and closed during Agent shutdown. Its schema setup is performed as a deployment/startup migration step and is safe to run before multiple Agents start.
+checkpointer 在 Agent 初始化时打开一次，在编译后的 Graph 整个生命周期内保持可用，并在 Agent 关闭时释放。所需表结构通过部署或启动阶段的迁移步骤创建，并保证在多个 Agent 启动前安全完成。
 
-Calls that inspect graph state use the asynchronous API, including `aget_state`, so no synchronous checkpointer methods are invoked from the async stream path.
+Graph 状态读取使用异步接口，包括 `aget_state`，避免异步流路径调用同步 checkpointer 方法。
 
-If Postgres is unavailable, the Agent reports degraded readiness and does not silently fall back to memory. This prevents conversations from appearing persistent while actually being process-local.
+Postgres 不可用时，Agent 就绪状态应显示为 degraded，并且不得静默回退到内存模式，防止系统表面上支持持久化，实际仍只在进程内保存状态。
 
-The existing `_pending_by_context` approval cache remains outside the checkpoint scope. Backend approval records remain authoritative. Approval survival across an Agent restart is not promised unless the current A2A resume protocol can reconstruct the pending action from persisted backend data; that behavior will be covered explicitly in tests and reported if further protocol work is required.
+现有 `_pending_by_context` 审批缓存不属于 checkpoint 范围，后端审批记录仍是权威数据。除非当前 A2A 恢复协议能够根据后端持久化记录重建待审批动作，否则本次改造不承诺 Agent 重启后仍能继续原审批。测试必须明确覆盖这一行为；如果还需改造协议，应在测试结论中说明。
 
-## Docker Compose and configuration
+## Docker Compose 和配置
 
-Docker Compose adds one durable Postgres service with a named volume and health check. Backend and Agent services depend on the healthy Postgres service.
+Docker Compose 增加一个带命名持久卷和健康检查的 Postgres 服务。后端和 Agent 服务必须依赖健康状态正常的 Postgres 服务。
 
-Required URLs:
+需要配置以下连接地址：
 
 ```text
 DATABASE_URL=postgresql+psycopg://...@postgres:5432/playground
 AGENT_CHECKPOINT_DATABASE_URL=postgresql://...@postgres:5432/langgraph
 ```
 
-Credentials are sourced from environment variables and example development defaults. Production secrets are not committed. Resetting the named Postgres volume intentionally deletes all local backend and checkpoint data and must be documented as destructive.
+账号密码通过环境变量和开发环境示例默认值提供，不得提交生产密码。删除 Postgres 命名卷会清空本地后端数据和 checkpoint 数据，文档必须明确说明这是破坏性操作。
 
-## Failure and consistency behavior
+## 故障与一致性行为
 
-- Backend database failure: startup/readiness fails; requests are not served against an in-memory substitute.
-- Agent checkpoint failure: Agent readiness is degraded and requests return a dependency error without losing the stable context ID.
-- Transaction failure: the whole repository mutation rolls back.
-- Duplicate event or approval writes: existing unique keys and idempotent repository behavior remain enforced by Postgres constraints.
-- Concurrent message writes: the conversation row is locked while its embedded message count and update timestamp are changed.
-- Database reset: the system starts empty and the three configured Agents are registered through the normal bootstrap or registration path.
+- 后端数据库故障：启动或就绪检查失败，不得使用内存替代方案继续提供请求。
+- Agent checkpoint 故障：Agent 就绪状态变为 degraded，请求返回依赖错误，同时保留稳定的 context ID。
+- 事务失败：整个 Repository 写操作回滚。
+- 重复事件或审批写入：继续通过 Postgres 唯一约束及幂等 Repository 行为进行限制。
+- 并发消息写入：更新会话 JSON 中的消息数量和更新时间前锁定对应会话行。
+- 数据库重置：系统从空数据开始，并通过正常的 bootstrap 或注册流程注册三个配置的 Agent。
 
-## Verification strategy
+## 验证策略
 
-### Repository and API tests
+### Repository 和 API 测试
 
-Tests run against a disposable Postgres database and cover:
+测试使用可清理的临时 Postgres 数据库，覆盖：
 
-- schema migration from an empty database;
-- Agent registration and upsert;
-- conversation, message, event, Run, orchestration task, remote binding, approval, and artifact operations;
-- pagination, ordering, constraints, cascading behavior, and transaction rollback;
-- backend restart with previously written data still available;
-- clear startup failure when `DATABASE_URL` is missing or unreachable.
+- 从空数据库执行结构迁移；
+- Agent 注册和 upsert；
+- 会话、消息、事件、Run、编排任务、远程绑定、审批和产物操作；
+- 分页、排序、约束、级联行为和事务回滚；
+- 后端重启后仍能读取已写入的数据；
+- 缺少 `DATABASE_URL` 或数据库不可访问时给出明确的启动错误。
 
-### Agent checkpoint tests
+### Agent checkpoint 测试
 
-- Two runtime instances using the same `thread_id` and Postgres database see the same prior graph state.
-- Different Agent-qualified thread IDs remain isolated.
-- Agent restart preserves multi-turn context.
-- Async state inspection and shutdown complete without resource warnings.
-- Missing or unreachable checkpoint Postgres produces degraded readiness rather than a memory fallback.
+- 两个运行时实例使用相同 `thread_id` 和 Postgres 数据库时，可以读取相同的历史 Graph 状态。
+- 带不同 Agent 标识的 thread ID 相互隔离。
+- Agent 重启后保留多轮对话上下文。
+- 异步状态读取和关闭过程完成且不产生资源警告。
+- checkpoint Postgres 缺失或不可访问时显示 degraded，不回退到内存模式。
 
-### Compose smoke tests
+### Compose 冒烟测试
 
-- Compose configuration contains Postgres, health checks, durable volume, both database URLs, and dependency ordering.
-- The full stack reaches healthy status from an empty volume.
-- Restarting backend and Agent containers does not remove persisted conversations or checkpoints.
+- Compose 配置包含 Postgres、健康检查、持久卷、两个数据库连接地址及正确的依赖顺序。
+- 从空数据卷启动时，完整系统最终达到健康状态。
+- 重启后端和 Agent 容器不会删除已有会话或 checkpoint。
 
-### Browser regression
+### 浏览器回归测试
 
-Run a real browser against the Compose stack:
+使用真实浏览器访问 Compose 启动的系统：
 
-1. Verify three Agents are registered and visible.
-2. Open a Direct conversation with each Agent, send a deterministic read-only prompt, and wait for a completed reply.
-3. Confirm user messages, Agent messages, status indicators, and tool activity render without page errors.
-4. Start an Auto conversation that coordinates the three Agents and confirm Host decisions, Agent task cards, event activity, and final output render.
-5. Reload the page and confirm the conversation history remains visible.
-6. Restart backend and Agent services, reopen the same conversations, and confirm backend history remains visible and an Agent follow-up retains its prior LangGraph context.
+1. 确认三个 Agent 已注册并在页面可见。
+2. 分别为三个 Agent 打开 Direct 会话，发送确定性的只读请求，并等待回复完成。
+3. 确认用户消息、Agent 消息、状态标识和工具活动都能正常显示，页面没有运行错误。
+4. 创建一个协调三个 Agent 的 Auto 会话，确认 Host 决策、Agent 任务卡片、事件活动和最终输出都能正常显示。
+5. 刷新页面，确认会话历史仍然可见。
+6. 重启后端和 Agent 服务，重新打开相同会话，确认后端历史仍然存在，并且 Agent 能在后续消息中保留之前的 LangGraph 上下文。
 
-Tests that require an LLM or Kubernetes MCP endpoint use explicitly configured test dependencies. Repository and UI rendering tests must not rely on an uncontrolled production cluster mutation.
+依赖 LLM 或 Kubernetes MCP 服务的测试必须使用明确配置的测试依赖。Repository 和前端展示测试不得依赖对不受控生产集群的写操作。
 
-## Rollout
+## 实施顺序
 
-1. Add Postgres dependencies, schema migrations, and disposable test database support.
-2. Convert the backend repository and pass its integration tests.
-3. Add Compose Postgres wiring and validate backend persistence across restart.
-4. Convert the shared Agent runtime to `AsyncPostgresSaver` and validate checkpoint recovery.
-5. Run API, runtime, Compose, and browser regressions.
-6. Remove SQLite code, SQLite tests, obsolete data-path settings, and legacy migration startup behavior only after the Postgres path passes.
+1. 增加 Postgres 依赖、数据库结构迁移和临时测试数据库支持。
+2. 改造后端 Repository，并通过 Postgres 集成测试。
+3. 增加 Compose Postgres 配置，验证后端数据能够跨重启持久化。
+4. 将共享 Agent 运行时改为 `AsyncPostgresSaver`，验证 checkpoint 恢复。
+5. 执行 API、运行时、Compose 和浏览器回归测试。
+6. 只有在 Postgres 路径验证通过后，才删除 SQLite 代码、SQLite 测试、旧数据库路径配置和旧版数据迁移启动逻辑。
 
-## Acceptance criteria
+## 验收标准
 
-- Docker Compose starts only after Postgres is healthy.
-- The backend and Agents do not use SQLite or `MemorySaver` in production code.
-- A clean deployment creates all required schemas and registers the expected three Agents.
-- Direct and Auto conversations complete and render correctly in the frontend.
-- Backend history and LangGraph conversation state survive relevant process/container restarts.
-- Existing non-database regression suites remain green.
-- No existing SQLite or JSON data is imported into the new Postgres databases.
+- Docker Compose 只在 Postgres 健康后启动依赖服务。
+- 后端和 Agent 的生产代码不再使用 SQLite 或 `MemorySaver`。
+- 全新部署能够创建所需数据库结构，并注册预期的三个 Agent。
+- Direct 和 Auto 会话能够完成，且前端展示正常。
+- 后端历史和 LangGraph 对话状态能够跨对应的进程或容器重启恢复。
+- 现有非数据库相关回归测试保持通过。
+- 不从已有 SQLite 或 JSON 文件导入任何数据。
