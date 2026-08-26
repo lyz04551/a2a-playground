@@ -9,11 +9,11 @@ from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import ToolNode, create_react_agent
 
 from .config import AgentRuntimeConfig, load_llm_config
+from .checkpoint import PostgresCheckpointManager
 from .mcp_client import K8sMCPClient
 from .models import ApprovalRequired, PendingAction
 from .streaming import RuntimeEvent, RuntimeEventType
@@ -40,6 +40,7 @@ class RuntimeMCPAgent:
         run_timeout: float | None = None,
         summary_reserve_seconds: float | None = None,
         timeout_safety_margin_seconds: float | None = None,
+        checkpoint_database_url: str | None = None,
     ):
         self.config = config
         self.prompt = (
@@ -54,6 +55,11 @@ class RuntimeMCPAgent:
             config.mcp_url, transport=config.mcp_transport
         )
         self._model = model
+        self.checkpoint_database_url = (
+            os.getenv("AGENT_CHECKPOINT_DATABASE_URL", "")
+            if checkpoint_database_url is None
+            else checkpoint_database_url
+        )
         self.run_timeout = run_timeout or float(os.getenv("AGENT_RUN_TIMEOUT", "90"))
         configured_summary_reserve = os.getenv("AGENT_SUMMARY_RESERVE_SECONDS")
         self.summary_reserve_seconds = (
@@ -94,14 +100,30 @@ class RuntimeMCPAgent:
         self._dependency_error = ""
         self._pending_by_context: dict[str, PendingAction] = {}
         self._tool_adapter: MCPToolAdapter | None = None
+        self._checkpoint_manager: PostgresCheckpointManager | None = None
+        self._checkpointer = None
 
     async def ensure_ready(self) -> None:
         if self._tools_loaded:
             return
+        if not self.checkpoint_database_url:
+            self._dependency_error = (
+                "AGENT_CHECKPOINT_DATABASE_URL is required"
+            )
+            raise RuntimeError(self._dependency_error)
         try:
+            if self._checkpoint_manager is None:
+                self._checkpoint_manager = PostgresCheckpointManager(
+                    self.checkpoint_database_url
+                )
+            self._checkpointer = await self._checkpoint_manager.open()
             definitions = await self.mcp_client.list_tools()
         except Exception as exc:
             self._dependency_error = str(exc)
+            if self._checkpoint_manager is not None:
+                await self._checkpoint_manager.close()
+                self._checkpoint_manager = None
+                self._checkpointer = None
             raise
         self._tool_adapter = MCPToolAdapter(
             self.mcp_client,
@@ -124,13 +146,14 @@ class RuntimeMCPAgent:
             model,
             tools=ToolNode(tools, handle_tool_errors=_handle_tool_error),
             prompt=self.prompt,
-            checkpointer=MemorySaver(),
+            checkpointer=self._checkpointer,
         )
         self._tools_loaded = True
         self._dependency_error = ""
 
     def readiness(self) -> dict[str, Any]:
         mcp_state = "ok" if self._tools_loaded else "error"
+        checkpoint_state = "ok" if self._checkpointer is not None else "error"
         return {
             "state": "ready" if self._tools_loaded else "degraded",
             "checks": {
@@ -142,6 +165,14 @@ class RuntimeMCPAgent:
                     )
                 },
                 "mcp": {"state": mcp_state, "detail": self._dependency_error},
+                "checkpoint": {
+                    "state": checkpoint_state,
+                    "detail": (
+                        ""
+                        if checkpoint_state == "ok"
+                        else self._dependency_error
+                    ),
+                },
                 "kubernetes": {"state": "ok" if self._tools_loaded else "unknown"},
             },
         }
@@ -161,6 +192,11 @@ class RuntimeMCPAgent:
             return False
 
     async def shutdown(self) -> None:
+        if self._checkpoint_manager is not None:
+            await self._checkpoint_manager.close()
+            self._checkpoint_manager = None
+            self._checkpointer = None
+        self._tools_loaded = False
         await self.mcp_client.disconnect()
 
     async def stream(self, query: str, context_id: str) -> AsyncIterable[RuntimeEvent]:
@@ -189,7 +225,7 @@ class RuntimeMCPAgent:
         seen_tool_calls: set[str] = set()
         seen_tool_results: set[str] = set()
         try:
-            previous = self._graph.get_state(graph_config)
+            previous = await self._graph.aget_state(graph_config)
             for message in previous.values.get("messages", []):
                 if isinstance(message, AIMessage):
                     seen_tool_calls.update(
@@ -251,12 +287,12 @@ class RuntimeMCPAgent:
             try:
                 content = await self._force_summary(query, graph_config)
             except TimeoutError:
-                content = self._deterministic_partial_summary(
+                content = await self._deterministic_partial_summary(
                     graph_config,
                     "强制总结模型也达到时间限制",
                 )
             except Exception as exc:
-                content = self._deterministic_partial_summary(
+                content = await self._deterministic_partial_summary(
                     graph_config,
                     f"强制总结模型不可用：{exc}",
                 )
@@ -281,7 +317,7 @@ class RuntimeMCPAgent:
             )
             return
 
-        state = self._graph.get_state(graph_config)
+        state = await self._graph.aget_state(graph_config)
         messages = state.values.get("messages", [])
         content = ""
         if messages and isinstance(messages[-1], AIMessage):
@@ -304,7 +340,7 @@ class RuntimeMCPAgent:
     async def _force_summary(self, query: str, graph_config: dict) -> str:
         if self._model is None:
             raise RuntimeError("Agent model is unavailable for forced summary")
-        evidence = self._bounded_checkpoint_evidence(graph_config)
+        evidence = await self._bounded_checkpoint_evidence(graph_config)
         prompt = (
             "调查阶段的时间预算已经用完。禁止调用任何工具。请仅根据下面已经取得的"
             "证据回答用户，优先说明已确认的问题、证据和建议，并明确指出哪些检查尚未"
@@ -318,8 +354,10 @@ class RuntimeMCPAgent:
             raise RuntimeError("Agent model returned an empty forced summary")
         return content
 
-    def _deterministic_partial_summary(self, graph_config: dict, reason: str) -> str:
-        evidence = self._bounded_checkpoint_evidence(graph_config)
+    async def _deterministic_partial_summary(
+        self, graph_config: dict, reason: str
+    ) -> str:
+        evidence = await self._bounded_checkpoint_evidence(graph_config)
         return (
             "本次调查已达到时间预算，已停止继续调用工具。\n\n"
             f"已取得的结果：\n{evidence[:6_000]}\n\n"
@@ -327,9 +365,9 @@ class RuntimeMCPAgent:
             "均未执行。"
         )
 
-    def _bounded_checkpoint_evidence(self, graph_config: dict) -> str:
+    async def _bounded_checkpoint_evidence(self, graph_config: dict) -> str:
         try:
-            state = self._graph.get_state(graph_config)
+            state = await self._graph.aget_state(graph_config)
             messages = state.values.get("messages", [])
         except (AttributeError, KeyError, TypeError, ValueError):
             messages = []
@@ -390,7 +428,7 @@ class RuntimeMCPAgent:
             return
         if approval.get("decision") != "approved":
             self._pending_by_context.pop(context_id, None)
-            self._close_pending_tool_call(
+            await self._close_pending_tool_call(
                 context_id,
                 pending,
                 "用户拒绝了该工具调用，未执行任何写操作。",
@@ -417,7 +455,7 @@ class RuntimeMCPAgent:
             return
         result = await self.mcp_client.call_tool(pending.tool_name, pending.arguments)
         self._pending_by_context.pop(context_id, None)
-        self._close_pending_tool_call(context_id, pending, str(result))
+        await self._close_pending_tool_call(context_id, pending, str(result))
         yield RuntimeEvent.completed(
             content=result,
             artifact_name="specialist_result",
@@ -438,14 +476,14 @@ class RuntimeMCPAgent:
             },
         )
 
-    def _close_pending_tool_call(
+    async def _close_pending_tool_call(
         self, context_id: str, pending: PendingAction, result: str
     ) -> None:
         """Append the missing tool result left behind by an approval interrupt."""
         if self._graph is None:
             return
         graph_config = {"configurable": {"thread_id": context_id}}
-        state = self._graph.get_state(graph_config)
+        state = await self._graph.aget_state(graph_config)
         messages = state.values.get("messages", [])
         completed_call_ids = {
             str(message.tool_call_id or "")
@@ -463,7 +501,7 @@ class RuntimeMCPAgent:
                     and call.get("name") == pending.tool_name
                     and call.get("args", {}) == pending.arguments
                 ):
-                    self._graph.update_state(
+                    await self._graph.aupdate_state(
                         graph_config,
                         {
                             "messages": [

@@ -236,7 +236,7 @@ async def test_agent_stream_emits_every_result_from_parallel_tool_batch():
             yield {"messages": [tool_request]}
             yield {"messages": [tool_request, *results]}
 
-        def get_state(self, _config):
+        async def aget_state(self, _config):
             class State:
                 values = {"messages": [AIMessage(content="complete")]}
             return State()
@@ -275,7 +275,7 @@ async def test_agent_stream_does_not_replay_tools_from_existing_context():
     class ContinuedGraph:
         state_reads = 0
 
-        def get_state(self, _config):
+        async def aget_state(self, _config):
             self.state_reads += 1
             messages = (
                 [old_call, old_result]
