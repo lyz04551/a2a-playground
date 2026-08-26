@@ -4,6 +4,7 @@ from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
 from a2a.types import AgentCapabilities, AgentCard, AgentSkill
+from starlette.responses import JSONResponse
 
 from .config import AgentRuntimeConfig
 
@@ -50,4 +51,10 @@ def create_a2a_app(
         agent_card=build_agent_card(config),
         http_handler=handler,
     )
-    return server.build(lifespan=lifespan)
+    app = server.build(lifespan=lifespan)
+
+    async def readiness(_request):
+        return JSONResponse(executor.agent.readiness())
+
+    app.add_route("/health/ready", readiness, methods=["GET"])
+    return app

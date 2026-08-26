@@ -7,17 +7,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-try:
-    from persistence.migrate_json import import_legacy_json
-    from persistence.repository import SQLiteRepository
-except ImportError:
-    from backend.persistence.migrate_json import import_legacy_json
-    from backend.persistence.repository import SQLiteRepository
+from backend.persistence.migrate_json import import_legacy_json
+from backend.persistence.repository import SQLiteRepository
 
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
+DEFAULT_DATABASE_PATH = DATA_DIR / "playground-local.db"
 DATABASE_PATH = Path(
-    os.getenv("PLAYGROUND_DB_PATH", str(DATA_DIR / "playground.db"))
+    os.getenv("PLAYGROUND_DB_PATH", str(DEFAULT_DATABASE_PATH))
 )
 repository = SQLiteRepository(DATABASE_PATH)
 repository.initialize()
@@ -40,12 +37,16 @@ def delete_agent(agent_id: str) -> bool:
     return repository.delete_agent(agent_id)
 
 
-def list_conversations() -> list[dict]:
-    return repository.list_conversations()
+def list_conversations(*, limit: int | None = None, offset: int = 0) -> list[dict]:
+    return repository.list_conversations(limit=limit, offset=offset)
 
 
-def list_conversations_by_agent(agent_id: str) -> list[dict]:
-    return repository.list_conversations(agent_id)
+def list_conversations_by_agent(agent_id: str, *, limit: int | None = None, offset: int = 0) -> list[dict]:
+    return repository.list_conversations(agent_id, limit=limit, offset=offset)
+
+
+def count_conversations(agent_id: str | None = None) -> int:
+    return repository.count_conversations(agent_id)
 
 
 def get_conversation(conversation_id: str) -> Optional[dict]:
@@ -85,9 +86,13 @@ def get_message(message_id: str) -> Optional[dict]:
 
 
 def list_events(
-    conversation_id: Optional[str] = None,
+    conversation_id: Optional[str] = None, *, limit: int | None = None, offset: int = 0,
 ) -> list[dict]:
-    return repository.list_events(conversation_id)
+    return repository.list_events(conversation_id, limit=limit, offset=offset)
+
+
+def count_events(conversation_id: Optional[str] = None) -> int:
+    return repository.count_events(conversation_id)
 
 
 def add_event(event: dict) -> dict:

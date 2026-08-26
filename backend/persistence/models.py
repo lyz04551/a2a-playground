@@ -4,6 +4,8 @@ from sqlalchemy import (
     JSON,
     Column,
     ForeignKey,
+    Index,
+    Integer,
     MetaData,
     String,
     Table,
@@ -42,6 +44,7 @@ messages = Table(
     Column("content", Text, nullable=False),
     Column("data", JSON, nullable=False),
 )
+Index("ix_messages_conversation", messages.c.conversation_id)
 
 events = Table(
     "events",
@@ -50,8 +53,15 @@ events = Table(
     Column("conversation_id", String, nullable=False),
     Column("task_id", String, nullable=False),
     Column("event_type", String, nullable=False),
+    Column("run_id", String, nullable=True),
+    Column("sequence", Integer, nullable=True),
+    Column("created_at", String, nullable=True),
     Column("data", JSON, nullable=False),
 )
+Index("ix_events_conversation_type", events.c.conversation_id, events.c.event_type)
+Index("ix_events_run_sequence", events.c.run_id, events.c.sequence, unique=True)
+Index("ix_events_conversation_created", events.c.conversation_id, events.c.created_at)
+Index("ix_events_type_created", events.c.event_type, events.c.created_at)
 
 runs = Table(
     "orchestration_runs",
@@ -61,6 +71,19 @@ runs = Table(
     Column("status", String, nullable=False),
     Column("data", JSON, nullable=False),
 )
+Index("ix_runs_conversation_status", runs.c.conversation_id, runs.c.status)
+
+orchestration_tasks = Table(
+    "orchestration_tasks",
+    metadata,
+    Column("id", String, primary_key=True),
+    Column("run_id", String, nullable=False),
+    Column("parent_task_id", String, nullable=True),
+    Column("agent_id", String, nullable=False),
+    Column("status", String, nullable=False),
+    Column("data", JSON, nullable=False),
+)
+Index("ix_tasks_run_status", orchestration_tasks.c.run_id, orchestration_tasks.c.status)
 
 remote_bindings = Table(
     "remote_task_bindings",
@@ -94,6 +117,7 @@ approvals = Table(
     Column("action_digest", String(64), nullable=False),
     Column("status", String, nullable=False, default="pending"),
 )
+Index("ix_approvals_run_status", approvals.c.run_id, approvals.c.status)
 
 artifacts = Table(
     "artifacts",
@@ -111,4 +135,3 @@ migrations = Table(
     Column("id", String, primary_key=True),
     Column("data", JSON, nullable=False),
 )
-

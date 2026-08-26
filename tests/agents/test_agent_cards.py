@@ -19,6 +19,6 @@ def test_all_agent_cards_are_valid_a2a_cards(monkeypatch):
 
     assert {card.name for card in cards} == {
         "K8s Ops Agent",
-        "K8s Orchestrator Agent",
+        "K8s Resource Orchestrator Agent",
         "K8s Security Agent",
     }

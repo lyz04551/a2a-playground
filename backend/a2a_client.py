@@ -5,6 +5,8 @@ import uuid
 from typing import AsyncIterable, Optional
 
 import httpx
+from backend.security import validate_agent_url
+from backend.settings import AppSettings
 from a2a.client.card_resolver import A2ACardResolver
 from a2a.client.client import ClientConfig
 from a2a.client.client_factory import ClientFactory
@@ -21,6 +23,22 @@ from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH, PREV_AGENT_CARD_WELL
 
 logger = logging.getLogger(__name__)
 A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "120"))
+
+
+class A2AClientError(RuntimeError):
+    def __init__(self, message: str, *, public_message: str):
+        super().__init__(message)
+        self.public_message = public_message
+
+
+class A2ATransportError(A2AClientError):
+    pass
+
+
+def public_error_message(exc: Exception) -> str:
+    return exc.public_message if isinstance(exc, A2AClientError) else (
+        str(exc) or exc.__class__.__name__
+    )
 
 
 def _get_text_from_part(p) -> str:
@@ -75,9 +93,10 @@ def _extract_text_from_task(task) -> str:
 
 
 async def fetch_agent_card(agent_url: str) -> AgentCard:
-    url = agent_url.strip().rstrip("/")
-    if not url.startswith("http"):
-        url = f"http://{url}"
+    url = await validate_agent_url(
+        agent_url,
+        allow_private=AppSettings.from_env().allow_private_agents,
+    )
     async with httpx.AsyncClient(timeout=15) as client:
         # Try A2ACardResolver first (uses AGENT_CARD_WELL_KNOWN_PATH)
         try:
@@ -100,12 +119,14 @@ async def fetch_agent_card(agent_url: str) -> AgentCard:
 
 
 async def check_agent_health(agent_url: str) -> dict:
-    """Lightweight health check for an agent.
-    Returns dict with 'online' bool and optional 'latency_ms' and 'error'.
-    """
-    url = agent_url.strip().rstrip("/")
-    if not url.startswith("http"):
-        url = f"http://{url}"
+    """Check transport availability and, when supported, dependency readiness."""
+    try:
+        url = await validate_agent_url(
+            agent_url,
+            allow_private=AppSettings.from_env().allow_private_agents,
+        )
+    except ValueError as exc:
+        return {"online": False, "error": str(exc)}
     import time
     start = time.monotonic()
     try:
@@ -115,7 +136,8 @@ async def check_agent_health(agent_url: str) -> dict:
                 resolver = A2ACardResolver(client, url)
                 await resolver.get_agent_card()
                 latency = int((time.monotonic() - start) * 1000)
-                return {"online": True, "latency_ms": latency}
+                readiness = await _fetch_agent_readiness(client, url)
+                return {"online": True, "latency_ms": latency, **readiness}
             except Exception:
                 pass
 
@@ -126,7 +148,8 @@ async def check_agent_health(agent_url: str) -> dict:
                     resp = await client.get(card_url)
                     resp.raise_for_status()
                     latency = int((time.monotonic() - start) * 1000)
-                    return {"online": True, "latency_ms": latency}
+                    readiness = await _fetch_agent_readiness(client, url)
+                    return {"online": True, "latency_ms": latency, **readiness}
                 except Exception:
                     continue
 
@@ -135,7 +158,8 @@ async def check_agent_health(agent_url: str) -> dict:
                 resp = await client.get(url, timeout=3)
                 resp.raise_for_status()
                 latency = int((time.monotonic() - start) * 1000)
-                return {"online": True, "latency_ms": latency}
+                readiness = await _fetch_agent_readiness(client, url)
+                return {"online": True, "latency_ms": latency, **readiness}
             except Exception:
                 pass
 
@@ -144,6 +168,35 @@ async def check_agent_health(agent_url: str) -> dict:
     except Exception as e:
         latency = int((time.monotonic() - start) * 1000)
         return {"online": False, "latency_ms": latency, "error": str(e)[:100]}
+
+
+async def _fetch_agent_readiness(client: httpx.AsyncClient, url: str) -> dict:
+    checks = {"http": {"state": "ok"}}
+    try:
+        response = await client.get(f"{url}/health/ready", timeout=3)
+        response.raise_for_status()
+        readiness = _normalize_readiness(response.json())
+        checks.update(readiness["checks"])
+        return {"state": readiness["state"], "checks": checks}
+    except Exception as exc:
+        checks["readiness"] = {"state": "unknown", "detail": str(exc)[:100]}
+        return {"state": "degraded", "checks": checks}
+
+
+def _normalize_readiness(payload: object) -> dict:
+    """Keep third-party Agent readiness responses inside our public contract."""
+    if not isinstance(payload, dict):
+        return {"state": "degraded", "checks": {}}
+    state = payload.get("state")
+    checks = payload.get("checks")
+    return {
+        "state": state if state in {"ready", "degraded"} else "degraded",
+        "checks": {
+            name: check
+            for name, check in (checks.items() if isinstance(checks, dict) else [])
+            if isinstance(name, str) and isinstance(check, dict)
+        },
+    }
 
 
 def _make_sdk_message(
@@ -165,9 +218,10 @@ def _make_sdk_message(
 
 async def _send_tasks_send_legacy(agent_url: str, text: str, session_id: str) -> dict:
     """Send using the old 'tasks/send' method (A2AServer from A2AServer project)."""
-    url = agent_url.strip().rstrip("/")
-    if not url.startswith("http"):
-        url = f"http://{url}"
+    url = await validate_agent_url(
+        agent_url,
+        allow_private=AppSettings.from_env().allow_private_agents,
+    )
     payload = {
         "jsonrpc": "2.0",
         "id": uuid.uuid4().hex,
@@ -204,9 +258,10 @@ async def _send_tasks_send_legacy(agent_url: str, text: str, session_id: str) ->
 
 async def _send_tasks_send_subscribe_legacy(agent_url: str, text: str, session_id: str) -> AsyncIterable[dict]:
     """Stream using old 'tasks/sendSubscribe' method. Yields text chunks."""
-    url = agent_url.strip().rstrip("/")
-    if not url.startswith("http"):
-        url = f"http://{url}"
+    url = await validate_agent_url(
+        agent_url,
+        allow_private=AppSettings.from_env().allow_private_agents,
+    )
     payload = {
         "jsonrpc": "2.0",
         "id": uuid.uuid4().hex,
@@ -265,7 +320,6 @@ async def send_message_to_agent(agent_url: str, text: str, conversation_id: str,
         async for event in client.send_message(sdk_msg):
             if isinstance(event, Message):
                 accumulated += _get_text_from_part(event)
-                state = "completed"
             elif isinstance(event, tuple):
                 task, update = event
                 if task:
@@ -278,6 +332,8 @@ async def send_message_to_agent(agent_url: str, text: str, conversation_id: str,
                 if task and task.status:
                     state = task.status.state.value
                 accumulated += _extract_text_from_task(task)
+        if state == "unknown" and accumulated:
+            state = "completed"
         return {
             "text": accumulated,
             "state": state,
@@ -290,8 +346,11 @@ async def send_message_to_agent(agent_url: str, text: str, conversation_id: str,
         if "400" in err or "Method not found" in err or "Unexpected request" in err:
             logger.warning(f"New protocol failed ({err[:80]}), falling back to legacy tasks/send")
             return await _send_tasks_send_legacy(agent_url, text, conversation_id)
-        logger.exception(f"send_message_to_agent failed: {err}")
-        return {"text": "", "state": "failed"}
+        logger.exception("send_message_to_agent failed")
+        raise A2ATransportError(
+            err,
+            public_message="Agent is unavailable",
+        ) from e
     finally:
         if client is not None:
             await client.close()
@@ -312,6 +371,7 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
         sdk_msg = _make_sdk_message(text, conversation_id)
         task_id = ""
         accumulated = ""
+        artifacts = []
         try:
             async for event in client.send_message(sdk_msg):
                 if isinstance(event, Message):
@@ -323,6 +383,10 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                     task: Task = event[0]
                     update = event[1]
                     task_id = task.id
+                    artifacts = [
+                        artifact.model_dump(by_alias=True)
+                        for artifact in (task.artifacts or [])
+                    ]
                     state = task.status.state if task.status else "unknown"
                     if isinstance(update, TaskStatusUpdateEvent):
                         msg = update.status.message
@@ -354,6 +418,8 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                                             ),
                                             "result": data.get("result", t),
                                         })
+                                    elif event_type == "approval_required":
+                                        chunk["approval"] = data
                                     else:
                                         accumulated += t
                                     yield chunk
@@ -377,7 +443,12 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                             accumulated += artifact_text
                             yield {"type": "text", "text": artifact_text, "state": state, "task_id": task_id}
                         yield {"type": "status", "state": state, "task_id": task_id}
-            yield {"type": "done", "task_id": task_id, "text": accumulated}
+            yield {
+                "type": "done",
+                "task_id": task_id,
+                "text": accumulated,
+                "artifacts": artifacts,
+            }
         except Exception as e:
             err = str(e)
             if "400" in err or "SSE" in err or "Content-Type" in err or "event-stream" in err or "Method not found" in err:
@@ -390,10 +461,16 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                 yield {"type": "done", "task_id": "", "text": accumulated}
                 return
             logger.exception("Streaming error")
-            yield {"type": "error", "text": err, "task_id": task_id}
+            yield {
+                "type": "error",
+                "text": "Agent stream failed",
+                "task_id": task_id,
+            }
         finally:
             await client.close()
             await httpx_client.aclose()
+    except ValueError:
+        raise
     except Exception as e:
         logger.warning(f"SDK init failed ({str(e)[:80]}), trying legacy tasks/sendSubscribe")
         async for chunk in _send_tasks_send_subscribe_legacy(agent_url, text, conversation_id):

@@ -7,15 +7,7 @@ from .config import ToolPolicyConfig
 from .models import PolicyAction, PolicyDecision
 
 
-DEFAULT_GLOBAL_DENY = (
-    "register_k8s_cluster",
-    "unregister_k8s_cluster",
-    "run_command_in_k8s_pod",
-    "upload_file_to_k8s_pod",
-    "delete_pod_file",
-    "drain_k8s_node",
-    "helm_uninstall_release",
-)
+DEFAULT_GLOBAL_DENY: tuple[str, ...] = ()
 
 
 def _matches(name: str, patterns: Iterable[str]) -> bool:

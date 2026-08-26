@@ -38,7 +38,35 @@ def test_agent_configs_have_unique_stable_ids_and_urls(monkeypatch):
     assert len({config.public_url for config in configs}) == 3
 
 
-def test_ops_and_security_cannot_mutate_cluster(monkeypatch):
+def test_agent_configs_declare_orchestration_capabilities(monkeypatch):
+    ops, orchestrator, security = load_configs(monkeypatch)
+
+    assert ops.read_only is False
+    assert security.read_only is True
+    assert orchestrator.read_only is False
+    assert ops.risk_level == "write_approval"
+    assert orchestrator.risk_level == "write_approval"
+    assert "mutation requires approval" in orchestrator.limitations
+
+
+def test_resource_orchestrator_keeps_stable_id_and_public_name(monkeypatch):
+    _, orchestrator, _ = load_configs(monkeypatch)
+
+    assert orchestrator.agent_id == "k8s-orchestrator"
+    assert orchestrator.name == "K8s Resource Orchestrator Agent"
+
+
+def test_resource_orchestrator_does_not_own_helm_mutations(monkeypatch):
+    _, orchestrator, _ = load_configs(monkeypatch)
+    policy = ToolPolicy(orchestrator.tool_policy)
+
+    assert (
+        policy.classify("helm_install_chart", {}).action
+        is PolicyAction.DENY
+    )
+
+
+def test_security_is_read_only_and_ops_only_approval_gates_pod_debug(monkeypatch):
     ops, _, security = load_configs(monkeypatch)
 
     for config in (ops, security):
@@ -55,6 +83,18 @@ def test_ops_and_security_cannot_mutate_cluster(monkeypatch):
             policy.classify("apply_k8s_yaml", {}).action
             is PolicyAction.DENY
         )
+
+    ops_policy = ToolPolicy(ops.tool_policy)
+    assert (
+        ops_policy.classify("run_command_in_k8s_pod", {}).action
+        is PolicyAction.APPROVAL_REQUIRED
+    )
+    assert (
+        ToolPolicy(security.tool_policy).classify(
+            "run_command_in_k8s_pod", {}
+        ).action
+        is PolicyAction.DENY
+    )
 
 
 def test_orchestrator_mutations_require_approval(monkeypatch):
@@ -77,4 +117,3 @@ def test_orchestrator_mutations_require_approval(monkeypatch):
         policy.classify("run_command_in_k8s_pod", {}).action
         is PolicyAction.DENY
     )
-

@@ -1,6 +1,11 @@
 agent_id: k8s-security
 name: K8s Security Agent
 description: Read-only Kubernetes workload, RBAC, network, image, and policy security assessment.
+read_only: true
+risk_level: read_only
+limitations:
+  - cannot mutate cluster resources
+priority: 30
 port: 8053
 public_url: ${AGENT_PUBLIC_URL}
 mcp_url: ${K8S_MCP_URL}
@@ -14,10 +19,18 @@ skills:
       - Review RBAC and NetworkPolicy risks.
 tool_policy:
   allow:
-    - list_k8s_*
+    - list_k8s_clusters
+    - list_k8s_namespace
+    - list_k8s_node
+    - list_k8s_pod
+    - list_k8s_resource
+    - list_k8s_event
+    - list_k8s_pod_event
+    - list_k8s_deploy_event
     - get_k8s_resource
+    - get_pod_linked_env_from_yaml
     - describe_k8s_resource
+    - describe_k8s_pod
   deny:
     - get_k8s_pod_linked_env
   approval_required: []
-

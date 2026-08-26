@@ -1,0 +1,88 @@
+:root {
+  color-scheme: light;
+  --font-display: 'Avenir Next', 'DIN Alternate', 'Segoe UI', sans-serif;
+  --font-body: 'Avenir Next', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  --color-page: #f3f6fa;
+  --color-surface: #ffffff;
+  --color-surface-subtle: #f7f9fc;
+  --color-surface-elevated: #ffffff;
+  --color-surface-overlay: rgba(255, 255, 255, .88);
+  --color-border: #dce3ec;
+  --color-border-strong: #c6d1df;
+  --color-text: #172033;
+  --color-text-muted: #64748b;
+  --color-text-faint: #94a3b8;
+  --color-primary: #047857;
+  --color-primary-hover: #059669;
+  --color-primary-subtle: #ecfdf5;
+  --color-orchestration: #0b70b5;
+  --color-orchestration-subtle: #eff6ff;
+  --color-approval: #b45309;
+  --color-approval-subtle: #fff7ed;
+  --color-danger: #b91c1c;
+  --color-danger-subtle: #fef2f2;
+  --color-success: #15803d;
+  --color-warning: #b45309;
+  --color-muted: #64748b;
+  --space-4: 4px;
+  --space-8: 8px;
+  --space-12: 12px;
+  --space-16: 16px;
+  --space-24: 24px;
+  --space-32: 32px;
+  --space-48: 48px;
+  --radius-8: 8px;
+  --radius-12: 12px;
+  --radius-16: 16px;
+  --radius-20: 20px;
+  --focus-ring: 0 0 0 3px rgba(11, 112, 181, .35);
+  --elevation-0: 0 1px 2px rgba(15, 23, 42, .04);
+  --elevation-1: 0 8px 24px rgba(15, 23, 42, .08);
+  --elevation-2: 0 20px 48px rgba(15, 23, 42, .13);
+  --sidebar-width: 248px;
+  --sidebar-collapsed-width: 76px;
+  --topbar-height: 68px;
+  --control-height: 40px;
+  --page-padding: clamp(20px, 3vw, 42px);
+  --motion-fast: 160ms;
+  --motion-base: 240ms;
+}
+
+[data-theme='dark'] {
+    color-scheme: dark;
+    --color-page: #0b1220;
+    --color-surface: #111c2e;
+    --color-surface-subtle: #0e1828;
+    --color-surface-elevated: #18253a;
+    --color-surface-overlay: rgba(17, 28, 46, .9);
+    --color-border: #2a3a52;
+    --color-border-strong: #3b4d68;
+    --color-text: #edf4ff;
+    --color-text-muted: #a9b8cc;
+    --color-text-faint: #7f91aa;
+    --color-primary: #4adea5;
+    --color-primary-hover: #6ee7b7;
+    --color-primary-subtle: #113b32;
+    --color-orchestration: #71b8ff;
+    --color-orchestration-subtle: #173354;
+    --color-approval: #fbbf65;
+    --color-approval-subtle: #42280e;
+    --color-danger: #fca5a5;
+    --color-danger-subtle: #4a1f27;
+    --color-success: #6ee7a0;
+    --color-warning: #fbbf65;
+    --color-muted: #aab8cc;
+    --elevation-0: 0 1px 2px rgba(0, 0, 0, .24);
+    --elevation-1: 0 10px 30px rgba(0, 0, 0, .3);
+    --elevation-2: 0 24px 60px rgba(0, 0, 0, .42);
+}
+
+[data-density='compact'] {
+  --control-height: 34px;
+  --page-padding: clamp(16px, 2.3vw, 30px);
+  --space-12: 10px;
+  --space-16: 12px;
+  --space-24: 18px;
+  --space-32: 24px;
+}

@@ -5,10 +5,12 @@ services:
       dockerfile: agents/k8s-orchestrator/Dockerfile
     environment:
       AGENT_PUBLIC_URL: http://k8s-orchestrator:8051
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/sse}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
+      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
     ports:
       - "8051:8051"
     healthcheck:
@@ -24,10 +26,12 @@ services:
       dockerfile: agents/k8s-ops/Dockerfile
     environment:
       AGENT_PUBLIC_URL: http://k8s-ops:8052
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/sse}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
+      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
     ports:
       - "8052:8052"
     healthcheck:
@@ -43,10 +47,12 @@ services:
       dockerfile: agents/k8s-security/Dockerfile
     environment:
       AGENT_PUBLIC_URL: http://k8s-security:8053
-      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/sse}
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
-      LLM_MODEL: ${LLM_MODEL:-deepseek-chat}
+      K8S_MCP_URL: ${K8S_MCP_URL:-http://10.2.0.57:9096/mcp}
+      MCP_TRANSPORT: ${MCP_TRANSPORT:-streamable_http}
+      AGENT_LLM_PROVIDER: ${AGENT_LLM_PROVIDER:-openai-compatible}
+      AGENT_LLM_API_KEY: ${AGENT_LLM_API_KEY:-}
+      AGENT_LLM_BASE_URL: ${AGENT_LLM_BASE_URL:-https://api.deepseek.com/v1}
+      AGENT_LLM_MODEL: ${AGENT_LLM_MODEL:-deepseek-chat}
     ports:
       - "8053:8053"
     healthcheck:
@@ -58,25 +64,26 @@ services:
 
   backend:
     build:
-      context: ./backend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: backend/Dockerfile
     environment:
       PLAYGROUND_DB_PATH: /app/data/playground.db
-      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
-      DEEPSEEK_BASE_URL: ${DEEPSEEK_BASE_URL:-https://api.deepseek.com/v1}
+      HOST_LLM_PROVIDER: ${HOST_LLM_PROVIDER:-deepseek}
+      HOST_LLM_API_KEY: ${HOST_LLM_API_KEY:-}
+      HOST_LLM_BASE_URL: ${HOST_LLM_BASE_URL:-https://api.deepseek.com/v1}
+      HOST_LLM_MODEL: ${HOST_LLM_MODEL:-deepseek-chat}
       BOOTSTRAP_AGENTS: >-
-        [{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"}]
+        [{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"}]
+      PLAYGROUND_ALLOW_PRIVATE_AGENTS: "true"
+      PLAYGROUND_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+      HOST_MAX_TASKS: ${HOST_MAX_TASKS:-12}
+      HOST_MAX_ROUNDS: ${HOST_MAX_ROUNDS:-8}
+      HOST_MAX_CONCURRENCY: ${HOST_MAX_CONCURRENCY:-3}
+      HOST_MAX_ATTEMPTS: ${HOST_MAX_ATTEMPTS:-2}
     ports:
       - "8050:8050"
     volumes:
       - backend_data:/app/data
-    depends_on:
-      k8s-ops:
-        condition: service_healthy
-      k8s-orchestrator:
-        condition: service_healthy
-      k8s-security:
-        condition: service_healthy
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; request=urllib.request.Request('http://127.0.0.1:8050/api/ping', data=b'{}', headers={'Content-Type':'application/json'}); urllib.request.urlopen(request)"]
       interval: 10s
@@ -102,4 +109,3 @@ services:
 
 volumes:
   backend_data:
-

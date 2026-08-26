@@ -6,8 +6,8 @@ import ArtifactCard from './ArtifactCard'
 
 function StatusIcon({ status }) {
   if (status === 'completed') return <CheckCircleFilled className="trace-ok" />
-  if (status === 'failed') return <CloseCircleFilled className="trace-failed" />
-  if (status === 'working') return <LoadingOutlined className="trace-working" />
+  if (status === 'failed' || status === 'blocked') return <CloseCircleFilled className="trace-failed" />
+  if (status === 'working' || status === 'retrying') return <LoadingOutlined className="trace-working" />
   return <ClockCircleFilled className="trace-waiting" />
 }
 
@@ -48,6 +48,18 @@ export default function OrchestrationTrace({ run, onApproval }) {
                 : <strong>{step.label}</strong>}
               {step.arguments && Object.keys(step.arguments).length > 0 && (
                 <code>{JSON.stringify(step.arguments)}</code>
+              )}
+              {step.dependsOn?.length > 0 && (
+                <small className="trace-meta">依赖：{step.dependsOn.join('、')}</small>
+              )}
+              {step.attempt > 1 && (
+                <small className="trace-meta">第 {step.attempt} 次尝试</small>
+              )}
+              {step.replacedAgentId && (
+                <small className="trace-meta">已切换：{step.replacedAgentId}</small>
+              )}
+              {step.reason && (
+                <small className="trace-meta">{step.reason}</small>
               )}
             </div>
           </div>

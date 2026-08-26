@@ -1,14 +1,25 @@
 agent_id: k8s-orchestrator
-name: K8s Orchestrator Agent
-description: Plans Kubernetes changes and executes only exact user-approved mutations.
+name: K8s Resource Orchestrator Agent
+description: Creates and manages Kubernetes resources through MCP and executes only exact user-approved mutations.
+read_only: false
+risk_level: write_approval
+limitations:
+  - mutation requires approval
+priority: 40
 port: 8051
 public_url: ${AGENT_PUBLIC_URL}
 mcp_url: ${K8S_MCP_URL}
 skills:
+  - id: resource.manage
+    name: Kubernetes Resource Management
+    description: Apply, patch, label, annotate, or delete Kubernetes resources after approval.
+    tags: [kubernetes, yaml, apply, patch, delete]
+    examples:
+      - Apply a reviewed Kubernetes manifest.
   - id: workload.orchestrate
     name: Kubernetes Workload Orchestration
-    description: Generate manifests and perform approved workload, rollout, and Helm changes.
-    tags: [kubernetes, deployment, rollout, helm]
+    description: Generate manifests and perform approved workload and rollout changes.
+    tags: [kubernetes, deployment, rollout, resource]
     examples:
       - Generate and apply a Deployment after approval.
       - Scale a Deployment and verify rollout status.
@@ -17,16 +28,18 @@ tool_policy:
     - list_k8s_*
     - get_k8s_*
     - describe_k8s_*
-    - helm_list_releases
-    - helm_search_repo
+    - get_pod_*
+    - get_large_model_yaml_example
+    - get_metax_gpu_pod_yaml
+    - get_mthreads_gpu_pod_yaml
   deny:
-    - delete_k8s_resource
-    - delete_k8s_yaml
-    - delete_k8s_pod
     - force_*
   approval_required:
     - apply_k8s_yaml
     - patch_k8s_resource
+    - delete_k8s_resource
+    - delete_k8s_yaml
+    - delete_k8s_pod
     - scale_k8s_deployment
     - restart_k8s_deployment
     - restart_k8s_daemonset
@@ -38,5 +51,3 @@ tool_policy:
     - update_k8s_deployment_image_tag
     - annotate_k8s_resource
     - label_k8s_resource
-    - helm_install_chart
-

@@ -9,9 +9,17 @@ class ApprovalService:
         self.gateway = gateway
 
     async def decide(self, approval_id: str, decision: str) -> dict:
-        approval = self.repository.decide_approval(
+        approval, claimed = self.repository.claim_approval_decision(
             approval_id, decision
         )
+        if not claimed:
+            return {
+                "approval": approval,
+                "result": {
+                    "state": "completed",
+                    "text": "审批已处理，未重复执行。",
+                },
+            }
         agent = self.repository.get_agent(approval["agent_id"])
         if agent is None:
             raise ValueError("approval agent is no longer registered")
@@ -19,7 +27,10 @@ class ApprovalService:
             {
                 "type": "approval_decision",
                 "approval_id": approval["id"],
+                "agent_id": approval["agent_id"],
                 "decision": decision,
+                "tool_name": approval["tool_name"],
+                "arguments": approval["arguments"],
                 "action_digest": approval["action_digest"],
             },
             ensure_ascii=False,
@@ -31,11 +42,14 @@ class ApprovalService:
             **result,
             "text": self._execution_text(result),
         }
+        run = self.repository.get_run(approval["run_id"]) or {}
         run_status = (
             "approval_required"
             if result.get("approval")
             else "failed"
             if result.get("state") == "failed"
+            else "approval_required"
+            if run.get("mode") == "auto"
             else "completed"
         )
         self.repository.update_run_status(
@@ -46,7 +60,10 @@ class ApprovalService:
     @staticmethod
     def _execution_text(result: dict) -> str:
         for artifact in reversed(result.get("artifacts", [])):
-            if artifact.get("name") != "execution_result":
+            if artifact.get("name") not in {
+                "execution_result",
+                "specialist_result",
+            }:
                 continue
             for part in artifact.get("parts", []):
                 root = part.get("root", part)
@@ -57,7 +74,10 @@ class ApprovalService:
                     payload = json.loads(text)
                 except json.JSONDecodeError:
                     return text
-                value = payload.get("result", payload.get("text", ""))
+                value = payload.get(
+                    "result",
+                    payload.get("summary", payload.get("text", "")),
+                )
                 if isinstance(value, str):
                     try:
                         decoded = json.loads(value)

@@ -55,11 +55,17 @@ async def test_approved_exact_action_executes_once_and_clears_pending():
     events = [event async for event in agent.stream(message, "ctx-1")]
 
     assert events[-1].type is RuntimeEventType.COMPLETED
-    assert events[-1].artifact_name == "execution_result"
+    assert events[-1].artifact_name == "specialist_result"
+    assert events[-1].data["continuation"]["allowed"] is True
     assert client.calls == [
         ("scale_k8s_deployment", {"name": "api", "replicas": 2})
     ]
     assert "ctx-1" not in agent._pending_by_context
+
+
+@pytest.mark.parametrize("query", ["1", "true", "null", "[]", '"approve"'])
+def test_approval_parser_ignores_valid_non_object_json(query):
+    assert RuntimeMCPAgent._parse_approval(query) is None
 
 
 @pytest.mark.anyio
@@ -89,3 +95,29 @@ async def test_changed_digest_never_executes_tool():
 
     assert events[-1].type is RuntimeEventType.ERROR
     assert client.calls == []
+
+
+@pytest.mark.anyio
+async def test_approved_action_recovers_after_agent_restart_from_signed_payload():
+    client = FakeMCPClient()
+    restarted_agent = make_agent(client)
+    pending = PendingAction.from_call(
+        approval_id="ap-1",
+        agent_id="k8s-orchestrator",
+        tool_name="scale_k8s_deployment",
+        arguments={"name": "api", "replicas": 2},
+    )
+    message = json.dumps({
+        "type": "approval_decision",
+        "approval_id": pending.approval_id,
+        "agent_id": pending.agent_id,
+        "decision": "approved",
+        "tool_name": pending.tool_name,
+        "arguments": pending.arguments,
+        "action_digest": pending.action_digest,
+    })
+
+    events = [event async for event in restarted_agent.stream(message, "ctx-1")]
+
+    assert events[-1].type is RuntimeEventType.COMPLETED
+    assert client.calls == [("scale_k8s_deployment", {"name": "api", "replicas": 2})]

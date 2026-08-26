@@ -45,7 +45,31 @@ def test_event_feed_enriches_single_and_multi_agent_events():
     assert result[0]["source"] == "multi-agent"
     assert result[0]["agent_name"] == "K8s Ops Agent"
     assert result[0]["payload"]["tool"] == "list_k8s_resources"
+    assert result[0]["event_type"] == "tool.called"
     assert result[1]["conversation_type"] == "single"
     assert result[1]["source"] == "single-agent"
     assert result[1]["agent_name"] == "K8s Ops Agent"
 
+
+def test_event_feed_normalizes_versioned_run_events_for_the_ui():
+    conversations = [{"id": "multi-1", "agent_id": "multi-host", "title": "并行检查", "type": "multi"}]
+    agents = [{"id": "ops-1", "name": "K8s Ops Agent"}]
+    events = [{
+        "version": 1,
+        "event_id": "evt-1",
+        "sequence": 6,
+        "run_id": "run-1",
+        "conversation_id": "multi-1",
+        "task_id": "run-1:root:plan:ops",
+        "type": "task.started",
+        "timestamp": "2026-08-07T08:38:02Z",
+        "data": {"agent_id": "ops-1"},
+    }]
+
+    result = build_event_feed(events, conversations, agents)
+
+    assert result[0]["event_type"] == "task.started"
+    assert result[0]["state"] == "working"
+    assert result[0]["agent_name"] == "K8s Ops Agent"
+    assert result[0]["payload"] == {"agent_id": "ops-1"}
+    assert result[0]["content"] == "任务开始执行"

@@ -1,11 +1,16 @@
 from __future__ import annotations
 
 import uuid
+import os
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import create_engine, delete, event, insert, select, update
+from sqlalchemy import create_engine, delete, event, func, insert, inspect, select, text, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from pydantic import ValidationError
+
+from backend.orchestration.events import RunEvent
 
 from .models import (
     agents,
@@ -16,9 +21,16 @@ from .models import (
     messages,
     metadata,
     migrations,
+    orchestration_tasks,
     remote_bindings,
     runs,
 )
+
+RUN_EVENT_DISCRIMINATOR = "run_event"
+RUN_EVENT_ENVELOPE_FIELDS = {
+    "version", "event_id", "sequence", "run_id", "conversation_id", "type",
+    "timestamp", "data",
+}
 
 
 class SQLiteRepository:
@@ -34,10 +46,75 @@ class SQLiteRepository:
         def enable_foreign_keys(dbapi_connection, _record):
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute(
+                f"PRAGMA busy_timeout={int(os.getenv('PLAYGROUND_DB_BUSY_TIMEOUT_MS', '5000'))}"
+            )
+            cursor.execute("PRAGMA journal_mode=WAL")
             cursor.close()
 
     def initialize(self) -> None:
+        if inspect(self.engine).has_table("events"):
+            self._upgrade_event_columns()
         metadata.create_all(self.engine)
+        if not inspect(self.engine).has_table("events"):
+            raise RuntimeError("events table initialization failed")
+        self._upgrade_legacy_run_events()
+
+    def _upgrade_event_columns(self) -> None:
+        existing = {column["name"] for column in inspect(self.engine).get_columns("events")}
+        additions = {
+            "run_id": "VARCHAR",
+            "sequence": "INTEGER",
+            "created_at": "VARCHAR",
+        }
+        with self.engine.begin() as connection:
+            for name, column_type in additions.items():
+                if name not in existing:
+                    connection.execute(text(f"ALTER TABLE events ADD COLUMN {name} {column_type}"))
+            rows = connection.execute(select(events.c.id, events.c.data)).mappings()
+            for row in rows:
+                payload = dict(row["data"])
+                values = {"created_at": str(payload.get("timestamp") or payload.get("created_at") or "")}
+                if RUN_EVENT_ENVELOPE_FIELDS.issubset(payload):
+                    try:
+                        envelope = RunEvent.model_validate(payload)
+                    except ValidationError:
+                        envelope = None
+                    if envelope is not None:
+                        values.update(run_id=envelope.run_id, sequence=envelope.sequence, created_at=envelope.timestamp.isoformat())
+                connection.execute(update(events).where(events.c.id == row["id"]).values(**values))
+            connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_events_run_sequence ON events (run_id, sequence) WHERE run_id IS NOT NULL"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_conversation_created ON events (conversation_id, created_at)"))
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_events_type_created ON events (event_type, created_at)"))
+
+    def _upgrade_legacy_run_events(self) -> None:
+        """Mark verified pre-discriminator RunEvent rows for the new stream."""
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                select(events).where(
+                    events.c.event_type != RUN_EVENT_DISCRIMINATOR
+                )
+            ).mappings()
+            for row in rows:
+                payload = dict(row["data"])
+                if not RUN_EVENT_ENVELOPE_FIELDS.issubset(payload):
+                    continue
+                try:
+                    run_event = RunEvent.model_validate(payload)
+                except ValidationError:
+                    continue
+                if (
+                    run_event.event_id != row["id"]
+                    or run_event.conversation_id != row["conversation_id"]
+                    or (run_event.task_id or "") != row["task_id"]
+                    or run_event.type.value != row["event_type"]
+                ):
+                    continue
+                connection.execute(
+                    update(events)
+                    .where(events.c.id == row["id"])
+                    .values(event_type=RUN_EVENT_DISCRIMINATOR)
+                )
 
     def upsert_agent(self, data: dict[str, Any]) -> dict[str, Any]:
         statement = sqlite_insert(agents).values(
@@ -76,16 +153,26 @@ class SQLiteRepository:
             return result.rowcount > 0
 
     def list_conversations(
-        self, agent_id: str | None = None
+        self, agent_id: str | None = None, *, limit: int | None = None, offset: int = 0
     ) -> list[dict[str, Any]]:
         statement = select(conversations)
         if agent_id is not None:
             statement = statement.where(
                 conversations.c.agent_id == agent_id
             )
+        statement = statement.order_by(func.json_extract(conversations.c.data, "$.updated_at").desc(), conversations.c.id)
+        if limit is not None:
+            statement = statement.limit(limit).offset(offset)
         with self.engine.connect() as connection:
             rows = connection.execute(statement).mappings()
             return [dict(row["data"]) for row in rows]
+
+    def count_conversations(self, agent_id: str | None = None) -> int:
+        statement = select(func.count()).select_from(conversations)
+        if agent_id is not None:
+            statement = statement.where(conversations.c.agent_id == agent_id)
+        with self.engine.connect() as connection:
+            return int(connection.execute(statement).scalar_one())
 
     def get_conversation(
         self, conversation_id: str
@@ -142,7 +229,8 @@ class SQLiteRepository:
             )
             connection.execute(
                 delete(events).where(
-                    events.c.conversation_id == conversation_id
+                    events.c.conversation_id == conversation_id,
+                    events.c.event_type != RUN_EVENT_DISCRIMINATOR,
                 )
             )
             result = connection.execute(
@@ -175,15 +263,22 @@ class SQLiteRepository:
                     data=data,
                 )
             )
-        conversation_id = data["conversation_id"]
-        self.update_conversation(
-            conversation_id,
-            {
-                "message_count": len(
-                    self.list_messages(conversation_id)
+            current_count = func.coalesce(
+                func.json_extract(conversations.c.data, "$.message_count"), 0
+            )
+            connection.execute(
+                update(conversations)
+                .where(conversations.c.id == data["conversation_id"])
+                .values(
+                    data=func.json_set(
+                        conversations.c.data,
+                        "$.message_count",
+                        current_count + 1,
+                        "$.updated_at",
+                        datetime.now(timezone.utc).isoformat(),
+                    )
                 )
-            },
-        )
+            )
         return dict(data)
 
     def get_message(self, message_id: str) -> dict[str, Any] | None:
@@ -194,18 +289,29 @@ class SQLiteRepository:
             return dict(data) if data else None
 
     def list_events(
-        self, conversation_id: str | None = None
+        self, conversation_id: str | None = None, *, limit: int | None = None, offset: int = 0
     ) -> list[dict[str, Any]]:
         statement = select(events)
         if conversation_id is not None:
             statement = statement.where(
                 events.c.conversation_id == conversation_id
             )
+        if limit is not None:
+            statement = statement.order_by(events.c.created_at.desc(), events.c.id.desc()).limit(limit).offset(offset)
         with self.engine.connect() as connection:
             rows = connection.execute(statement).mappings()
             return [dict(row["data"]) for row in rows]
 
+    def count_events(self, conversation_id: str | None = None) -> int:
+        statement = select(func.count()).select_from(events)
+        if conversation_id is not None:
+            statement = statement.where(events.c.conversation_id == conversation_id)
+        with self.engine.connect() as connection:
+            return int(connection.execute(statement).scalar_one())
+
     def add_event(self, data: dict[str, Any]) -> dict[str, Any]:
+        if data.get("event_type") == RUN_EVENT_DISCRIMINATOR:
+            raise ValueError("run_event is reserved for append_run_event")
         with self.engine.begin() as connection:
             connection.execute(
                 insert(events).values(
@@ -213,6 +319,9 @@ class SQLiteRepository:
                     conversation_id=data.get("conversation_id", ""),
                     task_id=data.get("task_id", ""),
                     event_type=data.get("event_type", ""),
+                    run_id=None,
+                    sequence=None,
+                    created_at=str(data.get("timestamp") or data.get("created_at") or ""),
                     data=data,
                 )
             )
@@ -254,6 +363,25 @@ class SQLiteRepository:
                 .values(status=status, data=data)
             )
 
+    def update_run_data(
+        self, run_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            current = connection.execute(
+                select(runs.c.data).where(runs.c.id == run_id)
+            ).scalar_one_or_none()
+            if current is None:
+                return None
+            payload = {**current, **changes, "id": run_id}
+            status = str(payload.get("status") or current["status"])
+            payload["status"] = status
+            connection.execute(
+                update(runs)
+                .where(runs.c.id == run_id)
+                .values(status=status, data=payload)
+            )
+        return payload
+
     def get_run(self, run_id: str) -> dict[str, Any] | None:
         with self.engine.connect() as connection:
             data = connection.execute(
@@ -261,10 +389,233 @@ class SQLiteRepository:
             ).scalar_one_or_none()
             return dict(data) if data else None
 
-    def list_runs(self) -> list[dict[str, Any]]:
+    def list_runs(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        statement = select(runs.c.data).order_by(runs.c.id.desc())
+        if limit is not None:
+            statement = statement.limit(limit).offset(offset)
         with self.engine.connect() as connection:
-            rows = connection.execute(select(runs.c.data)).scalars()
+            rows = connection.execute(statement).scalars()
             return [dict(row) for row in rows]
+
+    def count_runs(self) -> int:
+        with self.engine.connect() as connection:
+            return int(connection.execute(select(func.count()).select_from(runs)).scalar_one())
+
+    def create_task(self, data: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(data)
+        with self.engine.begin() as connection:
+            self._validate_task_parent(
+                connection,
+                task_id=payload["id"],
+                run_id=payload["run_id"],
+                parent_task_id=payload.get("parent_task_id"),
+            )
+            connection.execute(
+                insert(orchestration_tasks).values(
+                    id=payload["id"],
+                    run_id=payload["run_id"],
+                    parent_task_id=payload.get("parent_task_id"),
+                    agent_id=payload["agent_id"],
+                    status=payload["status"],
+                    data=payload,
+                )
+            )
+        return payload
+
+    def get_task(self, task_id: str) -> dict[str, Any] | None:
+        with self.engine.connect() as connection:
+            data = connection.execute(
+                select(orchestration_tasks.c.data).where(
+                    orchestration_tasks.c.id == task_id
+                )
+            ).scalar_one_or_none()
+            return dict(data) if data else None
+
+    def update_task_data(
+        self, task_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        return self.update_task(task_id, changes)
+
+    def update_task(
+        self, task_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        with self.engine.begin() as connection:
+            current = connection.execute(
+                select(orchestration_tasks.c.data).where(
+                    orchestration_tasks.c.id == task_id
+                )
+            ).scalar_one_or_none()
+            if current is None:
+                return None
+            if "id" in changes and changes["id"] != task_id:
+                raise ValueError("task id is immutable")
+            if "run_id" in changes and changes["run_id"] != current["run_id"]:
+                raise ValueError("task run_id is immutable")
+            payload = {**current, **changes}
+            payload["id"] = task_id
+            payload["run_id"] = current["run_id"]
+            self._validate_task_parent(
+                connection,
+                task_id=task_id,
+                run_id=payload["run_id"],
+                parent_task_id=payload.get("parent_task_id"),
+            )
+            connection.execute(
+                update(orchestration_tasks)
+                .where(orchestration_tasks.c.id == task_id)
+                .values(
+                    run_id=payload["run_id"],
+                    parent_task_id=payload.get("parent_task_id"),
+                    agent_id=payload["agent_id"],
+                    status=payload["status"],
+                    data=payload,
+                )
+            )
+        return payload
+
+    def list_tasks(self, run_id: str) -> list[dict[str, Any]]:
+        statement = select(orchestration_tasks.c.data).where(
+            orchestration_tasks.c.run_id == run_id
+        )
+        with self.engine.connect() as connection:
+            tasks = [dict(data) for data in connection.execute(statement).scalars()]
+        by_id = {task["id"]: task for task in tasks}
+        children: dict[str | None, list[dict[str, Any]]] = {}
+        for task in tasks:
+            parent_id = task.get("parent_task_id")
+            children.setdefault(parent_id, []).append(task)
+        for siblings in children.values():
+            siblings.sort(key=lambda task: task["id"])
+
+        ordered: list[dict[str, Any]] = []
+        visited: set[str] = set()
+
+        roots = [
+            *children.get(None, []),
+            *(by_id[task_id] for task_id in sorted(by_id)),
+        ]
+        stack = list(reversed(roots))
+        while stack:
+            task = stack.pop()
+            task_id = task["id"]
+            if task_id in visited:
+                continue
+            visited.add(task_id)
+            ordered.append(task)
+            stack.extend(reversed(children.get(task_id, [])))
+        return ordered
+
+    @staticmethod
+    def _validate_task_parent(
+        connection: Any,
+        *,
+        task_id: str,
+        run_id: str,
+        parent_task_id: str | None,
+    ) -> None:
+        if parent_task_id is None:
+            return
+        if parent_task_id == task_id:
+            raise ValueError("a task cannot be its own parent")
+
+        parent = connection.execute(
+            select(
+                orchestration_tasks.c.id,
+                orchestration_tasks.c.run_id,
+                orchestration_tasks.c.parent_task_id,
+            ).where(orchestration_tasks.c.id == parent_task_id)
+        ).mappings().one_or_none()
+        if parent is None:
+            raise ValueError("parent task does not exist")
+        ancestor = parent
+        visited = {task_id}
+        while True:
+            ancestor_id = ancestor["id"]
+            if ancestor_id in visited:
+                raise ValueError("parent change would create a cycle")
+            visited.add(ancestor_id)
+            if ancestor["run_id"] != run_id:
+                raise ValueError("parent task must belong to the same run")
+            if ancestor["parent_task_id"] is None:
+                return
+            ancestor_id = ancestor["parent_task_id"]
+            ancestor = connection.execute(
+                select(
+                    orchestration_tasks.c.id,
+                    orchestration_tasks.c.run_id,
+                    orchestration_tasks.c.parent_task_id,
+                ).where(orchestration_tasks.c.id == ancestor_id)
+            ).mappings().one_or_none()
+            if ancestor is None:
+                raise ValueError("parent task does not exist")
+
+    def append_run_event(self, event: RunEvent) -> RunEvent:
+        """Persist an event once and assign its next sequence within one transaction."""
+        candidate = RunEvent.model_validate(event)
+        with self.engine.connect() as connection:
+            connection.exec_driver_sql("BEGIN IMMEDIATE")
+            try:
+                existing = connection.execute(
+                    select(events.c.data).where(
+                        events.c.id == candidate.event_id,
+                        events.c.event_type == RUN_EVENT_DISCRIMINATOR,
+                    )
+                ).scalar_one_or_none()
+                if existing is not None:
+                    connection.commit()
+                    return RunEvent.model_validate(existing)
+
+                sequence = (
+                    connection.execute(
+                        select(
+                            func.coalesce(
+                                func.max(events.c.sequence),
+                                0,
+                            )
+                        ).where(
+                            events.c.event_type == RUN_EVENT_DISCRIMINATOR,
+                            events.c.run_id == candidate.run_id
+                        )
+                    ).scalar_one()
+                    + 1
+                )
+                persisted = candidate.model_copy(update={"sequence": sequence})
+                payload = persisted.model_dump(mode="json")
+                connection.execute(
+                    insert(events).values(
+                        id=persisted.event_id,
+                        conversation_id=persisted.conversation_id,
+                        task_id=persisted.task_id or "",
+                        event_type=RUN_EVENT_DISCRIMINATOR,
+                        run_id=persisted.run_id,
+                        sequence=persisted.sequence,
+                        created_at=persisted.timestamp.isoformat(),
+                        data=payload,
+                    )
+                )
+                connection.commit()
+                return persisted
+            except Exception:
+                connection.rollback()
+                raise
+
+    def list_run_events(
+        self, run_id: str, after_sequence: int = 0
+    ) -> list[RunEvent]:
+        statement = (
+            select(events.c.data)
+            .where(
+                events.c.event_type == RUN_EVENT_DISCRIMINATOR,
+                events.c.run_id == run_id,
+                events.c.sequence > after_sequence,
+            )
+            .order_by(events.c.sequence, events.c.id)
+        )
+        with self.engine.connect() as connection:
+            return [
+                RunEvent.model_validate(data)
+                for data in connection.execute(statement).scalars()
+            ]
 
     def upsert_remote_binding(
         self,
@@ -366,6 +717,29 @@ class SQLiteRepository:
                     .values(status=decision)
                 )
         return self.get_approval(approval_id)
+
+    def claim_approval_decision(
+        self, approval_id: str, decision: str
+    ) -> tuple[dict[str, Any], bool]:
+        """Atomically record a decision and report whether this caller won."""
+        if decision not in {"approved", "rejected"}:
+            raise ValueError("decision must be approved or rejected")
+        with self.engine.begin() as connection:
+            changed = connection.execute(
+                update(approvals)
+                .where(
+                    approvals.c.id == approval_id,
+                    approvals.c.status == "pending",
+                )
+                .values(status=decision)
+            ).rowcount == 1
+            current = connection.execute(
+                select(approvals).where(approvals.c.id == approval_id)
+            ).mappings().one()
+            if not changed and current["status"] != decision:
+                raise ValueError("approval already has a conflicting decision")
+            approval = dict(current)
+        return approval, changed
 
     def has_migration(self, migration_id: str) -> bool:
         with self.engine.connect() as connection:

@@ -1,20 +1,17 @@
 """LangGraph Host Manager — bridges the LangGraph host agent with the playground backend."""
 
-import json
 import logging
-import uuid
 from typing import AsyncIterable, Optional
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
-
-from host.langgraph.agent import LangGraphHostAgent, RemoteAgentConnections
+from backend.host.langgraph.agent import LangGraphHostAgent
+from backend.host.langgraph.decisions import LangGraphDecisionPort
+from backend.host.orchestration.engine import HostOrchestrationEngine
+from backend.host.orchestration.models import DelegationResult
 from a2a.types import AgentCard
-try:
-    import database
-    from a2a_gateway import A2AGateway
-except ImportError:
-    from backend import database
-    from backend.a2a_gateway import A2AGateway
+from backend import database
+from backend.a2a_gateway import A2AGateway
+from backend.registry.service import AgentRegistry
+from backend.settings import AppSettings
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +19,22 @@ logger = logging.getLogger(__name__)
 class LangGraphHostManager:
     """Manages the LangGraph HostAgent lifecycle and bridges to the playground backend."""
 
-    def __init__(self):
-        self._host_agent = LangGraphHostAgent(
-            gateway=A2AGateway(database.repository)
+    def __init__(self, *, registry=None, gateway=None, decisions=None):
+        settings = AppSettings.from_env()
+        self._gateway = gateway or A2AGateway(database.repository)
+        self._registry = registry or AgentRegistry(database.repository)
+        self._host_agent = LangGraphHostAgent(gateway=self._gateway)
+        self._decisions = decisions or LangGraphDecisionPort(
+            self._host_agent._make_model(streaming=False)
+        )
+        self._engine = HostOrchestrationEngine(
+            self._registry,
+            self._decisions,
+            self._delegate_task,
+            max_concurrency=settings.host_max_concurrency,
+            max_tasks=settings.host_max_tasks,
+            max_attempts=settings.host_max_attempts,
+            max_rounds=settings.host_max_rounds,
         )
 
     def register_agents_from_db(self, agents: list[dict]):
@@ -65,80 +75,86 @@ class LangGraphHostManager:
           - {"type": "text", "text": "..."}
           - {"type": "done", "session_id": "..."}
         """
-        token = self._host_agent.set_current_run(session_id)
-        graph = self._host_agent.get_graph()
-        config = {"configurable": {"thread_id": session_id}}
+        async for event in self._engine.stream(text, session_id):
+            yield event
 
-        # Track seen IDs to avoid duplicates from stream_mode="values"
-        seen_tool_call_ids = set()
-        seen_tool_result_ids = set()
-        tool_call_names = {}
-        # Track which agent a send_task was routed to
-        tool_call_agent_map = {}
-        # Track text already emitted to avoid re-emitting from ToolMessage content
-        # that the LLM then repeats in its final AIMessage
-        emitted_text_hashes = set()
+    async def resume_message_stream(
+        self,
+        text: str,
+        session_id: str,
+        *,
+        state=None,
+        plan=None,
+        results=None,
+        successful=None,
+    ) -> AsyncIterable[dict]:
+        async for event in self._engine.stream(
+            text,
+            session_id,
+            state=state,
+            plan=plan,
+            initial_results=results,
+            initial_successful=successful,
+        ):
+            yield event
 
-        try:
-            event_stream = graph.astream(
-                {"messages": [HumanMessage(content=text)]},
-                config,
-                stream_mode="values",
+    async def _delegate_task(
+        self, run_id: str, agent_id: str, message: str, on_event
+    ) -> DelegationResult:
+        agent = self._registry.get(agent_id)
+        if agent is None:
+            return DelegationResult(
+                state="failed", error=f"Agent '{agent_id}' not found"
             )
-            async for event in event_stream:
-                messages = event.get("messages", [])
-                if not messages:
-                    continue
-
-                last = messages[-1]
-
-                if isinstance(last, AIMessage):
-                    if last.tool_calls:
-                        for tc in last.tool_calls:
-                            if tc["id"] in seen_tool_call_ids:
-                                continue
-                            seen_tool_call_ids.add(tc["id"])
-                            tool_call_names[tc["id"]] = tc["name"]
-                        # Track which agent send_task is targeting
-                            if tc["name"] == "send_task" and tc.get("args"):
-                                agent_id = tc["args"].get("agent_id", "")
-                                if agent_id:
-                                    tool_call_agent_map[tc["id"]] = agent_id
-                            yield {"type": "tool_call", "tool": tc["name"], "args": tc.get("args", {}), "id": tc["id"]}
-                    elif last.content:
-                    # Only emit text that hasn't been emitted before
-                        text_hash = hash(last.content)
-                        if text_hash not in emitted_text_hashes:
-                            emitted_text_hashes.add(text_hash)
-                            yield {"type": "text", "text": last.content}
-
-                elif isinstance(last, ToolMessage):
-                    if last.tool_call_id in seen_tool_result_ids:
-                        continue
-                    seen_tool_result_ids.add(last.tool_call_id)
-                    tool_name = tool_call_names.get(last.tool_call_id, "unknown")
-                    result = last.content
-                    try:
-                        result_payload = json.loads(result)
-                    except (TypeError, json.JSONDecodeError):
-                        result_payload = {}
-                    if isinstance(result_payload, dict) and result_payload.get("approval"):
-                        yield {
-                            "type": "approval_required",
-                            "approval": result_payload["approval"],
-                            "agent_id": result_payload["approval"].get("agent_id"),
-                        }
-                # If this was a send_task, emit routing info for the sub-agent
-                    if tool_name == "send_task" and last.tool_call_id in tool_call_agent_map:
-                        agent_id = tool_call_agent_map[last.tool_call_id]
-                        agent_info = self._host_agent.agents.get(agent_id, {})
-                        agent_name = agent_info.get("name", agent_id)
-                        yield {"type": "routing", "agent": agent_name, "agent_id": agent_id}
-                    yield {"type": "tool_result", "tool": tool_name, "result": result, "id": last.tool_call_id}
-        finally:
-            self._host_agent.reset_current_run(token)
-
-        yield {"type": "done", "session_id": session_id}
+        response = {"state": "completed", "text": ""}
+        accumulated = ""
+        specialist_output = None
+        async for event in self._gateway.delegate_stream(run_id, agent, message):
+            event_type = str(event.get("type") or "")
+            if event_type in {"tool_call", "tool_result", "status"}:
+                await on_event(event)
+            if event_type == "text":
+                accumulated += str(event.get("text") or "")
+                await on_event(event)
+            elif event_type == "done":
+                current_state = str(
+                    response.get("state") or ""
+                ).replace("_", "-").lower()
+                if current_state not in {
+                    "failed", "error", "rejected", "cancelled", "canceled",
+                    "input-required",
+                }:
+                    response = event
+                    response["text"] = str(
+                        event.get("text") or accumulated
+                    )
+            elif event_type == "error":
+                response = {"state": "failed", "error": event.get("text")}
+            elif event_type == "approval_required":
+                response = event
+            elif not event_type:
+                response = event
+            if event.get("specialist_output") is not None:
+                specialist_output = event["specialist_output"]
+        state = str(response.get("state") or "").replace("_", "-").lower()
+        if response.get("approval") or state == "input-required":
+            return DelegationResult(
+                state="approval_required",
+                text=str(response.get("text") or ""),
+                output=specialist_output,
+                approval=response.get("approval"),
+            )
+        if state in {"failed", "error", "rejected", "cancelled", "canceled"}:
+            return DelegationResult(
+                state="failed",
+                output=specialist_output,
+                error=str(response.get("error") or response.get("text") or "remote execution failed"),
+            )
+        return DelegationResult(
+            state="completed",
+            text=str(response.get("text") or ""),
+            output=specialist_output,
+        )
 
 
 _manager: Optional[LangGraphHostManager] = None
