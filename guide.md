@@ -105,14 +105,13 @@ HOST_LLM_MODEL=deepseek-chat
 PLAYGROUND_ALLOW_PRIVATE_AGENTS=true
 ```
 
-不配置时，Backend 默认使用：
+Backend 必须配置 `DATABASE_URL` 指向 PostgreSQL。其他默认值包括：
 
-- SQLite：`backend/data/playground-local.db`
 - `HOST_MAX_TASKS=6`
 - `HOST_MAX_CONCURRENCY=3`
 - `HOST_MAX_ATTEMPTS=2`
 
-只有需要覆盖默认值时，才把这些变量写入 `.env`。
+`DATABASE_URL` 必须写入 `.env`，其余变量仅在需要覆盖默认值时配置。
 
 每个 Agent 都有独立示例，按需分别复制：
 
