@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from backend.persistence.repository import SQLiteRepository
+from tests.postgres_helpers import create_test_repository
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy import inspect
 
 
 def test_repository_uses_stable_agent_ids_even_with_duplicate_names(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
 
     repository.upsert_agent(
@@ -21,7 +21,7 @@ def test_repository_uses_stable_agent_ids_even_with_duplicate_names(tmp_path):
 
 
 def test_remote_binding_reuses_context_for_same_run_and_agent(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run(
         run_id="run-1",
@@ -48,7 +48,7 @@ def test_remote_binding_reuses_context_for_same_run_and_agent(tmp_path):
 
 
 def test_approval_decision_is_idempotent(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run("run-1", "conv-1", "approval_required")
     repository.create_approval(
@@ -68,7 +68,7 @@ def test_approval_decision_is_idempotent(tmp_path):
 
 
 def test_message_insert_atomically_updates_conversation_count(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_conversation(
         {"id": "conv-1", "agent_id": "ops", "message_count": 0}
@@ -94,12 +94,11 @@ def test_message_insert_atomically_updates_conversation_count(tmp_path):
     assert conversation["updated_at"]
 
 
-def test_sqlite_enables_wal_and_common_lookup_indexes(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+def test_postgres_exposes_common_lookup_indexes(tmp_path):
+    repository = create_test_repository()
     repository.initialize()
 
-    with repository.engine.connect() as connection:
-        assert connection.exec_driver_sql("PRAGMA journal_mode").scalar().lower() == "wal"
+    assert repository.engine.dialect.name == "postgresql"
 
     indexes = {
         (table, index["name"])
@@ -122,7 +121,7 @@ def test_sqlite_enables_wal_and_common_lookup_indexes(tmp_path):
 
 
 def test_repository_merges_run_and_task_checkpoint_data(tmp_path):
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run(
         "run-1", "conv-1", "running", {"title": "deploy nginx"}

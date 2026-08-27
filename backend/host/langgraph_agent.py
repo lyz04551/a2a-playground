@@ -9,7 +9,6 @@ from typing import AsyncIterable, Optional
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.tools import tool
 from langchain_openai import ChatOpenAI
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.prebuilt import create_react_agent
 
 from a2a.client.client import ClientConfig
@@ -189,6 +188,9 @@ class LangGraphHostAgent:
             f"Available agents:\n{self._build_agents_text()}"
         )
 
-        memory = MemorySaver()
-        self._graph = create_react_agent(model, tools=self._make_tools(), prompt=prompt, checkpointer=memory)
+        self._graph = create_react_agent(
+            model,
+            tools=self._make_tools(),
+            prompt=prompt,
+        )
         return self._graph

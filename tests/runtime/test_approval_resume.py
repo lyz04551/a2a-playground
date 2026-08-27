@@ -27,10 +27,10 @@ class FakeGraph:
     def __init__(self, messages):
         self.messages = list(messages)
 
-    def get_state(self, config):
+    async def aget_state(self, config):
         return type("State", (), {"values": {"messages": self.messages}})()
 
-    def update_state(self, config, values, **kwargs):
+    async def aupdate_state(self, config, values, **kwargs):
         self.messages.extend(values["messages"])
 
 

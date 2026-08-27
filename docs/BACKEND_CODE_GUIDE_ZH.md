@@ -365,15 +365,15 @@ Agent 返回 input-required + pending_action artifact
 
 `claim_approval_decision()` 用于防止重复点击导致同一个写操作执行两次。审批记录还保存 `action_digest`，让待批准动作可以被稳定识别。
 
-## 11. SQLite 保存了什么
+## 11. PostgreSQL 保存了什么
 
-默认数据库：
+数据库由环境变量指定：
 
 ```text
-backend/data/playground-local.db
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/playground
 ```
 
-可用 `PLAYGROUND_DB_PATH` 修改。
+未配置 `DATABASE_URL` 时后端不会启动。
 
 主要表：
 

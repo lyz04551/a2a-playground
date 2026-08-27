@@ -14,9 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
 COPY backend ./backend
-
-# Create data directory for persistent storage
-RUN mkdir -p /app/data
+COPY alembic.ini ./alembic.ini
 
 EXPOSE 8050
 

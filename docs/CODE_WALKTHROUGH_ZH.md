@@ -293,13 +293,13 @@ app.include_router(create_runs_router(run_service))
 
 这里使用的是依赖注入：`RunService` 不自己创建数据库、Gateway、Host，而是从外部传入。测试时就可以换成 FakeGateway、FakeHost。
 
-注意数据库路径由环境变量控制：
+数据库连接由环境变量控制：
 
 ```text
-PLAYGROUND_DB_PATH=backend/data/playground-local.db
+DATABASE_URL=postgresql+psycopg://user:password@localhost:5432/playground
 ```
 
-如果不设置，会使用默认 `backend/data/playground.db`。两个数据库的 Agent 注册数据可能不同。出现“明明 Agent 在运行，Host 却说没有 Agent”时，先检查后端连接的是哪个数据库。
+`DATABASE_URL` 未配置时后端会拒绝启动。出现“明明 Agent 在运行，Host 却说没有 Agent”时，先检查后端连接的是哪个 PostgreSQL 数据库。
 
 ### 4.2 Run API：`backend/api/runs.py`
 

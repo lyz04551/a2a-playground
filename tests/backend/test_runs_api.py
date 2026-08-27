@@ -8,7 +8,7 @@ from fastapi import FastAPI
 
 from backend.orchestration.commands import RunCommand
 from backend.orchestration.service import RunService
-from backend.persistence.repository import SQLiteRepository
+from tests.postgres_helpers import create_test_repository
 from backend.registry.service import AgentRegistry
 
 
@@ -29,7 +29,7 @@ class UnusedAutoHost:
 def make_app(tmp_path):
     from backend.api.runs import create_router
 
-    repository = SQLiteRepository(tmp_path / "playground.db")
+    repository = create_test_repository()
     repository.initialize()
     repository.upsert_agent(
         {

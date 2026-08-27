@@ -331,7 +331,7 @@ including mutations proposed after read-only diagnosis or security review.
 | DeepSeek model | `deepseek-chat` |
 | DeepSeek base URL | `https://api.deepseek.com/v1` |
 | A2A SDK | `>=0.3.25` |
-| Data storage | SQLite in `backend/data/` |
+| Data storage | PostgreSQL (`DATABASE_URL`) |
 
 ---
 

@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from backend.persistence.repository import SQLiteRepository
+from tests.postgres_helpers import create_test_repository
 from backend.registry.service import AgentRegistry
 
 
 def test_registry_keeps_duplicate_names_separate_and_filters_by_skill(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.upsert_agent(
         {
@@ -38,7 +38,7 @@ def test_registry_keeps_duplicate_names_separate_and_filters_by_skill(tmp_path):
 
 
 def test_registry_excludes_offline_agent_from_candidates(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.upsert_agent(
         {
@@ -56,7 +56,7 @@ def test_registry_excludes_offline_agent_from_candidates(tmp_path):
 
 
 def test_registry_normalizes_legacy_agent_conservatively(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.upsert_agent(
         {"id": "legacy", "name": "Legacy", "url": "http://legacy"}
@@ -71,7 +71,7 @@ def test_registry_normalizes_legacy_agent_conservatively(tmp_path):
 
 
 def test_registry_ranks_exact_skill_before_tag_match(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     for agent in (
         {
@@ -103,7 +103,7 @@ def test_registry_ranks_exact_skill_before_tag_match(tmp_path):
 
 
 def test_registry_excludes_read_only_agent_from_write_candidates(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.upsert_agent(
         {

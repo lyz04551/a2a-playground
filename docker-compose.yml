@@ -1,4 +1,48 @@
 services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-a2a}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-a2a_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-playground}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./deploy/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
+    restart: unless-stopped
+
+  backend-migrate:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: ["python", "-m", "backend.persistence.migrate"]
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-a2a}:${POSTGRES_PASSWORD:-a2a_dev_password}@postgres:5432/${POSTGRES_DB:-playground}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  checkpoint-migrate:
+    build:
+      context: .
+      dockerfile: agents/k8s-orchestrator/Dockerfile
+    command: ["python", "-m", "a2a_runtime.checkpoint_migrate"]
+    working_dir: /app
+    environment:
+      AGENT_CHECKPOINT_DATABASE_URL: postgresql://${POSTGRES_USER:-a2a}:${POSTGRES_PASSWORD:-a2a_dev_password}@postgres:5432/langgraph
+      LANGGRAPH_STRICT_MSGPACK: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
   k8s-orchestrator:
     build:
       context: .
@@ -16,6 +60,11 @@ services:
       AGENT_TIMEOUT_SAFETY_MARGIN_SECONDS: ${AGENT_TIMEOUT_SAFETY_MARGIN_SECONDS:-5}
       AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-12}
       AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-16}
+      AGENT_CHECKPOINT_DATABASE_URL: postgresql://${POSTGRES_USER:-a2a}:${POSTGRES_PASSWORD:-a2a_dev_password}@postgres:5432/langgraph
+      LANGGRAPH_STRICT_MSGPACK: "true"
+    depends_on:
+      checkpoint-migrate:
+        condition: service_completed_successfully
     ports:
       - "8051:8051"
     healthcheck:
@@ -43,6 +92,11 @@ services:
       AGENT_MAX_TOOL_CALLS: ${OPS_AGENT_MAX_TOOL_CALLS:-20}
       AGENT_MAX_STEPS: ${OPS_AGENT_MAX_STEPS:-24}
       AGENT_TOOL_BUDGET_WARNING_RATIO: ${OPS_AGENT_TOOL_BUDGET_WARNING_RATIO:-0.7}
+      AGENT_CHECKPOINT_DATABASE_URL: postgresql://${POSTGRES_USER:-a2a}:${POSTGRES_PASSWORD:-a2a_dev_password}@postgres:5432/langgraph
+      LANGGRAPH_STRICT_MSGPACK: "true"
+    depends_on:
+      checkpoint-migrate:
+        condition: service_completed_successfully
     ports:
       - "8052:8052"
     healthcheck:
@@ -69,6 +123,11 @@ services:
       AGENT_TIMEOUT_SAFETY_MARGIN_SECONDS: ${AGENT_TIMEOUT_SAFETY_MARGIN_SECONDS:-5}
       AGENT_MAX_TOOL_CALLS: ${AGENT_MAX_TOOL_CALLS:-12}
       AGENT_MAX_STEPS: ${AGENT_MAX_STEPS:-16}
+      AGENT_CHECKPOINT_DATABASE_URL: postgresql://${POSTGRES_USER:-a2a}:${POSTGRES_PASSWORD:-a2a_dev_password}@postgres:5432/langgraph
+      LANGGRAPH_STRICT_MSGPACK: "true"
+    depends_on:
+      checkpoint-migrate:
+        condition: service_completed_successfully
     ports:
       - "8053:8053"
     healthcheck:
@@ -83,7 +142,7 @@ services:
       context: .
       dockerfile: backend/Dockerfile
     environment:
-      PLAYGROUND_DB_PATH: /app/data/playground.db
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-a2a}:${POSTGRES_PASSWORD:-a2a_dev_password}@postgres:5432/${POSTGRES_DB:-playground}
       HOST_LLM_PROVIDER: ${HOST_LLM_PROVIDER:-deepseek}
       HOST_LLM_API_KEY: ${HOST_LLM_API_KEY:-}
       HOST_LLM_BASE_URL: ${HOST_LLM_BASE_URL:-https://api.deepseek.com/v1}
@@ -98,8 +157,9 @@ services:
       HOST_MAX_ATTEMPTS: ${HOST_MAX_ATTEMPTS:-2}
     ports:
       - "8050:8050"
-    volumes:
-      - backend_data:/app/data
+    depends_on:
+      backend-migrate:
+        condition: service_completed_successfully
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; request=urllib.request.Request('http://127.0.0.1:8050/api/ping', data=b'{}', headers={'Content-Type':'application/json'}); urllib.request.urlopen(request)"]
       interval: 10s
@@ -124,4 +184,4 @@ services:
     restart: unless-stopped
 
 volumes:
-  backend_data:
+  postgres_data:

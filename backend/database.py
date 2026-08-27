@@ -1,24 +1,22 @@
-"""Compatibility facade backed by transactional SQLite persistence."""
+"""Compatibility facade backed by transactional Postgres persistence."""
 
 from __future__ import annotations
 
 import os
 from datetime import datetime
-from pathlib import Path
 from typing import Optional
 
-from backend.persistence.migrate_json import import_legacy_json
-from backend.persistence.repository import SQLiteRepository
+from backend.persistence.repository import DatabaseRepository
 
 
-DATA_DIR = Path(__file__).resolve().parent / "data"
-DEFAULT_DATABASE_PATH = DATA_DIR / "playground-local.db"
-DATABASE_PATH = Path(
-    os.getenv("PLAYGROUND_DB_PATH", str(DEFAULT_DATABASE_PATH))
-)
-repository = SQLiteRepository(DATABASE_PATH)
-repository.initialize()
-import_legacy_json(repository, DATA_DIR)
+def create_repository_from_env() -> DatabaseRepository:
+    database_url = os.getenv("DATABASE_URL")
+    if not database_url:
+        raise RuntimeError("DATABASE_URL is required")
+    return DatabaseRepository(database_url)
+
+
+repository = create_repository_from_env()
 
 
 def list_agents() -> list[dict]:

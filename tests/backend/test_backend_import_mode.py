@@ -12,7 +12,7 @@ def test_backend_uses_one_canonical_package_namespace():
             str(root),
             str(root / "agents" / "shared-runtime"),
         ]),
-        "PLAYGROUND_DB_PATH": str(root / "backend" / "data" / "playground-local.db"),
+        "DATABASE_URL": os.environ["DATABASE_URL"],
     }
 
     result = subprocess.run(

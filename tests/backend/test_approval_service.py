@@ -5,7 +5,7 @@ import pytest
 
 from backend.approvals.service import ApprovalService
 from backend.orchestration.events import RunEvent, RunEventType
-from backend.persistence.repository import SQLiteRepository
+from tests.postgres_helpers import create_test_repository
 
 
 class FakeGateway:
@@ -22,7 +22,7 @@ class FakeGateway:
 async def test_approval_service_resumes_same_agent_run_with_exact_digest(
     tmp_path,
 ):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     repository.create_run(
         "run-1",
@@ -157,7 +157,7 @@ def prepare_pending_run(repository):
 
 @pytest.mark.anyio
 async def test_rejected_approval_closes_tool_and_blocks_task(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     prepare_pending_run(repository)
     service = ApprovalService(
@@ -182,7 +182,7 @@ async def test_rejected_approval_closes_tool_and_blocks_task(tmp_path):
 
 @pytest.mark.anyio
 async def test_failed_approved_execution_marks_tool_task_and_run_failed(tmp_path):
-    repository = SQLiteRepository(tmp_path / "db.sqlite")
+    repository = create_test_repository()
     repository.initialize()
     prepare_pending_run(repository)
     service = ApprovalService(
