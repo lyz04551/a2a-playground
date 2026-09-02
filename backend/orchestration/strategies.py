@@ -1127,6 +1127,15 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                 yield event
             return
 
+        if awaiting_approval:
+            yield builder.create(
+                RunEventType.TASK_STATUS_CHANGED,
+                task_id=root_task_id,
+                parent_task_id=None,
+                data={"state": "approval_required"},
+            )
+            return
+
         for event in failure_events(
             "upstream stream ended without a terminal event"
         ):

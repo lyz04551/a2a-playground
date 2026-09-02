@@ -1102,6 +1102,34 @@ async def test_auto_links_structured_plan_approval_to_logical_child():
 
 
 @pytest.mark.anyio
+async def test_auto_treats_stream_end_after_approval_as_a_normal_pause():
+    host = FakeHostManager(
+        [
+            {
+                "type": "routing",
+                "task_id": "change",
+                "agent_id": "orchestrator",
+            },
+            {
+                "type": "approval_required",
+                "task_id": "change",
+                "agent_id": "orchestrator",
+                "approval": {"id": "approval-1", "status": "pending"},
+            },
+        ]
+    )
+
+    events = await _collect(
+        _auto_strategy(host), RunCommand(mode="auto", message="Change")
+    )
+
+    assert events[-1].type == RunEventType.TASK_STATUS_CHANGED
+    assert events[-1].task_id == "task-host"
+    assert events[-1].data["state"] == "approval_required"
+    assert not any(event.type == RunEventType.TASK_FAILED for event in events)
+
+
+@pytest.mark.anyio
 async def test_auto_accepts_blocked_plan_task_that_was_never_routed():
     host = FakeHostManager([
         {"type": "plan_created", "summary": "parallel", "tasks": [
