@@ -85,6 +85,9 @@ class RunService:
         execution_message = self._conversation_context_message(
             conversation_id, command.message
         )
+        continuation_state = self._conversation_host_state(
+            conversation_id, command.mode
+        )
         run_id = uuid.uuid4().hex
         root_task_id = f"{run_id}:root"
         root_agent_id = (
@@ -140,6 +143,7 @@ class RunService:
             conversation_id=conversation_id,
             root_task_id=root_task_id,
             sequence_start=2,
+            host_state=continuation_state,
         )
         partial_output = ""
         assistant_saved = False
@@ -606,7 +610,13 @@ class RunService:
         self, conversation_id: str, current_message: str
     ) -> str:
         messages = sorted(
-            self.repository.list_messages(conversation_id),
+            (
+                message
+                for message in self.repository.list_messages(conversation_id)
+                if message.get("role") == "user"
+                or message.get("metadata", {}).get("source")
+                != "delegated-agent"
+            ),
             key=lambda item: (
                 str(item.get("created_at") or ""),
                 str(item.get("id") or ""),
@@ -618,7 +628,17 @@ class RunService:
         remaining = _CONVERSATION_CONTEXT_CHARS - len(current_message)
         history: list[str] = []
         for message in reversed(messages):
-            role = "User" if message.get("role") == "user" else "Agent"
+            metadata = message.get("metadata", {})
+            role = (
+                "User"
+                if message.get("role") == "user"
+                else (
+                    "Host"
+                    if metadata.get("source") == "unified-run"
+                    and metadata.get("mode") == "auto"
+                    else "Agent"
+                )
+            )
             content = str(message.get("content") or "").strip()
             line = f"{role}: {content}"
             if len(line) > remaining:
@@ -637,6 +657,37 @@ class RunService:
             f"{current_message}"
         )
 
+    def _conversation_host_state(
+        self, conversation_id: str, mode: str
+    ) -> HostRunState | None:
+        if mode != "auto":
+            return None
+        messages = sorted(
+            self.repository.list_messages(conversation_id),
+            key=lambda item: (
+                str(item.get("created_at") or ""),
+                str(item.get("id") or ""),
+            ),
+            reverse=True,
+        )
+        for message in messages:
+            metadata = message.get("metadata", {})
+            if (
+                message.get("role") != "agent"
+                or metadata.get("source") != "unified-run"
+                or metadata.get("mode") != "auto"
+            ):
+                continue
+            run = self.repository.get_run(str(metadata.get("run_id") or ""))
+            raw_state = run.get("host_state") if run else None
+            if not raw_state:
+                return None
+            state = HostRunState.model_validate(raw_state)
+            if state.decisions and state.decisions[-1].action == "clarify":
+                return state
+            return None
+        return None
+
     def _is_cancelled(self, run_id: str) -> bool:
         run = self.repository.get_run(run_id)
         return run is not None and run["status"] == "cancelled"
@@ -649,6 +700,7 @@ class RunService:
         conversation_id: str,
         root_task_id: str,
         sequence_start: int,
+        host_state: HostRunState | None = None,
     ):
         arguments = {
             "run_id": run_id,
@@ -664,7 +716,9 @@ class RunService:
             )
         if command.mode == "auto":
             self.auto_host.register_agents_from_db(self.registry.list())
-            return AutoExecutionStrategy(self.auto_host, **arguments)
+            return AutoExecutionStrategy(
+                self.auto_host, host_state=host_state, **arguments
+            )
         raise ValueError("mode must be direct or auto")
 
     def _apply_task_event(self, event: RunEvent) -> None:

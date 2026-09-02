@@ -464,6 +464,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
         conversation_id: str,
         root_task_id: str,
         sequence_start: int = 1,
+        host_state=None,
     ):
         super().__init__(
             run_id=run_id,
@@ -472,6 +473,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
             sequence_start=sequence_start,
         )
         self._host_manager = host_manager
+        self._host_state = host_state
 
     async def execute(self, command: RunCommand) -> AsyncIterator[RunEvent]:
         if command.mode != "auto":
@@ -711,9 +713,17 @@ class AutoExecutionStrategy(_RunBoundStrategy):
         )
 
         try:
-            stream = self._host_manager.process_message_stream(
-                command.message,
-                self._context.run_id,
+            stream = (
+                self._host_manager.resume_message_stream(
+                    command.message,
+                    self._context.run_id,
+                    state=self._host_state,
+                )
+                if self._host_state is not None
+                else self._host_manager.process_message_stream(
+                    command.message,
+                    self._context.run_id,
+                )
             )
             async for raw_upstream in stream:
                 upstream = _require_mapping(raw_upstream)

@@ -224,6 +224,70 @@ async def test_follow_up_run_receives_bounded_conversation_context(tmp_path):
     assert stored[-1]["content"] == "Use nginx-test instead."
 
 
+def test_conversation_context_excludes_delegated_agent_reports(tmp_path):
+    repository, service = make_service(tmp_path, [])
+    repository.create_conversation({
+        "id": "conversation-auto", "agent_id": "multi-host", "title": "nginx",
+        "type": "multi", "created_at": service._now(), "updated_at": service._now(),
+        "message_count": 0,
+    })
+    service._add_message(conversation_id="conversation-auto", role="user", content="Create nginx", task_id="root", metadata={"run_id": "run-1", "mode": "auto"})
+    service._add_message(conversation_id="conversation-auto", role="agent", content="very long security report", task_id="security", metadata={"run_id": "run-1", "mode": "auto", "source": "delegated-agent"})
+    service._add_message(conversation_id="conversation-auto", role="agent", content="Use nginx-test. Do you agree?", task_id="root", metadata={"run_id": "run-1", "mode": "auto", "source": "unified-run"})
+
+    context = service._conversation_context_message("conversation-auto", "Agree")
+
+    assert "User: Create nginx" in context
+    assert "Host: Use nginx-test. Do you agree?" in context
+    assert "very long security report" not in context
+
+
+@pytest.mark.anyio
+async def test_auto_follow_up_inherits_clarification_checkpoint(tmp_path):
+    from backend.orchestration.service import RunService
+
+    class ContinuingAutoHost:
+        def __init__(self):
+            self.state = None
+
+        def register_agents_from_db(self, agents):
+            pass
+
+        async def process_message_stream(self, text, session_id):
+            raise AssertionError("clarification follow-up must resume structured Host state")
+            yield
+
+        async def resume_message_stream(self, text, session_id, *, state=None, **kwargs):
+            self.state = state
+            yield {"type": "text", "text": "Continuing the approved plan"}
+            yield {"type": "done", "session_id": session_id}
+
+    repository = create_test_repository()
+    repository.initialize()
+    repository.create_conversation({
+        "id": "conversation-auto", "agent_id": "multi-host", "title": "nginx",
+        "type": "multi", "created_at": "2026-09-02T00:00:00+00:00", "updated_at": "2026-09-02T00:00:00+00:00",
+        "message_count": 0,
+    })
+    checkpoint = {
+        "goal": "Create nginx", "round": 1,
+        "decisions": [{"action": "clarify", "reason": "confirm name", "response": "Use nginx-test?", "tasks": []}],
+        "observations": {}, "successful": [], "task_fingerprints": [],
+        "pending_approval_task_id": None, "total_tasks": 0,
+    }
+    repository.create_run("run-previous", "conversation-auto", "completed", {"mode": "auto", "root_task_id": "run-previous:root", "host_state": checkpoint})
+    auto_host = ContinuingAutoHost()
+    service = RunService(repository, AgentRegistry(repository), FakeGateway([]), auto_host)
+    service._add_message(conversation_id="conversation-auto", role="agent", content="Use nginx-test?", task_id="run-previous:root", metadata={"run_id": "run-previous", "mode": "auto", "source": "unified-run"})
+
+    events = await collect(service.stream(RunCommand(conversation_id="conversation-auto", mode="auto", message="Agree")))
+
+    assert auto_host.state is not None
+    assert auto_host.state.round == 1
+    assert auto_host.state.decisions[-1].action == "clarify"
+    assert events[-1].type == RunEventType.RUN_COMPLETED
+
+
 @pytest.mark.anyio
 async def test_persists_each_event_before_yielding_it(tmp_path):
     repository, service = make_service(
