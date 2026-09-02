@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildRunReconnectCommand, canChangeMode, getSystemStatus, getWorkspaceSendState, nextWorkspaceMode, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
+import { buildRunReconnectCommand, canChangeMode, enrichWorkspaceMessages, getSystemStatus, getWorkspaceSendState, nextWorkspaceMode, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
 
 test('mode can change only before a conversation has messages', () => {
   assert.equal(canChangeMode({ messageCount: 0 }), true)
@@ -64,6 +64,25 @@ test('approval follow-up reconnects to an existing run without creating a new on
   assert.deepEqual(buildRunReconnectCommand({ runId: 'run-2', afterSequence: 8, mode: 'direct', targetAgentId: 'ops' }), {
     run_id: 'run-2', after_sequence: 8, mode: 'direct', message: 'resume', target_agent_id: 'ops',
   })
+})
+
+test('workspace messages display their concrete Agent or Host source', () => {
+  const messages = enrichWorkspaceMessages([
+    { id: 'user', role: 'user', content: '创建 nginx' },
+    { id: 'security', role: 'agent', agentId: 'security', content: '预检通过' },
+    { id: 'task-source', role: 'agent', taskId: 'ops-task', content: '检查完成' },
+    { id: 'unknown', role: 'agent', agentId: 'removed-agent', content: '旧回复' },
+    { id: 'host', role: 'agent', source: 'host', content: '执行完成' },
+    { id: 'legacy', role: 'agent', content: '无来源' },
+  ], {
+    agents: [{ id: 'security', name: 'K8s Security Agent' }, { id: 'ops', name: 'K8s Ops Agent' }],
+    tasksById: { 'ops-task': { agentId: 'ops' } },
+    language: 'zh-CN',
+  })
+
+  assert.deepEqual(messages.map(message => message.agentName), [
+    '你', 'K8s Security Agent', 'K8s Ops Agent', 'removed-agent', 'Host Agent 总结', 'Agent',
+  ])
 })
 
 test('restoring a direct conversation uses the deterministically latest run target before legacy agent fallback', () => {

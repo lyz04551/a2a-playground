@@ -41,6 +41,17 @@ export function buildRunReconnectCommand({ runId, afterSequence = 0, mode = 'aut
   }
 }
 
+export function enrichWorkspaceMessages(messages = [], { agents = [], tasksById = {}, language = 'zh-CN' } = {}) {
+  const namesById = new Map(agents.map(agent => [agent.id, agent.name || agent.id]))
+  const zh = language === 'zh-CN'
+  return messages.map(message => {
+    if (message.role === 'user') return { ...message, agentName: zh ? '你' : 'You' }
+    if (message.source === 'host') return { ...message, agentName: zh ? 'Host Agent 总结' : 'Host Agent summary' }
+    const agentId = message.agentId || tasksById[message.taskId]?.agentId || ''
+    return { ...message, agentId, agentName: message.agentName || namesById.get(agentId) || agentId || 'Agent' }
+  })
+}
+
 function runSortValue(run = {}) {
   return Date.parse(run.updated_at || run.updatedAt || run.created_at || run.createdAt || '') || 0
 }

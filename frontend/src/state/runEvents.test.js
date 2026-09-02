@@ -39,7 +39,7 @@ test('message, approval, artifact, and terminal events update their normalized c
   state = reduceRunEvent(state, event('artifact.created', 5, { id: 'artifact-1', name: 'plan.yaml' }))
   state = reduceRunEvent(state, event('run.completed', 6))
 
-  assert.deepEqual(state.messages, [{ id: 'msg-1', role: 'agent', content: 'Hello', taskId: 'task-1', completed: true }])
+  assert.deepEqual(state.messages, [{ id: 'msg-1', role: 'agent', content: 'Hello', taskId: 'task-1', agentId: '', source: 'host', completed: true }])
   assert.equal(state.approvals[0].id, 'approval-1')
   assert.equal(state.artifacts[0].name, 'plan.yaml')
   assert.equal(state.run.status, 'completed')
@@ -192,10 +192,16 @@ test('keeps each agent output and host summary in separate replayable state', ()
   assert.equal(state.tasksById.security.output, '安全检查通过')
   assert.equal(state.tasksById.change.output, undefined)
   assert.equal(state.hostSummary, '部署和验证均已完成')
+  assert.deepEqual(state.messages.map(message => ({ content: message.content, agentId: message.agentId, source: message.source })), [
+    { content: '安全检查通过', agentId: 'security', source: 'agent' },
+    { content: '部署和验证均已完成', agentId: '', source: 'host' },
+  ])
 
   const restored = restoreRunEventState({ rawEvents: state.rawEvents })
   assert.equal(restored.tasksById.security.output, '安全检查通过')
   assert.equal(restored.hostSummary, '部署和验证均已完成')
+  assert.equal(restored.messages[0].agentId, 'security')
+  assert.equal(restored.messages[1].source, 'host')
 })
 
 test('appends react decision rounds and only their newly introduced tasks', () => {

@@ -265,6 +265,7 @@ function reduceNormalizedEvent(state, event) {
   if (event.type === 'message.delta' || event.type === 'message.completed') {
     const id = data.message_id || data.id || `message:${event.task_id || event.event_id}`
     const current = state.messages.find(message => message.id === id)
+    const task = event.task_id ? state.tasksById[event.task_id] : null
     const content = event.type === 'message.delta'
       ? `${current?.content || ''}${data.content || data.text || ''}`
       : (data.content || data.text || current?.content || '')
@@ -281,7 +282,17 @@ function reduceNormalizedEvent(state, event) {
     } else if (event.type === 'message.completed') {
       next = { ...state, hostSummary: content }
     }
-    return { ...next, messages: upsertById(next.messages, { ...current, id, role: data.role || current?.role || 'agent', content, taskId: event.task_id, completed: event.type === 'message.completed' }) }
+    return { ...next, messages: upsertById(next.messages, {
+      ...current,
+      id,
+      role: data.role || current?.role || 'agent',
+      content,
+      taskId: event.task_id,
+      agentId: data.agent_id || current?.agentId || task?.agentId || '',
+      ...(data.agent_name || current?.agentName ? { agentName: data.agent_name || current.agentName } : {}),
+      source: event.parent_task_id === null ? 'host' : (current?.source || 'agent'),
+      completed: event.type === 'message.completed',
+    }) }
   }
   if (event.type === 'approval.required') {
     const approval = data.approval || data
@@ -356,6 +367,6 @@ export function restoreRunEventState({ run = null, messages = [], approvals = []
     tasksById[task.id] = { ...(tasksById[task.id] || {}), ...task }
     if (!taskOrder.includes(task.id)) taskOrder.push(task.id)
   }
-  const restored = { ...state, run: { ...(state.run || {}), ...(run || {}) }, messages, approvals: approvals.length ? approvals : state.approvals, tasksById, taskOrder }
+  const restored = { ...state, run: { ...(state.run || {}), ...(run || {}) }, messages: messages.length ? messages : state.messages, approvals: approvals.length ? approvals : state.approvals, tasksById, taskOrder }
   return { ...restored, ...adaptRunStateForLegacy(restored) }
 }
