@@ -43,6 +43,35 @@
 .run-stage.is-failed details { margin-top: 5px; }.run-stage.is-failed details > summary { color: var(--color-danger); font-size: 10px; }.run-stage.is-failed details p { max-height: 110px; margin: 6px 0 0; overflow: auto; color: var(--color-text-muted); font-size: 9px; line-height: 1.55; }
 .run-timeline__node.is-agent { margin-top: 5px; }.run-timeline__node.is-agent .run-timeline__rail { color: var(--color-orchestration); border-color: color-mix(in srgb, var(--color-orchestration) 32%, var(--color-border)); background: color-mix(in srgb, var(--color-orchestration) 8%, var(--color-surface)); }.run-timeline__node.is-agent .run-timeline__task { padding: 10px 11px; border-color: var(--color-border); background: var(--color-surface); box-shadow: 0 5px 16px color-mix(in srgb, #000 5%, transparent); }.run-timeline__node.is-agent.status-working .run-timeline__task { border-color: color-mix(in srgb, var(--color-orchestration) 42%, var(--color-border)); }
 .run-timeline__node.is-tool-summary { margin-left: 20px; padding: 4px 0 11px; }.run-timeline__node.is-tool-summary .run-timeline__rail { width: 27px; height: 27px; margin: 2px; color: var(--color-primary); background: var(--color-primary-subtle); }.tool-activity { min-width: 0; padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-surface-subtle); }.tool-activity > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0; list-style: none; cursor: pointer; }.tool-activity > summary::-webkit-details-marker { display: none; }.tool-activity__title { min-width: 0; }.tool-activity__title strong, .tool-activity__title small { display: block; }.tool-activity__title strong { font-size: 10px; }.tool-activity__title small { margin-top: 2px; font-size: 9px; }.tool-activity__count { flex: none; padding: 3px 6px; color: var(--color-text-muted); border: 1px solid var(--color-border); border-radius: 999px; background: var(--color-surface); font-size: 8px; font-weight: 700; }.tool-activity__progress { height: 3px; margin-top: 7px; overflow: hidden; border-radius: 3px; background: var(--color-border); }.tool-activity__progress i { display: block; height: 100%; border-radius: inherit; background: var(--color-success); transition: width var(--motion-normal); }.tool-activity__active { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 7px; }.tool-activity__active > span { color: var(--color-text-muted); font-size: 8px; font-weight: 800; text-transform: uppercase; }.tool-activity__active code { max-width: 145px; padding: 2px 5px; overflow: hidden; color: var(--color-primary); border-radius: 4px; background: var(--color-primary-subtle); font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }.tool-groups { display: grid; gap: 5px; margin-top: 9px; padding-top: 8px; border-top: 1px solid var(--color-border); }.tool-group { margin: 0 !important; border: 1px solid var(--color-border); border-radius: 7px; background: var(--color-surface); }.tool-group > summary { display: flex; justify-content: space-between; gap: 8px; padding: 7px 8px; color: var(--color-text) !important; font-family: var(--font-mono); font-size: 9px !important; }.tool-group > summary span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.tool-group > summary small { flex: none; margin: 0; font-family: var(--font-sans); font-size: 8px; }.tool-group__calls { display: grid; gap: 4px; padding: 0 6px 6px; }.tool-call-detail { margin: 0 !important; border-radius: 5px; background: var(--color-page); }.tool-call-detail > summary { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px; color: var(--color-text-muted) !important; font-size: 8px !important; }.tool-call-detail > summary > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }.tool-call-detail > summary > small { flex: none; margin: 0; }.tool-call-detail section { padding: 0 6px 6px; }.tool-call-detail section header { display: flex; align-items: center; justify-content: space-between; color: var(--color-text-muted); font-size: 9px; font-weight: 700; }.tool-call-detail section button { padding: 1px 5px; color: var(--color-primary); border: 1px solid var(--color-border); border-radius: 4px; background: transparent; cursor: pointer; font-size: 8px; }
+.run-timeline__node.is-tool-summary,
+.tool-activity,
+.tool-groups,
+.tool-group,
+.tool-group__calls,
+.tool-call-detail,
+.tool-call-detail section {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.tool-activity {
+  width: 100%;
+  overflow: hidden;
+}
+
+.tool-group,
+.tool-call-detail {
+  overflow: hidden;
+}
+
+.workspace-trace pre {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .workspace-connection {
   margin: 0 20px;
   padding: 7px 12px;
