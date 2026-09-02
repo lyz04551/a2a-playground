@@ -12,6 +12,123 @@ export function groupEventsByConversation(events) {
   return grouped
 }
 
+const HOST_EVENT_PREFIXES = ['host.', 'run.', 'message.', 'approval.', 'artifact.']
+
+function agentIdFor(event) {
+  return event.agent_id || event.payload?.agent_id || ''
+}
+
+function deriveRunMode(run, events) {
+  const started = events.find(event => event.event_type === 'run.started')
+  return run?.mode || started?.payload?.mode || (events.some(event => event.conversation_type === 'multi') ? 'auto' : 'direct')
+}
+
+function deriveStatus(events) {
+  const latest = [...events].reverse().find(event => event.state || event.event_type?.startsWith('run.'))
+  if (!latest) return 'submitted'
+  if (latest.state) return latest.state
+  if (latest.event_type === 'run.completed') return 'completed'
+  if (latest.event_type === 'run.failed') return 'failed'
+  if (latest.event_type === 'run.cancelled') return 'canceled'
+  return 'working'
+}
+
+function buildTools(events) {
+  const tools = new Map()
+  for (const event of events.filter(item => item.event_type === 'tool.called' || item.event_type === 'tool.completed')) {
+    const payload = event.payload || {}
+    const id = payload.tool_call_id || payload.id || event.id
+    const existing = tools.get(id) || { id, status: 'working', calledAt: '', completedAt: '' }
+    existing.name = payload.tool || payload.tool_name || existing.name || 'Tool call'
+    existing.arguments = payload.arguments ?? existing.arguments
+    existing.result = payload.result ?? existing.result
+    existing.error = payload.error ?? existing.error
+    existing.remoteTaskId = payload.remote_task_id || existing.remoteTaskId || ''
+    existing.events = [...(existing.events || []), event]
+    if (event.event_type === 'tool.called') existing.calledAt = eventTimestamp(event)
+    if (event.event_type === 'tool.completed') {
+      existing.completedAt = eventTimestamp(event)
+      existing.status = event.state === 'failed' || payload.error ? 'failed' : 'completed'
+    }
+    tools.set(id, existing)
+  }
+  return [...tools.values()].map(tool => {
+    const start = new Date(tool.calledAt).getTime()
+    const end = new Date(tool.completedAt).getTime()
+    return { ...tool, durationMs: Number.isFinite(start) && Number.isFinite(end) ? end - start : null }
+  })
+}
+
+function buildTasks(events, agentsById) {
+  const grouped = new Map()
+  for (const event of events.filter(item => item.task_id)) {
+    const task = grouped.get(event.task_id) || { id: event.task_id, events: [] }
+    task.events.push(event)
+    task.parentTaskId = event.parent_task_id ?? task.parentTaskId ?? null
+    task.agentId = agentIdFor(event) || task.agentId || ''
+    task.agentName = event.agent_name || task.agentName || ''
+    task.remoteTaskId = event.payload?.remote_task_id || task.remoteTaskId || ''
+    task.objective = event.payload?.objective || event.payload?.label || task.objective || ''
+    grouped.set(event.task_id, task)
+  }
+  return [...grouped.values()].map(task => ({
+    ...task,
+    agentName: agentsById.get(task.agentId)?.name || task.agentName || task.agentId || 'Host Agent',
+    status: deriveStatus(task.events),
+    tools: buildTools(task.events),
+    startedAt: eventTimestamp(task.events[0]),
+    endedAt: eventTimestamp(task.events.at(-1)),
+  }))
+}
+
+export function buildEventConversationGroups(events, runs = [], agents = []) {
+  const runsById = new Map(runs.map(run => [run.id, run]))
+  const agentsById = new Map(agents.map(agent => [agent.id, agent]))
+  const conversations = new Map()
+  const ordered = [...events].sort((a, b) => eventTimestamp(a).localeCompare(eventTimestamp(b)))
+
+  for (const event of ordered) {
+    const conversationId = event.conversation_id || 'unknown'
+    const conversation = conversations.get(conversationId) || {
+      id: conversationId,
+      title: event.conversation_title || '未命名会话',
+      type: event.conversation_type || 'single',
+      events: [],
+      runEvents: new Map(),
+    }
+    conversation.title = event.conversation_title || conversation.title
+    if (event.conversation_type === 'multi') conversation.type = 'multi'
+    conversation.events.push(event)
+    const runId = event.run_id || `legacy:${conversationId}`
+    const runEvents = conversation.runEvents.get(runId) || []
+    runEvents.push(event)
+    conversation.runEvents.set(runId, runEvents)
+    conversations.set(conversationId, conversation)
+  }
+
+  return [...conversations.values()].map(conversation => {
+    const structuredRuns = [...conversation.runEvents.entries()].map(([id, runEvents]) => {
+      const persisted = runsById.get(id)
+      const mode = deriveRunMode(persisted, runEvents)
+      const started = runEvents.find(event => event.event_type === 'run.started')
+      const targetAgentId = persisted?.target_agent_id || started?.payload?.target_agent_id || ''
+      return {
+        id,
+        mode,
+        targetAgentId,
+        targetAgentName: agentsById.get(targetAgentId)?.name || targetAgentId || '',
+        status: deriveStatus(runEvents),
+        startedAt: eventTimestamp(runEvents[0]),
+        endedAt: eventTimestamp(runEvents.at(-1)),
+        events: runEvents,
+        tasks: buildTasks(runEvents, agentsById),
+        milestones: runEvents.filter(event => HOST_EVENT_PREFIXES.some(prefix => event.event_type?.startsWith(prefix))),
+      }
+    }).sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    return { ...conversation, runs: structuredRuns, runEvents: undefined }
+  }).sort((a, b) => eventTimestamp(b.events.at(-1)).localeCompare(eventTimestamp(a.events.at(-1))))
+}
+
 export function filterEvents(events, { type = 'all', state = 'all', query = '' } = {}) {
   const needle = query.trim().toLowerCase()
   return events.filter(event => {

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { filterEvents, filterEventsByView, groupEventsByConversation, summarizeEvent } from './eventFeed.js'
+import { buildEventConversationGroups, filterEvents, filterEventsByView, groupEventsByConversation, summarizeEvent } from './eventFeed.js'
 
 const events = [
   {
@@ -58,4 +58,53 @@ test('event views keep summary, errors, tools, or all events', () => {
   assert.deepEqual(filterEventsByView(source, 'errors').map(e => e.event_type), ['task.retry_scheduled', 'task.failed'])
   assert.deepEqual(filterEventsByView(source, 'tools').map(e => e.event_type), ['tool.called', 'tool.completed'])
   assert.equal(filterEventsByView(source, 'all').length, source.length)
+})
+
+test('structured event feed separates runs and identifies direct and auto modes', () => {
+  const source = [
+    { id: 'direct-start', conversation_id: 'conversation-1', conversation_title: '集群检查', conversation_type: 'single', run_id: 'run-direct', event_type: 'run.started', payload: { mode: 'direct', target_agent_id: 'ops' }, timestamp: '2026-09-02T10:00:00Z' },
+    { id: 'auto-start', conversation_id: 'conversation-1', conversation_title: '集群检查', conversation_type: 'multi', run_id: 'run-auto', event_type: 'run.started', payload: { mode: 'auto' }, timestamp: '2026-09-02T11:00:00Z' },
+  ]
+  const groups = buildEventConversationGroups(source, [
+    { id: 'run-direct', mode: 'direct', target_agent_id: 'ops' },
+    { id: 'run-auto', mode: 'auto' },
+  ], [{ id: 'ops', name: 'K8s Ops Agent' }])
+
+  assert.equal(groups.length, 1)
+  assert.deepEqual(groups[0].runs.map(run => run.id), ['run-auto', 'run-direct'])
+  assert.equal(groups[0].runs[0].mode, 'auto')
+  assert.equal(groups[0].runs[1].mode, 'direct')
+  assert.equal(groups[0].runs[1].targetAgentName, 'K8s Ops Agent')
+})
+
+test('structured event feed merges tool lifecycle by call id without losing details', () => {
+  const source = [
+    { id: 'called', conversation_id: 'conversation-1', run_id: 'run-1', task_id: 'task-1', agent_id: 'ops', event_type: 'tool.called', payload: { tool_call_id: 'call-1', tool: 'list_k8s_nodes', arguments: { wide: true }, remote_task_id: 'remote-1' }, timestamp: '2026-09-02T10:00:01Z' },
+    { id: 'completed', conversation_id: 'conversation-1', run_id: 'run-1', task_id: 'task-1', agent_id: 'ops', event_type: 'tool.completed', state: 'completed', payload: { tool_call_id: 'call-1', tool: '', result: [{ name: 'node-1' }], remote_task_id: 'remote-1' }, timestamp: '2026-09-02T10:00:03Z' },
+  ]
+  const [conversation] = buildEventConversationGroups(source, [{ id: 'run-1', mode: 'direct' }], [{ id: 'ops', name: 'K8s Ops Agent' }])
+  const [task] = conversation.runs[0].tasks
+  const [tool] = task.tools
+
+  assert.equal(task.remoteTaskId, 'remote-1')
+  assert.equal(task.agentName, 'K8s Ops Agent')
+  assert.equal(tool.id, 'call-1')
+  assert.equal(tool.name, 'list_k8s_nodes')
+  assert.deepEqual(tool.arguments, { wide: true })
+  assert.deepEqual(tool.result, [{ name: 'node-1' }])
+  assert.equal(tool.status, 'completed')
+  assert.equal(tool.durationMs, 2000)
+})
+
+test('structured event feed preserves A2A task hierarchy and host milestones', () => {
+  const source = [
+    { id: 'planning', conversation_id: 'conversation-1', run_id: 'run-1', event_type: 'host.plan_created', payload: { summary: '检查集群' }, timestamp: '2026-09-02T10:00:00Z' },
+    { id: 'root', conversation_id: 'conversation-1', run_id: 'run-1', task_id: 'root-task', parent_task_id: null, event_type: 'task.started', agent_name: 'Host Agent', timestamp: '2026-09-02T10:00:01Z' },
+    { id: 'child', conversation_id: 'conversation-1', run_id: 'run-1', task_id: 'ops-task', parent_task_id: 'root-task', agent_id: 'ops', event_type: 'task.delegated', payload: { remote_task_id: 'remote-ops' }, timestamp: '2026-09-02T10:00:02Z' },
+  ]
+  const [conversation] = buildEventConversationGroups(source, [{ id: 'run-1', mode: 'auto' }], [{ id: 'ops', name: 'K8s Ops Agent' }])
+  const run = conversation.runs[0]
+
+  assert.deepEqual(run.milestones.map(event => event.id), ['planning'])
+  assert.equal(run.tasks.find(task => task.id === 'ops-task').parentTaskId, 'root-task')
 })

@@ -1,11 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as api from '../api/api'
-import { filterEvents, filterEventsByView, groupEventsByConversation } from '../state/eventFeed'
+import { buildEventConversationGroups, filterEvents, filterEventsByView } from '../state/eventFeed'
 
 const VIEW_STORAGE_KEY = 'a2a-events-view'
 
 export default function useEvents() {
   const [events, setEvents] = useState([])
+  const [runs, setRuns] = useState([])
+  const [agents, setAgents] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [type, setType] = useState('all')
@@ -15,15 +17,21 @@ export default function useEvents() {
 
   const load = useCallback(async () => {
     setLoading(true); setError('')
-    try { setEvents(await api.listEvents()) }
+    try {
+      const [nextEvents, nextRuns, nextAgents] = await Promise.all([
+        api.listEvents(), api.listRuns().catch(() => []), api.listAgents().catch(() => []),
+      ])
+      setEvents(nextEvents); setRuns(nextRuns); setAgents(nextAgents)
+    }
     catch (cause) { setError(cause.message || String(cause)) }
     finally { setLoading(false) }
   }, [])
 
   useEffect(() => { load() }, [load])
   useEffect(() => { window.localStorage.setItem(VIEW_STORAGE_KEY, view) }, [view])
-  const visibleEvents = useMemo(() => filterEvents(filterEventsByView(events, view), { type, state, query }), [events, view, type, state, query])
-  const groups = useMemo(() => Object.entries(groupEventsByConversation(visibleEvents)), [visibleEvents])
+  const filteredEvents = useMemo(() => filterEvents(events, { type, state, query }), [events, type, state, query])
+  const visibleEvents = useMemo(() => filterEventsByView(filteredEvents, view), [filteredEvents, view])
+  const groups = useMemo(() => buildEventConversationGroups(filteredEvents, runs, agents), [filteredEvents, runs, agents])
   const stats = useMemo(() => ({
     total: events.length,
     completed: events.filter(event => event.state === 'completed').length,

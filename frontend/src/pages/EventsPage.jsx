@@ -11,10 +11,12 @@ import {
 import EventDetailDrawer from '../components/EventDetailDrawer'
 import EventConversationCard from '../components/events/EventConversationCard'
 import useEvents from '../hooks/useEvents'
+import { useNavigate } from 'react-router-dom'
 
 const { Text } = Typography
 
 export default function EventsPage() {
+  const navigate = useNavigate()
   const { loading, error, load, type, setType, state, setState, query, setQuery, view, setView, visibleEvents, groups, stats } = useEvents()
   const [selectedEvent, setSelectedEvent] = useState(null)
 
@@ -102,8 +104,9 @@ export default function EventsPage() {
             <Empty image={<FileTextOutlined style={{ fontSize: 52, color: '#cbd5e1' }} />}
               description="暂无符合条件的事件" />
           </Card>
-        ) : groups.map(([conversationId, items]) => (
-          <EventConversationCard key={conversationId} conversationId={conversationId} events={items} onSelect={setSelectedEvent} />
+        ) : groups.map(conversation => (
+          <EventConversationCard key={conversation.id} conversation={conversation} view={view} onSelect={setSelectedEvent}
+            onOpenWorkspace={run => navigate(`/workspace?mode=${run.mode}&conversation=${encodeURIComponent(conversation.id)}`)} />
         ))}
       </div>
       <EventDetailDrawer event={selectedEvent} open={Boolean(selectedEvent)} onClose={() => setSelectedEvent(null)} />
