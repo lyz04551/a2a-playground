@@ -18,13 +18,14 @@ export function groupToolCalls(tools = []) {
   for (const tool of tools) {
     const name = tool.name || 'Tool call'
     const group = groups.get(name) || {
-      name, items: [], total: 0, completed: 0, working: 0, failed: 0,
+      name, items: [], total: 0, completed: 0, working: 0, failed: 0, durationMs: 0,
     }
     group.items.push(tool)
     group.total += 1
     if (tool.status === 'completed') group.completed += 1
     else if (tool.status === 'failed') group.failed += 1
     else group.working += 1
+    if (Number.isFinite(tool.durationMs)) group.durationMs += tool.durationMs
     groups.set(name, group)
   }
   return [...groups.values()]

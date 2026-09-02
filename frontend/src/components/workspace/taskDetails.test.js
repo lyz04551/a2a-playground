@@ -55,9 +55,9 @@ test('builds expandable tool arguments result and error text', () => {
 
 test('groups repeated tools into a compact activity summary', () => {
   const groups = groupToolCalls([
-    { id: '1', name: 'list_pods', status: 'completed' },
-    { id: '2', name: 'list_pods', status: 'working' },
-    { id: '3', name: 'get_nodes', status: 'failed' },
+    { id: '1', name: 'list_pods', status: 'completed', durationMs: 120 },
+    { id: '2', name: 'list_pods', status: 'working', durationMs: null },
+    { id: '3', name: 'get_nodes', status: 'failed', durationMs: 80 },
   ])
 
   assert.deepEqual(groups.map(group => ({
@@ -66,8 +66,9 @@ test('groups repeated tools into a compact activity summary', () => {
     completed: group.completed,
     working: group.working,
     failed: group.failed,
+    durationMs: group.durationMs,
   })), [
-    { name: 'list_pods', total: 2, completed: 1, working: 1, failed: 0 },
-    { name: 'get_nodes', total: 1, completed: 0, working: 0, failed: 1 },
+    { name: 'list_pods', total: 2, completed: 1, working: 1, failed: 0, durationMs: 120 },
+    { name: 'get_nodes', total: 1, completed: 0, working: 0, failed: 1, durationMs: 80 },
   ])
 })

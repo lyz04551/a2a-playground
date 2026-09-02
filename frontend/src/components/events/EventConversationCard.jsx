@@ -1,7 +1,7 @@
 import React from 'react'
 import { Badge, Button, Card, Collapse, Tag, Timeline, Typography } from 'antd'
 import { BranchesOutlined, CheckCircleFilled, ClockCircleOutlined, CloseCircleFilled, ExportOutlined, RobotOutlined, ToolOutlined } from '@ant-design/icons'
-import { buildToolDetails } from '../workspace/taskDetails'
+import { buildToolDetails, groupToolCalls } from '../workspace/taskDetails'
 import { eventTimestamp, filterEventsByView, summarizeEvent } from '../../state/eventFeed'
 
 const { Text } = Typography
@@ -59,8 +59,21 @@ function ToolCall({ tool }) {
   </div>
 }
 
+function ToolGroup({ group }) {
+  const state = group.failed > 0 ? EVENT_STATES.failed : group.working > 0 ? EVENT_STATES.working : EVENT_STATES.completed
+  const summary = <div className="event-tool-group__summary">
+    <span className="event-tool-group__name"><ToolOutlined /><strong>{group.name}</strong><Tag>{group.total} 次</Tag></span>
+    <span className="event-tool-group__stats"><Badge color={state.color} text={group.failed > 0 ? `${group.failed} 次失败` : group.working > 0 ? `${group.working} 次执行中` : '全部完成'} />{group.durationMs > 0 && <Text type="secondary">总计 {group.durationMs} ms</Text>}</span>
+  </div>
+  return <Collapse className="event-tool-group" size="small" items={[{
+    key: group.name, label: summary,
+    children: <div className="event-tool-instances">{group.items.map(tool => <ToolCall key={tool.id} tool={tool} />)}</div>,
+  }]} />
+}
+
 function TaskCard({ task, mode }) {
   const state = EVENT_STATES[task.status] || EVENT_STATES.submitted
+  const toolGroups = groupToolCalls(task.tools)
   return <div className={`event-task-card${task.parentTaskId ? ' event-task-card--child' : ''}`}>
     <div className="event-task-card__head"><div className="event-task-icon"><RobotOutlined /></div><div className="event-task-title"><strong>{task.agentName}</strong><span>{mode === 'direct' ? '目标 Agent A2A Task' : task.parentTaskId ? 'Agent A2A 子任务' : 'Host Root Task'}</span></div><Tag bordered={false} color={state.color}>{state.label}</Tag></div>
     <div className="event-task-ids">
@@ -68,7 +81,7 @@ function TaskCard({ task, mode }) {
       <div className="event-id-row"><span>Remote A2A Task</span><code title={task.remoteTaskId}>{shortId(task.remoteTaskId)}</code></div>
       {task.parentTaskId && <div className="event-id-row"><span>Parent</span><code title={task.parentTaskId}>{shortId(task.parentTaskId)}</code></div>}
     </div>
-    {task.tools.length > 0 && <div className="event-tools-block"><div className="event-section-label"><ToolOutlined /> 工具活动 <Tag>{task.tools.length}</Tag></div>{task.tools.map(tool => <ToolCall key={tool.id} tool={tool} />)}</div>}
+    {task.tools.length > 0 && <div className="event-tools-block"><div className="event-section-label"><ToolOutlined /> 工具活动 <Tag>{task.tools.length}</Tag><Text type="secondary">{toolGroups.length} 种工具</Text></div>{toolGroups.map(group => <ToolGroup key={group.name} group={group} />)}</div>}
   </div>
 }
 
