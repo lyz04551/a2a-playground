@@ -120,7 +120,7 @@ class LangGraphHostManager:
                 current_state = str(
                     response.get("state") or ""
                 ).replace("_", "-").lower()
-                if current_state not in {
+                if not response.get("approval") and current_state not in {
                     "failed", "error", "rejected", "cancelled", "canceled",
                     "input-required",
                 }:

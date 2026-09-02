@@ -28,7 +28,7 @@ class ApprovalStreamGateway:
     async def delegate_stream(self, run_id, agent, message):
         yield {
             "type": "approval_required",
-            "state": "input-required",
+            "state": "pending",
             "text": "Approval required",
             "approval": {
                 "id": "ap-1",
