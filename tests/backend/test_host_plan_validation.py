@@ -354,6 +354,50 @@ def test_react_accepts_mutation_after_security_allows_continuation():
     assert validate_decision(decision, AGENTS, state) is decision
 
 
+def test_react_rejects_verification_in_same_round_as_unfinished_mutation():
+    security = task(
+        "security", "k8s-security", workflow_role="precheck"
+    )
+    state = HostRunState(
+        goal="deploy nginx",
+        observations={security.id: observed(security)},
+        successful={security.id},
+    )
+    decision = HostDecision(
+        action="delegate",
+        reason="Create and verify",
+        tasks=[
+            task(
+                "change", "k8s-orchestrator", risk="write",
+                workflow_role="mutation",
+            ),
+            task("verify", "k8s-ops", workflow_role="verification"),
+        ],
+    )
+
+    with pytest.raises(PlanValidationError, match="successful mutation"):
+        validate_decision(decision, AGENTS, state)
+
+
+def test_react_accepts_verification_after_mutation_completed():
+    mutation = task(
+        "change", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    state = HostRunState(
+        goal="deploy nginx",
+        observations={mutation.id: observed(mutation)},
+        successful={mutation.id},
+    )
+    decision = HostDecision(
+        action="delegate",
+        reason="Verify the created workload",
+        tasks=[task("verify", "k8s-ops", workflow_role="verification")],
+    )
+
+    assert validate_decision(decision, AGENTS, state) is decision
+
+
 def test_react_accepts_sufficient_security_when_legacy_continuation_is_unknown():
     security = task(
         "security", "k8s-security", workflow_role="precheck"

@@ -57,7 +57,8 @@ class LangGraphDecisionPort:
 Base the decision on structured observations, not keywords. Use only available
 Agent IDs and declared capabilities. Never repeat semantic work or a rejected
 write. A Kubernetes mutation requires a successful Security precheck observation;
-after mutation, obtain an Ops verification observation before completing. Return
+mutation and verification must never be delegated in the same round. Wait for a
+successful mutation observation, then delegate Ops verification in the next round. Return
 only a concise public reason. The Host must never ask for write approval in text;
 approval is created only by a delegated Agent's write tool.
 Do not reveal hidden chain-of-thought."""

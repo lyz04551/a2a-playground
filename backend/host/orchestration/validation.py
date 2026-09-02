@@ -103,6 +103,17 @@ def validate_decision(
                 raise PlanValidationError(
                     f"mutation task '{task.id}' requires a successful security precheck observation"
                 )
+        if task.workflow_role == "verification":
+            mutation_completed = any(
+                observed.task.workflow_role == "mutation"
+                and observed.evaluation.outcome == "sufficient"
+                and task_id in state.successful
+                for task_id, observed in state.observations.items()
+            )
+            if not mutation_completed:
+                raise PlanValidationError(
+                    f"verification task '{task.id}' requires a successful mutation observation from an earlier round"
+                )
 
     if decision.action == "complete":
         successful_mutation = any(
