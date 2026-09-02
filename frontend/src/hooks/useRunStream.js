@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'r
 import * as api from '../api/api'
 import { streamRun } from '../api/runStream'
 import { emptyRunState, reduceRunEvent, restoreRunEventState } from '../state/runEvents'
-import { restoreWorkspaceState, selectLatestConversationRun } from '../components/workspace/workspaceState'
+import { buildRunReconnectCommand, restoreWorkspaceState, selectLatestConversationRun } from '../components/workspace/workspaceState'
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled'])
 
@@ -10,6 +10,7 @@ function reducer(state, action) {
   if (action.type === 'reset') return { ...emptyRunState, messages: action.messages || [] }
   if (action.type === 'event') return reduceRunEvent(state, action.event)
   if (action.type === 'user-message') return { ...state, messages: [...state.messages, action.message] }
+  if (action.type === 'approval-decision') return { ...state, approvals: state.approvals.map(approval => approval.id === action.id ? { ...approval, status: action.decision } : approval) }
   if (action.type === 'restore') return restoreRunEventState(action)
   return state
 }
@@ -96,6 +97,32 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
   }, [conversationId, loading, mode, selectedAgentId, state.run?.id])
 
   const retry = useCallback(() => lastCommand && send(lastCommand.message), [lastCommand, send])
+  const markApprovalDecision = useCallback((id, decision) => {
+    dispatch({ type: 'approval-decision', id, decision })
+  }, [])
+  const followRun = useCallback(async runId => {
+    abortRef.current?.abort()
+    const afterSequence = Math.max(0, ...(state.rawEvents || []).map(event => Number(event.sequence) || 0))
+    const command = buildRunReconnectCommand({ runId, afterSequence, mode, targetAgentId: selectedAgentId })
+    const controller = new AbortController(); abortRef.current = controller
+    setLoading(true); setError(''); setConnection({ state: 'connecting', attempt: 0 })
+    try {
+      await streamRun(command, {
+        onEvent: event => dispatch({ type: 'event', event }),
+        onError: cause => setError(cause.message || 'The run stream was interrupted.'),
+        onReconnect: ({ attempt }) => setConnection({ state: 'reconnecting', attempt }),
+        onConnectionChange: next => setConnection(next),
+      }, { signal: controller.signal })
+    } catch (cause) {
+      if (cause.name !== 'AbortError') {
+        setError(cause.message || 'Unable to follow the resumed run.')
+        setConnection({ state: 'interrupted', attempt: 0 })
+      }
+    } finally {
+      setLoading(false)
+      if (abortRef.current === controller) abortRef.current = null
+    }
+  }, [mode, selectedAgentId, state.rawEvents])
   const cancel = useCallback(async () => {
     abortRef.current?.abort()
     if (state.run?.id) {
@@ -111,5 +138,5 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
   useEffect(() => () => abortRef.current?.abort(), [])
 
   const canCancel = Boolean(state.run?.id && !TERMINAL_RUN_STATUSES.has(state.run?.status))
-  return useMemo(() => ({ state, conversationId, mode, setMode, selectedAgentId, setSelectedAgentId, loading, error, connection, canCancel, send, retry, cancel, beginNewConversation, restoreConversation }), [state, conversationId, mode, selectedAgentId, loading, error, connection, canCancel, send, retry, cancel, beginNewConversation, restoreConversation])
+  return useMemo(() => ({ state, conversationId, mode, setMode, selectedAgentId, setSelectedAgentId, loading, error, connection, canCancel, send, retry, cancel, beginNewConversation, restoreConversation, followRun, markApprovalDecision }), [state, conversationId, mode, selectedAgentId, loading, error, connection, canCancel, send, retry, cancel, beginNewConversation, restoreConversation, followRun, markApprovalDecision])
 }

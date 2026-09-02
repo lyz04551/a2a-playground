@@ -44,6 +44,31 @@ def _command(data: dict[str, Any]) -> RunCommand:
     )
 
 
+def _schedule_auto_resume(
+    run_service,
+    approval: dict[str, Any],
+    execution: dict[str, Any],
+    background_tasks: set[asyncio.Task],
+    logger: logging.Logger | None = None,
+) -> asyncio.Task:
+    run_id = approval["run_id"]
+    run_service.repository.update_run_status(run_id, "running")
+
+    async def resume() -> None:
+        try:
+            await run_service.resume_after_approval(approval, execution)
+        except Exception:
+            (logger or logging.getLogger(__name__)).exception(
+                "Unable to resume Auto Run %s after approval", run_id
+            )
+            run_service.repository.update_run_status(run_id, "failed")
+
+    task = asyncio.create_task(resume())
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+    return task
+
+
 def create_router(service) -> APIRouter:
     router = APIRouter()
     background_runs: set[asyncio.Task] = set()
@@ -190,6 +215,7 @@ def create_approval_router(
 ) -> APIRouter:
     """Expose the legacy approval wire contract through a router."""
     router = APIRouter()
+    background_resumes: set[asyncio.Task] = set()
     approval_service = ApprovalService(run_service.repository, gateway)
     route_logger = logger or logging.getLogger(__name__)
 
@@ -211,13 +237,14 @@ def create_approval_router(
             result_text = execution.get("text", "")
             run = run_service.repository.get_run(approval["run_id"]) or {}
             if run.get("mode") == "auto":
-                resumed_events = await run_service.resume_after_approval(
-                    approval, execution
+                _schedule_auto_resume(
+                    run_service,
+                    approval,
+                    execution,
+                    background_resumes,
+                    route_logger,
                 )
-                result["resumed_events"] = [
-                    event.model_dump(mode="json")
-                    for event in resumed_events
-                ]
+                result["resume_started"] = True
                 return ApiResponse(result=result)
             if (
                 approval["status"] == "approved"

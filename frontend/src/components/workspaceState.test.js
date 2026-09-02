@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canChangeMode, getSystemStatus, getWorkspaceSendState, nextWorkspaceMode, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
+import { buildRunReconnectCommand, canChangeMode, getSystemStatus, getWorkspaceSendState, nextWorkspaceMode, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
 
 test('mode can change only before a conversation has messages', () => {
   assert.equal(canChangeMode({ messageCount: 0 }), true)
@@ -54,6 +54,15 @@ test('restoring a conversation restores its workspace execution context', () => 
   assert.deepEqual(restored, {
     conversationId: 'conv-1', mode: 'direct', selectedAgentId: 'ops', run: { id: 'run-1' },
     approvals: [{ id: 'approval-1' }], tasks: [{ id: 'task-1' }],
+  })
+})
+
+test('approval follow-up reconnects to an existing run without creating a new one', () => {
+  assert.deepEqual(buildRunReconnectCommand({ runId: 'run-1', afterSequence: 42, mode: 'auto', targetAgentId: 'stale' }), {
+    run_id: 'run-1', after_sequence: 42, mode: 'auto', message: 'resume',
+  })
+  assert.deepEqual(buildRunReconnectCommand({ runId: 'run-2', afterSequence: 8, mode: 'direct', targetAgentId: 'ops' }), {
+    run_id: 'run-2', after_sequence: 8, mode: 'direct', message: 'resume', target_agent_id: 'ops',
   })
 })
 

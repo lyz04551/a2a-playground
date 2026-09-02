@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import httpx
@@ -10,6 +11,7 @@ from backend.orchestration.commands import RunCommand
 from backend.orchestration.service import RunService
 from tests.postgres_helpers import create_test_repository
 from backend.registry.service import AgentRegistry
+from backend.api.runs import _schedule_auto_resume
 
 
 class FakeGateway:
@@ -24,6 +26,41 @@ class UnusedAutoHost:
     async def process_message_stream(self, text, session_id):
         raise AssertionError("unexpected Auto execution")
         yield
+
+
+@pytest.mark.anyio
+async def test_auto_approval_resume_runs_in_background_after_marking_run_active():
+    gate = asyncio.Event()
+
+    class Repository:
+        def __init__(self):
+            self.updates = []
+
+        def update_run_status(self, run_id, status):
+            self.updates.append((run_id, status))
+
+    class Service:
+        def __init__(self):
+            self.repository = Repository()
+
+        async def resume_after_approval(self, approval, execution):
+            await gate.wait()
+
+    service = Service()
+    background = set()
+    task = _schedule_auto_resume(
+        service,
+        {"id": "approval-1", "run_id": "run-1"},
+        {"state": "completed", "text": "created"},
+        background,
+    )
+
+    assert service.repository.updates == [("run-1", "running")]
+    assert task in background
+    assert not task.done()
+
+    gate.set()
+    await task
 
 
 def make_app(tmp_path):

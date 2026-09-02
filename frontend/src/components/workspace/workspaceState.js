@@ -31,6 +31,16 @@ export function nextWorkspaceMode({ messageCount = 0 } = {}, mode) {
   return { mode, needsNewConversation: !canChangeMode({ messageCount }) }
 }
 
+export function buildRunReconnectCommand({ runId, afterSequence = 0, mode = 'auto', targetAgentId = '' }) {
+  return {
+    run_id: runId,
+    after_sequence: afterSequence,
+    mode,
+    message: 'resume',
+    ...(mode === 'direct' ? { target_agent_id: targetAgentId } : {}),
+  }
+}
+
 function runSortValue(run = {}) {
   return Date.parse(run.updated_at || run.updatedAt || run.created_at || run.createdAt || '') || 0
 }

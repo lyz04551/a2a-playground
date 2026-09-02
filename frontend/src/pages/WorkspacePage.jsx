@@ -105,7 +105,11 @@ export default function WorkspacePage() {
     interrupted: zh ? '运行流已中断' : 'Run stream interrupted',
     restoring: zh ? '正在恢复运行记录…' : 'Restoring run history…',
   }[workspace.connection.state]
-  const tracePanel = <RunTracePanel run={trace} stage={runStage} agents={agents} language={language} loading={workspace.loading} error={workspace.error} canCancel={workspace.canCancel} cancelling={cancelling} onCancel={stopRun} onDebug={() => setDrawer('debug')} onApproval={async (approval, decision) => { await api.decideApproval(approval.id, decision); workspace.restoreConversation(workspace.conversationId) }} />
+  const tracePanel = <RunTracePanel run={trace} stage={runStage} agents={agents} language={language} loading={workspace.loading} error={workspace.error} canCancel={workspace.canCancel} cancelling={cancelling} onCancel={stopRun} onDebug={() => setDrawer('debug')} onApproval={async (approval, decision) => {
+    const response = await api.decideApproval(approval.id, decision)
+    workspace.markApprovalDecision(approval.id, decision)
+    void workspace.followRun(response.approval?.run_id || workspace.state.run?.id)
+  }} />
 
   return <div className="agent-workspace">
     <div className="agent-workspace__desktop">{sidebar}</div>
