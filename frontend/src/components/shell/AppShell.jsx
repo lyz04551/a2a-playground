@@ -19,8 +19,8 @@ import CommandPalette from './CommandPalette'
 
 const NAV_ITEMS = [
   { key: '/dashboard', icon: <DashboardOutlined />, zh: '总览', en: 'Dashboard' },
-  { key: '/workspace', icon: <MessageOutlined />, zh: '工作台', en: 'Workspace' },
   { key: '/agents', icon: <RobotOutlined />, zh: 'Agents', en: 'Agents' },
+  { key: '/workspace', icon: <MessageOutlined />, zh: '工作台', en: 'Workspace' },
   { key: '/events', icon: <FileTextOutlined />, zh: '事件', en: 'Events' },
 ]
 
