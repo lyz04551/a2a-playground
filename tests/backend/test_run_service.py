@@ -13,8 +13,10 @@ from backend.registry.service import AgentRegistry
 class FakeGateway:
     def __init__(self, events):
         self.events = events
+        self.messages = []
 
     def delegate(self, run_id, agent, message):
+        self.messages.append(message)
         async def stream():
             for event in self.events:
                 if isinstance(event, Exception):
@@ -191,6 +193,35 @@ async def test_stream_creates_conversation_run_and_root_task(tmp_path):
     assert len(tasks) == 1
     assert tasks[0]["parent_task_id"] is None
     assert tasks[0]["status"] == "completed"
+
+
+@pytest.mark.anyio
+async def test_follow_up_run_receives_bounded_conversation_context(tmp_path):
+    repository, service = make_service(
+        tmp_path,
+        [{"type": "done", "text": "Use nginx-test instead."}],
+    )
+    first = await collect(service.stream(RunCommand(
+        mode="direct", target_agent_id="ops", message="Create an nginx pod",
+    )))
+    conversation_id = first[0].conversation_id
+
+    await collect(service.stream(RunCommand(
+        conversation_id=conversation_id,
+        mode="direct",
+        target_agent_id="ops",
+        message="Create the new one",
+    )))
+
+    assert service.gateway.messages[-1] == (
+        "Conversation history (oldest to newest):\n"
+        "User: Create an nginx pod\n"
+        "Agent: Use nginx-test instead.\n\n"
+        "Current user message:\nCreate the new one"
+    )
+    stored = repository.list_messages(conversation_id)
+    assert stored[-2]["content"] == "Create the new one"
+    assert stored[-1]["content"] == "Use nginx-test instead."
 
 
 @pytest.mark.anyio

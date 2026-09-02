@@ -23,6 +23,8 @@ from backend.host.orchestration.models import (
 
 
 _TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
+_CONVERSATION_CONTEXT_MESSAGES = 12
+_CONVERSATION_CONTEXT_CHARS = 12000
 
 
 class RunService:
@@ -80,6 +82,9 @@ class RunService:
 
     async def _stream(self, command: RunCommand) -> AsyncIterator[RunEvent]:
         conversation_id = self._conversation_id(command)
+        execution_message = self._conversation_context_message(
+            conversation_id, command.message
+        )
         run_id = uuid.uuid4().hex
         root_task_id = f"{run_id}:root"
         root_agent_id = (
@@ -142,7 +147,10 @@ class RunService:
         failure: RunEvent | None = None
         awaiting_approval = False
 
-        async for candidate in strategy.execute(command):
+        execution_command = command.model_copy(
+            update={"message": execution_message}
+        )
+        async for candidate in strategy.execute(execution_command):
             if self._is_cancelled(run_id):
                 return
             event = self._persist_event(candidate)
@@ -593,6 +601,41 @@ class RunService:
             }
         )
         return conversation_id
+
+    def _conversation_context_message(
+        self, conversation_id: str, current_message: str
+    ) -> str:
+        messages = sorted(
+            self.repository.list_messages(conversation_id),
+            key=lambda item: (
+                str(item.get("created_at") or ""),
+                str(item.get("id") or ""),
+            ),
+        )[-_CONVERSATION_CONTEXT_MESSAGES:]
+        if not messages:
+            return current_message
+
+        remaining = _CONVERSATION_CONTEXT_CHARS - len(current_message)
+        history: list[str] = []
+        for message in reversed(messages):
+            role = "User" if message.get("role") == "user" else "Agent"
+            content = str(message.get("content") or "").strip()
+            line = f"{role}: {content}"
+            if len(line) > remaining:
+                line = line[:max(0, remaining)]
+            if not line:
+                break
+            history.append(line)
+            remaining -= len(line) + 1
+            if remaining <= 0:
+                break
+        history.reverse()
+        return (
+            "Conversation history (oldest to newest):\n"
+            f"{'\n'.join(history)}\n\n"
+            "Current user message:\n"
+            f"{current_message}"
+        )
 
     def _is_cancelled(self, run_id: str) -> bool:
         run = self.repository.get_run(run_id)
