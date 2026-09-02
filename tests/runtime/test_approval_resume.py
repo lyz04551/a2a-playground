@@ -76,6 +76,35 @@ async def test_approved_exact_action_executes_once_and_clears_pending():
 
 
 @pytest.mark.anyio
+async def test_approved_action_reports_mcp_failure_as_terminal_error():
+    class FailingMCPClient(FakeMCPClient):
+        async def call_tool(self, name, arguments):
+            raise RuntimeError("immutable Pod update")
+
+    client = FailingMCPClient()
+    agent = make_agent(client)
+    pending = PendingAction.from_call(
+        approval_id="ap-1",
+        agent_id="k8s-orchestrator",
+        tool_name="apply_k8s_yaml",
+        arguments={"yaml": "kind: Pod"},
+    )
+    agent._pending_by_context["ctx-1"] = pending
+    message = json.dumps({
+        "type": "approval_decision",
+        "approval_id": pending.approval_id,
+        "decision": "approved",
+        "action_digest": pending.action_digest,
+    })
+
+    events = [event async for event in agent.stream(message, "ctx-1")]
+
+    assert events[-1].type is RuntimeEventType.ERROR
+    assert "immutable Pod update" in events[-1].content
+    assert "ctx-1" not in agent._pending_by_context
+
+
+@pytest.mark.anyio
 async def test_approved_action_closes_checkpoint_tool_call_history():
     client = FakeMCPClient()
     agent = make_agent(client)

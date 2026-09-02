@@ -286,6 +286,9 @@ class RunService:
                 decision == "approved"
                 and execution.get("state") not in {"failed", "error"}
             )
+            execution_failed = (
+                decision == "approved" and not completed
+            )
             result = DelegationResult(
                 state="completed" if completed else "failed",
                 text=str(execution.get("text") or ""),
@@ -299,7 +302,11 @@ class RunService:
             self.repository.update_task_data(
                 paused["id"],
                 {
-                    "status": "completed" if completed else "blocked",
+                    "status": (
+                        "completed" if completed
+                        else "failed" if execution_failed
+                        else "blocked"
+                    ),
                     "delegation_result": result.model_dump(),
                 },
             )
@@ -329,6 +336,44 @@ class RunService:
                     "decision": decision,
                 },
             ))
+            completed_call_ids = {
+                str(event.data.get("tool_call_id") or event.data.get("id") or "")
+                for event in persisted
+                if event.type == RunEventType.TOOL_COMPLETED
+            }
+            tool_call = next((
+                event for event in reversed(persisted)
+                if event.type == RunEventType.TOOL_CALLED
+                and event.task_id == paused["id"]
+                and str(event.data.get("tool_call_id") or event.data.get("id") or "")
+                not in completed_call_ids
+                and (event.data.get("tool") or event.data.get("tool_name"))
+                == approval.get("tool_name")
+                and (event.data.get("arguments") or event.data.get("args") or {})
+                == approval.get("arguments", {})
+            ), None)
+            if tool_call is not None:
+                tool_result = {
+                    "agent_id": approval["agent_id"],
+                    "tool_call_id": str(
+                        tool_call.data.get("tool_call_id")
+                        or tool_call.data.get("id") or ""
+                    ),
+                    "tool": approval.get("tool_name", ""),
+                }
+                if completed:
+                    tool_result["result"] = result.text
+                else:
+                    tool_result["error"] = result.error
+                persist(RunEvent.create(
+                    event_type=RunEventType.TOOL_COMPLETED,
+                    run_id=run_id,
+                    conversation_id=run["conversation_id"],
+                    sequence=sequence,
+                    task_id=paused["id"],
+                    parent_task_id=paused.get("parent_task_id"),
+                    data=tool_result,
+                ))
             if result.text:
                 message_event = RunEvent.create(
                     event_type=RunEventType.MESSAGE_COMPLETED,
@@ -353,7 +398,11 @@ class RunService:
                 event_type=(
                     RunEventType.TASK_COMPLETED
                     if completed
-                    else RunEventType.TASK_BLOCKED
+                    else (
+                        RunEventType.TASK_FAILED
+                        if execution_failed
+                        else RunEventType.TASK_BLOCKED
+                    )
                 ),
                 run_id=run_id,
                 conversation_id=run["conversation_id"],
@@ -367,6 +416,22 @@ class RunService:
                     "delegation_result": result.model_dump(),
                 },
             ))
+
+            if execution_failed:
+                self.repository.update_run_status(run_id, "failed")
+                self.repository.update_task(
+                    run["root_task_id"], {"status": "failed"}
+                )
+                persist(RunEvent.create(
+                    event_type=RunEventType.RUN_FAILED,
+                    run_id=run_id,
+                    conversation_id=run["conversation_id"],
+                    sequence=sequence,
+                    task_id=run["root_task_id"],
+                    parent_task_id=None,
+                    data={"error": result.error},
+                ))
+                return emitted
 
             checkpoint = self._host_checkpoint(run_id)
             self.repository.update_run_status(run_id, "running")

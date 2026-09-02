@@ -138,6 +138,28 @@ async def test_client_normalizes_tool_catalog_and_text_result():
 
 
 @pytest.mark.anyio
+async def test_client_raises_when_mcp_marks_tool_result_as_error():
+    class ErrorSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            class Text:
+                text = 'update Pod error: immutable field'
+
+            class Response:
+                isError = True
+                content = [Text()]
+
+            return Response()
+
+    client = K8sMCPClient(
+        "http://mcp.invalid/sse",
+        session_factory=lambda: ErrorSession(),
+    )
+
+    with pytest.raises(RuntimeError, match="immutable field"):
+        await client.call_tool("apply_k8s_yaml", {"yaml": "kind: Pod"})
+
+
+@pytest.mark.anyio
 async def test_client_reconnects_once_after_stale_sse_timeout():
     class StaleSession(FakeSession):
         async def call_tool(self, name, arguments):

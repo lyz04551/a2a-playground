@@ -604,6 +604,20 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
             "logical_id": logical_id,
             **({"delegation_result": result} if result else {}),
         })
+    repository.append_run_event(RunEvent.create(
+        event_type=RunEventType.TOOL_CALLED,
+        run_id="run-auto",
+        conversation_id="conv-auto",
+        sequence=1,
+        task_id="root:plan:change",
+        parent_task_id="root",
+        data={
+            "agent_id": "orchestrator",
+            "tool_call_id": "call-write",
+            "tool": "apply_k8s_yaml",
+            "arguments": {"yaml": "kind: Pod"},
+        },
+    ))
 
     events = await service.resume_after_approval(
         {
@@ -611,6 +625,8 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
             "run_id": "run-auto",
             "agent_id": "orchestrator",
             "status": "approved",
+            "tool_name": "apply_k8s_yaml",
+            "arguments": {"yaml": "kind: Pod"},
         },
         {
             "state": "completed",
@@ -625,6 +641,12 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
     assert repository.get_run("run-auto")["status"] == "completed"
     assert repository.get_task("root:plan:change")["status"] == "completed"
     assert repository.get_task("root:plan:verify")["status"] == "completed"
+    completed_tool = next(
+        event for event in events
+        if event.type == RunEventType.TOOL_COMPLETED
+        and event.data.get("tool_call_id") == "call-write"
+    )
+    assert completed_tool.data["result"] == "nginx Deployment created"
     assert any(
         event.type == RunEventType.MESSAGE_COMPLETED
         and event.task_id == "root:plan:verify"
@@ -637,3 +659,53 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
         and event.data["content"] == "部署和验证均已完成"
         for event in events
     )
+
+
+@pytest.mark.anyio
+async def test_failed_approved_auto_mutation_closes_tool_and_stops_run(tmp_path):
+    repository, service = make_service(tmp_path, [])
+
+    class MustNotResumeHost:
+        async def resume_message_stream(self, *args, **kwargs):
+            raise AssertionError("failed mutation must not start another Host round")
+            yield
+
+    service.auto_host = MustNotResumeHost()
+    repository.create_run("run-auto", "conv-auto", "approval_required", {
+        "mode": "auto", "request": "create nginx", "root_task_id": "root",
+    })
+    repository.create_task({
+        "id": "root", "run_id": "run-auto", "parent_task_id": None,
+        "agent_id": "host", "status": "approval_required",
+    })
+    repository.create_task({
+        "id": "change", "run_id": "run-auto", "parent_task_id": "root",
+        "agent_id": "orchestrator", "status": "approval_required",
+    })
+    repository.append_run_event(RunEvent.create(
+        event_type=RunEventType.TOOL_CALLED, run_id="run-auto",
+        conversation_id="conv-auto", sequence=1, task_id="change",
+        parent_task_id="root", data={
+            "agent_id": "orchestrator", "tool_call_id": "call-write",
+            "tool": "apply_k8s_yaml", "arguments": {"yaml": "kind: Pod"},
+        },
+    ))
+
+    events = await service.resume_after_approval({
+        "id": "approval-1", "run_id": "run-auto", "agent_id": "orchestrator",
+        "status": "approved", "tool_name": "apply_k8s_yaml",
+        "arguments": {"yaml": "kind: Pod"},
+    }, {
+        "state": "failed", "text": "immutable Pod update",
+        "error": "immutable Pod update",
+    })
+
+    assert [event.type for event in events] == [
+        RunEventType.APPROVAL_DECIDED,
+        RunEventType.TOOL_COMPLETED,
+        RunEventType.MESSAGE_COMPLETED,
+        RunEventType.TASK_FAILED,
+        RunEventType.RUN_FAILED,
+    ]
+    assert events[1].data["error"] == "immutable Pod update"
+    assert repository.get_run("run-auto")["status"] == "failed"

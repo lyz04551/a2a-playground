@@ -453,7 +453,20 @@ class RuntimeMCPAgent:
                 is_task_complete=True,
             )
             return
-        result = await self.mcp_client.call_tool(pending.tool_name, pending.arguments)
+        try:
+            result = await self.mcp_client.call_tool(
+                pending.tool_name, pending.arguments
+            )
+        except Exception as exc:
+            error = f"MCP tool {pending.tool_name} failed: {exc}"
+            self._pending_by_context.pop(context_id, None)
+            await self._close_pending_tool_call(context_id, pending, error)
+            yield RuntimeEvent(
+                type=RuntimeEventType.ERROR,
+                content=error,
+                is_task_complete=True,
+            )
+            return
         self._pending_by_context.pop(context_id, None)
         await self._close_pending_tool_call(context_id, pending, str(result))
         yield RuntimeEvent.completed(

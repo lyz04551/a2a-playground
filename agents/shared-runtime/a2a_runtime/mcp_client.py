@@ -125,4 +125,7 @@ class K8sMCPClient:
                 parts.append(str(content.data))
             else:
                 parts.append(str(content))
-        return "\n".join(parts)
+        result = "\n".join(parts)
+        if getattr(response, "isError", False):
+            raise RuntimeError(result or f"MCP tool '{name}' failed")
+        return result
