@@ -24,6 +24,10 @@ from backend.host.orchestration.validation import (
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+def _response_language(request: str) -> str:
+    return "zh-CN" if any("\u4e00" <= char <= "\u9fff" for char in request) else "en"
+
+
 class LangGraphDecisionPort:
     def __init__(self, model):
         self._model = model
@@ -40,6 +44,7 @@ class LangGraphDecisionPort:
             result["text"] = str(result.get("text") or "")[:2000]
         payload = {
             "request": request,
+            "response_language": _response_language(request),
             "available_agents": agents,
             "state": compact_state,
         }
@@ -58,13 +63,16 @@ Base the decision on structured observations, not keywords. Use only available
 Agent IDs and declared capabilities. Never repeat semantic work or a rejected
 write. A Kubernetes mutation requires a successful Security precheck observation;
 mutation and verification must never be delegated in the same round. Wait for a
-successful mutation observation, then delegate Ops verification in the next round. Return
+successful mutation observation, then delegate Ops verification in the next round.
 If verification proves the resource unhealthy or the write did not take effect,
 one corrective mutation is allowed. For an existing Kubernetes Pod whose immutable
 spec must change, instruct the write Agent to delete and recreate it; both writes
 must go through formal approval. Verify again after the correction. Return
 only a concise public reason. The Host must never ask for write approval in text;
 approval is created only by a delegated Agent's write tool.
+Use payload.response_language for every user-visible string. When it is zh-CN,
+reason, response, task objective, task input, and completion criteria must all
+be written in Chinese. Keep Agent IDs, tool names, and Kubernetes identifiers unchanged.
 Do not reveal hidden chain-of-thought."""
         try:
             profiles = {agent["id"]: agent for agent in agents}

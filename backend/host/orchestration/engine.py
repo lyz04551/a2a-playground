@@ -438,6 +438,11 @@ class HostOrchestrationEngine:
                 "approval request. Do not repeat cluster health, capacity, or "
                 "security prechecks. Never ask for approval in plain text."
             )
+        language_instruction = (
+            "\n\n请使用中文完成任务并返回中文报告。工具名、资源名和原始错误保持不变。"
+            if any("\u4e00" <= char <= "\u9fff" for char in request)
+            else "\n\nRespond in the same language as the user request."
+        )
         return (
             f"User goal:\n{request}\n\n"
             f"Your assigned task:\n{task.objective}\n\n"
@@ -447,6 +452,7 @@ class HostOrchestrationEngine:
             "Completion criteria:\n- "
             + "\n- ".join(task.completion_criteria)
             + mutation_instruction
+            + language_instruction
         )
 
     async def _run_task(
