@@ -14,6 +14,16 @@
 .workspace-message { padding: var(--space-16); border: 1px solid var(--color-border); border-radius: var(--radius-12); color: var(--color-text); background: var(--color-surface); }
 .workspace-message--user { border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border)); background: var(--color-primary-subtle); }
 .workspace-message header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); margin-bottom: var(--space-8); }.workspace-message header > span { display: flex; align-items: center; gap: 4px; opacity: .35; transition: opacity var(--motion-fast); }.workspace-message:hover header > span, .workspace-message:focus-within header > span { opacity: 1; }.workspace-message small { color: var(--color-text-muted); }.workspace-message__body { white-space: pre-wrap; line-height: 1.6; }
+.workspace-message--agent .workspace-message__body {
+  max-height: min(52dvh, 520px);
+  padding-right: var(--space-8);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
 .workspace-tool { margin-top: var(--space-12); padding: var(--space-8) var(--space-12); border: 1px solid var(--color-border); border-radius: var(--radius-8); background: var(--color-surface-subtle); }.workspace-tool__summary { display: flex; align-items: center; gap: var(--space-8); color: var(--color-orchestration); font-size: 12px; font-weight: 700; }.workspace-tool__summary small { margin-left: auto; color: var(--color-text-muted); font-weight: 500; }.workspace-tool details { margin-top: var(--space-8); }.workspace-tool summary, .workspace-trace details summary { cursor: pointer; color: var(--color-text-muted); font-size: 12px; }.workspace-tool pre, .workspace-trace pre { max-height: 180px; overflow: auto; margin: var(--space-8) 0 0; padding: var(--space-8); border-radius: var(--radius-8); color: var(--color-text); background: var(--color-page); font-size: 11px; white-space: pre-wrap; }
 .workspace-artifact, .workspace-artifacts button { display: block; width: 100%; margin-top: var(--space-8); padding: var(--space-8); color: var(--color-orchestration); border: 1px solid var(--color-border); text-align: left; }
 .workspace-trace { padding: var(--space-24); color: var(--color-text); background: var(--color-surface); }.workspace-trace > header { display: flex; align-items: start; justify-content: space-between; gap: var(--space-12); margin-bottom: var(--space-24); }.workspace-trace h2 { margin: var(--space-4) 0 0; font-size: 18px; }.workspace-eyebrow { color: var(--color-text-muted); font-size: 11px; font-weight: 800; letter-spacing: .1em; text-transform: uppercase; }.workspace-trace__tasks li { display: grid; grid-template-columns: 18px 1fr; gap: var(--space-8); }.workspace-trace__tasks li > .anticon { color: var(--color-orchestration); margin-top: 2px; }.workspace-trace__tasks strong, .workspace-trace__tasks small { display: block; }.workspace-trace__tasks small { margin-top: var(--space-4); color: var(--color-text-muted); font-size: 12px; }.workspace-trace__tasks details { margin-top: var(--space-8); }
