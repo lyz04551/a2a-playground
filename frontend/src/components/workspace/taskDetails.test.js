@@ -1,6 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildTaskDetails, buildToolDetails, groupToolCalls } from './taskDetails.js'
+import { buildTaskDetails, buildToolDetails, groupToolCalls, statusLabel } from './taskDetails.js'
+
+test('localizes internal execution states without changing their values', () => {
+  assert.equal(statusLabel('working', true), '正在执行')
+  assert.equal(statusLabel('completed', true), '已完成')
+  assert.equal(statusLabel('failed', true), '失败')
+  assert.equal(statusLabel('approval_required', true), '等待审批')
+  assert.equal(statusLabel('working', false), 'Working')
+  assert.equal(statusLabel('custom_state', true), 'custom_state')
+})
 
 test('builds readable Agent task details with dependencies and result', () => {
   const tasks = [

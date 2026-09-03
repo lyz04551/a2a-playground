@@ -8,7 +8,7 @@ import {
   PauseCircleOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
-import { buildToolDetails, groupToolCalls } from './taskDetails'
+import { buildToolDetails, groupToolCalls, statusLabel } from './taskDetails'
 import { buildRoundTimeline } from './roundTimeline'
 import { formatAgentOutput } from './agentOutput'
 
@@ -35,7 +35,7 @@ function ToolCallDetail({ tool, zh }) {
     <details className={`tool-call-detail status-${tool.status || 'working'}`}>
       <summary>
         <span><StatusIcon status={tool.status} /> {tool.name || (zh ? '工具调用' : 'Tool call')}</span>
-        <small><StatusIcon status={tool.status} /> {tool.status || 'working'} · {formatDuration(tool.durationMs)}</small>
+        <small><StatusIcon status={tool.status} /> {statusLabel(tool.status || 'working', zh)} · {formatDuration(tool.durationMs)}</small>
       </summary>
       {tool.error && <code>{details.errorText}</code>}
       <section>
@@ -89,18 +89,18 @@ export default function RunTimeline({ run = {}, tasks = [], rounds = [], onTaskS
     <ol className="run-timeline" aria-label="Host to Agent execution timeline">
       <li className="run-timeline__node is-host">
         <span className="run-timeline__rail"><NodeIndexOutlined /></span>
-        <div><strong>Host Agent</strong><small>{run.status || 'idle'}</small></div>
+        <div><strong>Host Agent</strong><small>{statusLabel(run.status || 'idle', zh)}</small></div>
       </li>
       {timelineItems.map(item => item.kind === 'decision' ? (
         <li className={`run-timeline__node is-decision status-${item.round.status || 'working'}`} key={item.id}>
           <span className="run-timeline__rail"><NodeIndexOutlined /></span>
-          <section><strong>{zh ? `Host 第 ${item.round.round} 轮决策` : `Host decision round ${item.round.round}`}</strong><span>{item.round.reason}</span><small>{item.round.status || item.round.action}</small></section>
+          <section><strong>{zh ? `Host 第 ${item.round.round} 轮决策` : `Host decision round ${item.round.round}`}</strong><span>{item.round.reason}</span><small>{statusLabel(item.round.status || item.round.action, zh)}</small></section>
         </li>
       ) : (
         <React.Fragment key={item.id}>
           <li className={`run-timeline__node is-agent status-${item.task.status || 'queued'}`}>
             <span className="run-timeline__rail"><RobotOutlined /></span>
-            <button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {item.task.status || 'queued'} · {formatDuration(item.task.durationMs)}</small>{(item.task.output || item.task.streamingOutput || item.task.result) && <pre className="run-timeline__agent-output">{formatAgentOutput(item.task.output || item.task.streamingOutput || item.task.result)}</pre>}{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}</button>
+            <button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {statusLabel(item.task.status || 'queued', zh)} · {formatDuration(item.task.durationMs)}</small>{(item.task.output || item.task.streamingOutput || item.task.result) && <pre className="run-timeline__agent-output">{formatAgentOutput(item.task.output || item.task.streamingOutput || item.task.result)}</pre>}{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}</button>
           </li>
           {(item.task.tools || []).length > 0 && <ToolActivity tools={item.task.tools} zh={zh} />}
         </React.Fragment>

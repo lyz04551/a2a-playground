@@ -11,7 +11,7 @@ import RunTracePanel from '../components/workspace/RunTracePanel'
 import PromptTemplates from '../components/PromptTemplates'
 import DebugDrawer from '../components/workspace/DebugDrawer'
 import { useConsoleSettings } from '../context/ConsoleSettingsContext'
-import { enrichWorkspaceMessages, getWorkspaceSendState } from '../components/workspace/workspaceState'
+import { approvalStatusAfterDecision, enrichWorkspaceMessages, getWorkspaceSendState } from '../components/workspace/workspaceState'
 import { deriveRunStage } from '../state/runStage'
 
 export default function WorkspacePage() {
@@ -108,7 +108,7 @@ export default function WorkspacePage() {
   }[workspace.connection.state]
   const tracePanel = <RunTracePanel run={trace} stage={runStage} agents={agents} language={language} loading={workspace.loading} error={workspace.error} canCancel={workspace.canCancel} cancelling={cancelling} onCancel={stopRun} onDebug={() => setDrawer('debug')} onApproval={async (approval, decision) => {
     const response = await api.decideApproval(approval.id, decision)
-    workspace.markApprovalDecision(approval.id, decision)
+    workspace.markApprovalDecision(approval.id, approvalStatusAfterDecision(response, decision))
     void workspace.followRun(response.approval?.run_id || workspace.state.run?.id)
   }} />
 

@@ -354,6 +354,37 @@ def test_react_accepts_mutation_after_security_allows_continuation():
     assert validate_decision(decision, AGENTS, state) is decision
 
 
+def test_react_rejects_second_mutation_after_prior_attempt_with_new_task_id():
+    security = task(
+        "security", "k8s-security", workflow_role="precheck"
+    )
+    first_mutation = task(
+        "create-nginx", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    state = HostRunState(
+        goal="可以创建一个nginx pod么 然后检查一下有没有什么问题",
+        observations={
+            security.id: observed(security),
+            first_mutation.id: observed(first_mutation),
+        },
+        successful={security.id, first_mutation.id},
+    )
+    repeated = task(
+        "recreate-nginx-final", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    repeated.objective = "重新创建加固的 nginx pod，确保资源实际存在"
+    decision = HostDecision(
+        action="delegate",
+        reason="Verification could not find the resource",
+        tasks=[repeated],
+    )
+
+    with pytest.raises(PlanValidationError, match="mutation already attempted"):
+        validate_decision(decision, AGENTS, state)
+
+
 def test_react_rejects_verification_in_same_round_as_unfinished_mutation():
     security = task(
         "security", "k8s-security", workflow_role="precheck"

@@ -69,6 +69,37 @@ def _schedule_auto_resume(
     return task
 
 
+def _schedule_auto_approval_execution(
+    approval_service,
+    run_service,
+    approval: dict[str, Any],
+    background_tasks: set[asyncio.Task],
+    logger: logging.Logger | None = None,
+) -> asyncio.Task:
+    run_id = approval["run_id"]
+    run_service.repository.update_run_status(run_id, "running")
+
+    async def execute_and_resume() -> None:
+        try:
+            outcome = await approval_service.execute_claimed(approval)
+            execution = outcome.get("result", {})
+        except Exception as exc:
+            (logger or logging.getLogger(__name__)).exception(
+                "Unable to execute approval %s", approval.get("id")
+            )
+            execution = {
+                "state": "failed",
+                "text": str(exc),
+                "error": str(exc),
+            }
+        await run_service.resume_after_approval(approval, execution)
+
+    task = asyncio.create_task(execute_and_resume())
+    background_tasks.add(task)
+    task.add_done_callback(background_tasks.discard)
+    return task
+
+
 def create_router(service) -> APIRouter:
     router = APIRouter()
     background_runs: set[asyncio.Task] = set()
@@ -228,24 +259,40 @@ def create_approval_router(
     @router.post("/api/approvals/decide")
     async def approvals_decide(data: dict[str, Any]):
         try:
-            result = await approval_service.decide(
+            approval, claimed = approval_service.claim(
                 data.get("approval_id", ""),
                 data.get("decision", ""),
             )
-            approval = result["approval"]
-            execution = result.get("result", {})
-            result_text = execution.get("text", "")
             run = run_service.repository.get_run(approval["run_id"]) or {}
             if run.get("mode") == "auto":
-                _schedule_auto_resume(
-                    run_service,
-                    approval,
-                    execution,
-                    background_resumes,
-                    route_logger,
-                )
-                result["resume_started"] = True
-                return ApiResponse(result=result)
+                if claimed:
+                    _schedule_auto_approval_execution(
+                        approval_service,
+                        run_service,
+                        approval,
+                        background_resumes,
+                        route_logger,
+                    )
+                return ApiResponse(result={
+                    "approval": approval,
+                    "result": {
+                        "state": "accepted" if claimed else "already_decided",
+                        "text": (
+                            "审批决定已接受，正在执行。"
+                            if claimed
+                            else "审批已处理，未重复执行。"
+                        ),
+                    },
+                    "resume_started": claimed,
+                })
+
+            result = (
+                await approval_service.execute_claimed(approval)
+                if claimed
+                else approval_service.duplicate_result(approval)
+            )
+            execution = result.get("result", {})
+            result_text = execution.get("text", "")
             if (
                 approval["status"] == "approved"
                 and execution.get("state") != "failed"

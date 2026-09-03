@@ -41,6 +41,10 @@ export function buildRunReconnectCommand({ runId, afterSequence = 0, mode = 'aut
   }
 }
 
+export function approvalStatusAfterDecision(response = {}, decision) {
+  return response.result?.state === 'accepted' ? 'executing' : decision
+}
+
 export function enrichWorkspaceMessages(messages = [], { agents = [], tasksById = {}, language = 'zh-CN' } = {}) {
   const namesById = new Map(agents.map(agent => [agent.id, agent.name || agent.id]))
   const zh = language === 'zh-CN'

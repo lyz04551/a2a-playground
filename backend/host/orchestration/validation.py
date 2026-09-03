@@ -88,6 +88,17 @@ def validate_decision(
                 raise PlanValidationError(
                     f"mutation task '{task.id}' must declare risk write"
                 )
+            previous_mutation = next((
+                observed
+                for observed in state.observations.values()
+                if observed.task.workflow_role == "mutation"
+            ), None)
+            if previous_mutation is not None:
+                raise PlanValidationError(
+                    f"mutation already attempted by task "
+                    f"'{previous_mutation.task.id}'; do not create a new "
+                    "mutation task in a later round"
+                )
             security_passed = any(
                 observed.task.workflow_role == "precheck"
                 and observed.evaluation.outcome == "sufficient"

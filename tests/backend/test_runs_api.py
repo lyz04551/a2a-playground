@@ -11,7 +11,11 @@ from backend.orchestration.commands import RunCommand
 from backend.orchestration.service import RunService
 from tests.postgres_helpers import create_test_repository
 from backend.registry.service import AgentRegistry
-from backend.api.runs import _schedule_auto_resume
+from backend.api.runs import (
+    _schedule_auto_approval_execution,
+    _schedule_auto_resume,
+    create_approval_router,
+)
 
 
 class FakeGateway:
@@ -61,6 +65,132 @@ async def test_auto_approval_resume_runs_in_background_after_marking_run_active(
 
     gate.set()
     await task
+
+
+@pytest.mark.anyio
+async def test_auto_approval_execution_is_owned_once_and_resumes_after_result():
+    gate = asyncio.Event()
+    calls = []
+
+    class ApprovalService:
+        async def execute_claimed(self, approval):
+            calls.append(("execute", approval["id"]))
+            await gate.wait()
+            return {
+                "approval": approval,
+                "result": {"state": "completed", "text": "Pod created"},
+            }
+
+    class RunService:
+        class Repository:
+            def __init__(self):
+                self.updates = []
+
+            def update_run_status(self, run_id, status):
+                self.updates.append((run_id, status))
+
+        def __init__(self):
+            self.repository = self.Repository()
+
+        async def resume_after_approval(self, approval, execution):
+            calls.append(("resume", approval["id"], execution["text"]))
+
+    background = set()
+    run_service = RunService()
+    task = _schedule_auto_approval_execution(
+        ApprovalService(),
+        run_service,
+        {"id": "approval-1", "run_id": "run-1", "status": "approved"},
+        background,
+    )
+
+    await asyncio.sleep(0)
+    assert calls == [("execute", "approval-1")]
+    assert run_service.repository.updates == [("run-1", "running")]
+    assert task in background
+    assert not task.done()
+
+    gate.set()
+    await task
+    assert calls == [
+        ("execute", "approval-1"),
+        ("resume", "approval-1", "Pod created"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_auto_approval_endpoint_returns_before_execution_and_deduplicates():
+    gate = asyncio.Event()
+    delegated = []
+    resumed = []
+
+    class Repository:
+        def __init__(self):
+            self.approval = {
+                "id": "approval-1", "run_id": "run-1", "agent_id": "ops",
+                "tool_name": "apply_k8s_yaml", "arguments": {"yaml": "kind: Pod"},
+                "action_digest": "b" * 64, "status": "pending",
+            }
+
+        def claim_approval_decision(self, approval_id, decision):
+            claimed = self.approval["status"] == "pending"
+            if claimed:
+                self.approval["status"] = decision
+            return dict(self.approval), claimed
+
+        def get_run(self, run_id):
+            return {"id": run_id, "mode": "auto"}
+
+        def get_agent(self, agent_id):
+            return {"id": agent_id}
+
+        def update_run_status(self, run_id, status):
+            return None
+
+        def list_approvals(self, run_id=None):
+            return [dict(self.approval)]
+
+    class Gateway:
+        async def delegate(self, run_id, agent, message):
+            delegated.append(json.loads(message))
+            await gate.wait()
+            return {"state": "completed", "text": "Pod created"}
+
+    class Service:
+        def __init__(self):
+            self.repository = Repository()
+
+        async def resume_after_approval(self, approval, execution):
+            resumed.append((approval, execution))
+
+    service = Service()
+    app = FastAPI()
+    app.include_router(create_approval_router(service, Gateway(), object()))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        first = await client.post("/api/approvals/decide", json={
+            "approval_id": "approval-1", "decision": "approved",
+        })
+        duplicate = await client.post("/api/approvals/decide", json={
+            "approval_id": "approval-1", "decision": "approved",
+        })
+
+        assert first.json()["result"]["result"]["state"] == "accepted"
+        assert duplicate.json()["result"]["result"]["state"] == "already_decided"
+        await asyncio.sleep(0)
+        assert len(delegated) == 1
+        assert resumed == []
+
+        gate.set()
+        for _ in range(10):
+            if resumed:
+                break
+            await asyncio.sleep(0)
+
+    assert len(resumed) == 1
+    assert resumed[0][1]["text"] == "Pod created"
 
 
 def make_app(tmp_path):

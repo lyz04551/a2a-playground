@@ -10,18 +10,28 @@ class ApprovalService:
         self.repository = repository
         self.gateway = gateway
 
-    async def decide(self, approval_id: str, decision: str) -> dict:
-        approval, claimed = self.repository.claim_approval_decision(
+    def claim(self, approval_id: str, decision: str) -> tuple[dict, bool]:
+        return self.repository.claim_approval_decision(
             approval_id, decision
         )
+
+    @staticmethod
+    def duplicate_result(approval: dict) -> dict:
+        return {
+            "approval": approval,
+            "result": {
+                "state": "already_decided",
+                "text": "审批已处理，未重复执行。",
+            },
+        }
+
+    async def decide(self, approval_id: str, decision: str) -> dict:
+        approval, claimed = self.claim(approval_id, decision)
         if not claimed:
-            return {
-                "approval": approval,
-                "result": {
-                    "state": "completed",
-                    "text": "审批已处理，未重复执行。",
-                },
-            }
+            return self.duplicate_result(approval)
+        return await self.execute_claimed(approval)
+
+    async def execute_claimed(self, approval: dict) -> dict:
         agent = self.repository.get_agent(approval["agent_id"])
         if agent is None:
             raise ValueError("approval agent is no longer registered")
@@ -30,7 +40,7 @@ class ApprovalService:
                 "type": "approval_decision",
                 "approval_id": approval["id"],
                 "agent_id": approval["agent_id"],
-                "decision": decision,
+                "decision": approval["status"],
                 "tool_name": approval["tool_name"],
                 "arguments": approval["arguments"],
                 "action_digest": approval["action_digest"],
@@ -51,7 +61,7 @@ class ApprovalService:
             else (
                 "failed"
                 if result.get("state") == "failed"
-                else "approval_required" if run.get("mode") == "auto" else "completed"
+                else "running" if run.get("mode") == "auto" else "completed"
             )
         )
         self.repository.update_run_status(

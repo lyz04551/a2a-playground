@@ -281,6 +281,10 @@ class RunService:
             if paused is None:
                 return []
 
+            execution_state = str(execution.get("state") or "").lower()
+            if execution_state not in {"completed", "failed", "error"}:
+                return []
+
             decision = approval.get("status", "")
             completed = (
                 decision == "approved"

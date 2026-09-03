@@ -117,6 +117,36 @@ async def test_client_uses_streamable_http_transport(monkeypatch):
     assert FakeClientSession.initialized == [("http-read", "http-write")]
     await client.disconnect()
 
+
+@pytest.mark.anyio
+async def test_each_operation_enters_and_exits_transport_in_same_task(monkeypatch):
+    lifecycle = []
+
+    class LifecycleSession(FakeClientSession):
+        async def list_tools(self):
+            return await FakeSession().list_tools()
+
+    @asynccontextmanager
+    async def fake_streamable_client(**_kwargs):
+        lifecycle.append(("enter", asyncio.current_task()))
+        try:
+            yield "http-read", "http-write", lambda: "session-id"
+        finally:
+            lifecycle.append(("exit", asyncio.current_task()))
+
+    monkeypatch.setattr(
+        mcp_client_module, "streamablehttp_client", fake_streamable_client
+    )
+    monkeypatch.setattr(mcp_client_module, "ClientSession", LifecycleSession)
+    client = K8sMCPClient(
+        "http://mcp.invalid/mcp", transport="streamable_http"
+    )
+
+    await asyncio.create_task(client.list_tools())
+
+    assert [event for event, _task in lifecycle] == ["enter", "exit"]
+    assert lifecycle[0][1] is lifecycle[1][1]
+
 @pytest.mark.anyio
 async def test_client_normalizes_tool_catalog_and_text_result():
     client = K8sMCPClient(
@@ -209,6 +239,62 @@ async def test_client_bounds_a_hung_tool_call():
 
     with pytest.raises(TimeoutError, match="timed out"):
         await client.call_tool("list_k8s_pod", {"namespace": "default"})
+
+
+@pytest.mark.anyio
+async def test_client_serializes_parallel_calls_on_one_session():
+    class ConcurrencySensitiveSession(FakeSession):
+        def __init__(self):
+            self.active = 0
+            self.max_active = 0
+
+        async def call_tool(self, name, arguments):
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+            await asyncio.sleep(0.01)
+            self.active -= 1
+            return await super().call_tool(name, arguments)
+
+    session = ConcurrencySensitiveSession()
+    client = K8sMCPClient(
+        "http://mcp.invalid/mcp",
+        session_factory=lambda: session,
+    )
+
+    results = await asyncio.gather(*(
+        client.call_tool("list_k8s_pod", {"namespace": namespace})
+        for namespace in ("default", "kube-system", "mcp")
+    ))
+
+    assert session.max_active == 1
+    assert results == [
+        "list_k8s_pod:default",
+        "list_k8s_pod:kube-system",
+        "list_k8s_pod:mcp",
+    ]
+
+
+@pytest.mark.anyio
+async def test_client_reconnects_after_timeout_invalidates_session():
+    class HungSession(FakeSession):
+        async def call_tool(self, name, arguments):
+            await asyncio.Event().wait()
+
+    healthy = FakeSession()
+    sessions = iter([HungSession(), healthy])
+    client = K8sMCPClient(
+        "http://mcp.invalid/mcp",
+        session_factory=lambda: next(sessions),
+        tool_timeout=0.01,
+    )
+
+    with pytest.raises(TimeoutError, match="timed out"):
+        await client.call_tool("list_k8s_pod", {"namespace": "default"})
+
+    result = await client.call_tool(
+        "list_k8s_pod", {"namespace": "kube-system"}
+    )
+    assert result == "list_k8s_pod:kube-system"
 
 
 @pytest.mark.anyio

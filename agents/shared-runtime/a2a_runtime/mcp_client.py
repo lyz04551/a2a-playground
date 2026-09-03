@@ -4,7 +4,7 @@ import asyncio
 import os
 import httpx
 from collections.abc import Callable
-from contextlib import AsyncExitStack
+from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 from typing import Literal
 
@@ -39,6 +39,7 @@ class K8sMCPClient:
         self._session: Any | None = None
         self._stack: AsyncExitStack | None = None
         self._connect_lock = asyncio.Lock()
+        self._operation_lock = asyncio.Lock()
 
     async def connect(self) -> None:
         if self._session is not None:
@@ -80,15 +81,52 @@ class K8sMCPClient:
             self._session = session
 
     async def disconnect(self) -> None:
+        async with self._operation_lock:
+            await self._disconnect_unlocked()
+
+    async def _disconnect_unlocked(self) -> None:
         self._session = None
         if self._stack is not None:
             stack = self._stack
             self._stack = None
             await stack.aclose()
 
+    @asynccontextmanager
+    async def _operation_session(self):
+        if self._session_factory is not None:
+            yield self._session_factory()
+            return
+
+        stack = AsyncExitStack()
+        try:
+            transport_client = (
+                streamablehttp_client
+                if self.transport == "streamable_http"
+                else sse_client
+            )
+            streams = await asyncio.wait_for(
+                stack.enter_async_context(
+                    transport_client(
+                        url=self.mcp_url,
+                        timeout=self.connect_timeout,
+                        sse_read_timeout=self.sse_read_timeout,
+                    )
+                ),
+                timeout=self.connect_timeout,
+            )
+            read, write = streams[:2]
+            session = await stack.enter_async_context(ClientSession(read, write))
+            await asyncio.wait_for(
+                session.initialize(), timeout=self.connect_timeout
+            )
+            yield session
+        finally:
+            await stack.aclose()
+
     async def list_tools(self) -> list[dict[str, Any]]:
-        await self.connect()
-        response = await self._session.list_tools()
+        async with self._operation_lock:
+            async with self._operation_session() as session:
+                response = await session.list_tools()
         return [
             {
                 "name": tool.name,
@@ -99,24 +137,23 @@ class K8sMCPClient:
         ]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        await self.connect()
-        try:
-            response = await asyncio.wait_for(
-                self._session.call_tool(name, arguments),
-                timeout=self.tool_timeout,
-            )
-        except TimeoutError as exc:
-            await self.disconnect()
-            raise TimeoutError(
-                f"MCP tool '{name}' timed out after {self.tool_timeout:g}s"
-            ) from exc
-        except httpx.TransportError:
-            await self.disconnect()
-            await self.connect()
-            response = await asyncio.wait_for(
-                self._session.call_tool(name, arguments),
-                timeout=self.tool_timeout,
-            )
+        async with self._operation_lock:
+            try:
+                async with self._operation_session() as session:
+                    response = await asyncio.wait_for(
+                        session.call_tool(name, arguments),
+                        timeout=self.tool_timeout,
+                    )
+            except TimeoutError as exc:
+                raise TimeoutError(
+                    f"MCP tool '{name}' timed out after {self.tool_timeout:g}s"
+                ) from exc
+            except httpx.TransportError:
+                async with self._operation_session() as session:
+                    response = await asyncio.wait_for(
+                        session.call_tool(name, arguments),
+                        timeout=self.tool_timeout,
+                    )
         parts: list[str] = []
         for content in response.content:
             if hasattr(content, "text"):

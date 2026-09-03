@@ -103,16 +103,51 @@ async def test_approval_service_resumes_same_agent_run_with_exact_digest(
 
     repeated = await service.decide("ap-1", "approved")
     assert len(gateway.calls) == 1
-    assert repeated["result"]["state"] == "completed"
+    assert repeated["result"]["state"] == "already_decided"
     assert "未重复执行" in repeated["result"]["text"]
 
 
-def prepare_pending_run(repository):
+@pytest.mark.anyio
+async def test_approval_claim_does_not_wait_for_remote_execution(tmp_path):
+    repository = create_test_repository()
+    repository.initialize()
+    prepare_pending_run(repository)
+    gateway = FakeGateway()
+    service = ApprovalService(repository, gateway)
+
+    approval, claimed = service.claim("ap-1", "approved")
+
+    assert claimed is True
+    assert approval["status"] == "approved"
+    assert gateway.calls == []
+
+    result = await service.execute_claimed(approval)
+    assert result["result"]["text"] == "executed"
+    assert len(gateway.calls) == 1
+
+
+@pytest.mark.anyio
+async def test_auto_execution_stays_running_until_host_resume_finishes(tmp_path):
+    repository = create_test_repository()
+    repository.initialize()
+    prepare_pending_run(repository, mode="auto")
+    gateway = FakeGateway()
+    service = ApprovalService(repository, gateway)
+    approval, claimed = service.claim("ap-1", "approved")
+    assert claimed is True
+    repository.update_run_status("run-1", "running")
+
+    await service.execute_claimed(approval)
+
+    assert repository.get_run("run-1")["status"] == "running"
+
+
+def prepare_pending_run(repository, mode="direct"):
     repository.create_run(
         "run-1",
         "conv-1",
         "approval_required",
-        {"mode": "direct", "root_task_id": "run-1:root"},
+        {"mode": mode, "root_task_id": "run-1:root"},
     )
     repository.create_task(
         {

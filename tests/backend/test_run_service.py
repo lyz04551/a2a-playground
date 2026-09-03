@@ -546,7 +546,7 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
         "approval_required",
         {
             "mode": "auto",
-            "request": "部署 nginx",
+            "request": "可以创建一个nginx pod么 然后检查一下有没有什么问题",
             "root_task_id": "root",
             "host_plan": {
                 "summary": "guarded deployment",
@@ -659,6 +659,20 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
         and event.data["content"] == "部署和验证均已完成"
         for event in events
     )
+    event_types = [event.type for event in events]
+    assert event_types.index(RunEventType.APPROVAL_DECIDED) < event_types.index(
+        RunEventType.TOOL_COMPLETED
+    ) < next(
+        index for index, event in enumerate(events)
+        if event.type == RunEventType.MESSAGE_COMPLETED
+        and event.task_id == "root:plan:verify"
+    )
+    assert sum(
+        event.type == RunEventType.TOOL_COMPLETED
+        and event.data.get("tool_call_id") == "call-write"
+        for event in events
+    ) == 1
+    assert not any(event.type == RunEventType.TASK_FAILED for event in events)
 
 
 @pytest.mark.anyio
@@ -709,3 +723,43 @@ async def test_failed_approved_auto_mutation_closes_tool_and_stops_run(tmp_path)
     ]
     assert events[1].data["error"] == "immutable Pod update"
     assert repository.get_run("run-auto")["status"] == "failed"
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("execution_state", ["accepted", "already_decided"])
+async def test_nonterminal_approval_result_cannot_resume_auto_host(
+    tmp_path, execution_state
+):
+    repository, service = make_service(tmp_path, [])
+
+    class MustNotResumeHost:
+        async def resume_message_stream(self, *args, **kwargs):
+            raise AssertionError("nonterminal approval must not resume Host")
+            yield
+
+    service.auto_host = MustNotResumeHost()
+    repository.create_run("run-auto", "conv-auto", "approval_required", {
+        "mode": "auto", "request": "可以创建一个nginx pod么 然后检查一下有没有什么问题",
+        "root_task_id": "root",
+    })
+    repository.create_task({
+        "id": "root", "run_id": "run-auto", "parent_task_id": None,
+        "agent_id": "host", "status": "approval_required",
+    })
+    repository.create_task({
+        "id": "change", "run_id": "run-auto", "parent_task_id": "root",
+        "agent_id": "orchestrator", "status": "approval_required",
+    })
+
+    events = await service.resume_after_approval({
+        "id": "approval-1", "run_id": "run-auto", "agent_id": "orchestrator",
+        "status": "approved", "tool_name": "apply_k8s_yaml",
+        "arguments": {"yaml": "kind: Pod"},
+    }, {
+        "state": execution_state,
+        "text": "审批已处理，未重复执行。",
+    })
+
+    assert events == []
+    assert repository.get_task("change")["status"] == "approval_required"
+    assert repository.get_run("run-auto")["status"] == "approval_required"

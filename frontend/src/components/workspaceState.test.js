@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildRunReconnectCommand, canChangeMode, enrichWorkspaceMessages, getSystemStatus, getWorkspaceSendState, nextWorkspaceMode, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
+import { approvalStatusAfterDecision, buildRunReconnectCommand, canChangeMode, enrichWorkspaceMessages, getSystemStatus, getWorkspaceSendState, nextWorkspaceMode, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
 
 test('mode can change only before a conversation has messages', () => {
   assert.equal(canChangeMode({ messageCount: 0 }), true)
@@ -64,6 +64,12 @@ test('approval follow-up reconnects to an existing run without creating a new on
   assert.deepEqual(buildRunReconnectCommand({ runId: 'run-2', afterSequence: 8, mode: 'direct', targetAgentId: 'ops' }), {
     run_id: 'run-2', after_sequence: 8, mode: 'direct', message: 'resume', target_agent_id: 'ops',
   })
+})
+
+test('accepted approval is executing until a terminal run event arrives', () => {
+  assert.equal(approvalStatusAfterDecision({ result: { state: 'accepted' } }, 'approved'), 'executing')
+  assert.equal(approvalStatusAfterDecision({ result: { state: 'already_decided' } }, 'approved'), 'approved')
+  assert.equal(approvalStatusAfterDecision({}, 'rejected'), 'rejected')
 })
 
 test('workspace messages display their concrete Agent or Host source', () => {

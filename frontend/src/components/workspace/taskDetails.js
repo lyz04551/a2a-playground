@@ -46,3 +46,23 @@ export function buildTaskDetails(task = {}, tasks = [], agents = []) {
   if (!resultText) resultText = '暂无返回结果。'
   return { ...task, agentName: agent?.name || task.agentName || effectiveAgentId || 'Agent task', effectiveAgentId, objective: task.objective || task.label || 'Agent task', input: printable(task.input), dependencies, completionCriteria: task.completionCriteria || [], attempt: task.attempt || 1, resultText }
 }
+const STATUS_LABELS = {
+  queued: { zh: '排队中', en: 'Queued' },
+  submitted: { zh: '已提交', en: 'Submitted' },
+  delegated: { zh: '已委派', en: 'Delegated' },
+  working: { zh: '正在执行', en: 'Working' },
+  retrying: { zh: '正在重试', en: 'Retrying' },
+  waiting: { zh: '等待中', en: 'Waiting' },
+  approval_required: { zh: '等待审批', en: 'Approval required' },
+  executing: { zh: '正在执行', en: 'Executing' },
+  completed: { zh: '已完成', en: 'Completed' },
+  failed: { zh: '失败', en: 'Failed' },
+  blocked: { zh: '已阻塞', en: 'Blocked' },
+  cancelled: { zh: '已取消', en: 'Cancelled' },
+  idle: { zh: '空闲', en: 'Idle' },
+}
+
+export function statusLabel(status, zh = false) {
+  const normalized = status || 'idle'
+  return STATUS_LABELS[normalized]?.[zh ? 'zh' : 'en'] || normalized
+}
