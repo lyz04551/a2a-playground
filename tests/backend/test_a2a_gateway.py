@@ -100,6 +100,24 @@ class ApprovalStreamingTransport(FakeTransport):
         }
 
 
+def test_pending_action_uses_latest_retained_artifact():
+    artifacts = [
+        {
+            "name": "pending_action",
+            "parts": [{"text": json.dumps({"approval_id": "ap-old"})}],
+        },
+        {"name": "specialist_result", "parts": [{"text": "{}"}]},
+        {
+            "name": "pending_action",
+            "parts": [{"text": json.dumps({"approval_id": "ap-next"})}],
+        },
+    ]
+
+    assert A2AGateway._find_pending_action(artifacts) == {
+        "approval_id": "ap-next"
+    }
+
+
 @pytest.mark.anyio
 async def test_gateway_reuses_remote_context_for_same_run_and_agent(tmp_path):
     repository = create_test_repository()

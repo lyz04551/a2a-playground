@@ -242,10 +242,15 @@ class A2AGateway:
     def _find_artifact_json(
         artifacts: list[dict], name: str
     ) -> dict | None:
-        for artifact in artifacts:
+        # A2A continuation tasks retain artifacts from earlier turns.  When a
+        # serial write batch requests its next approval there can therefore be
+        # several ``pending_action`` artifacts with the same name.  The newest
+        # artifact/part is authoritative; reading from the front replays the
+        # already-approved action and prevents the next checkpoint appearing.
+        for artifact in reversed(artifacts):
             if artifact.get("name") != name:
                 continue
-            for part in artifact.get("parts", []):
+            for part in reversed(artifact.get("parts", [])):
                 root = part.get("root", part)
                 text = root.get("text") if isinstance(root, dict) else None
                 if not text:
