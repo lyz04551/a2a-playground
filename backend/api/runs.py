@@ -293,9 +293,16 @@ def create_approval_router(
             )
             execution = result.get("result", {})
             result_text = execution.get("text", "")
+            # A serial multi-write approval returns control to a follow-up
+            # approval instead of a terminal result; do not summarise it as a
+            # finished action (the final approval in the chain will be).
+            followup_required = bool(
+                execution.get("approval")
+            ) and execution.get("state") == "input-required"
             if (
                 approval["status"] == "approved"
                 and execution.get("state") != "failed"
+                and not followup_required
             ):
                 try:
                     summary = await auto_host.summarize_approval_result(

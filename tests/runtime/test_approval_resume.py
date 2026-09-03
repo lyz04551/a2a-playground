@@ -46,6 +46,20 @@ def make_agent(client):
     return RuntimeMCPAgent(config, "prompt", mcp_client=client)
 
 
+def _approval_payload(pending, decision="approved"):
+    return json.dumps(
+        {
+            "type": "approval_decision",
+            "approval_id": pending.approval_id,
+            "agent_id": pending.agent_id,
+            "decision": decision,
+            "tool_name": pending.tool_name,
+            "arguments": pending.arguments,
+            "action_digest": pending.action_digest,
+        }
+    )
+
+
 @pytest.mark.anyio
 async def test_approved_exact_action_executes_once_and_clears_pending():
     client = FakeMCPClient()
@@ -187,6 +201,72 @@ async def test_rejected_action_also_closes_checkpoint_tool_call_history():
     assert isinstance(agent._graph.messages[-1], ToolMessage)
     assert agent._graph.messages[-1].tool_call_id == "call-1"
     assert "未执行" in agent._graph.messages[-1].content
+
+
+@pytest.mark.anyio
+async def test_batch_writes_surface_serial_approvals_and_only_finalise_when_drained():
+    """A model turn proposing several approval-gated writes must resolve every
+    call of the interrupted batch before a terminal event. Approvals are
+    surfaced one at a time (serial), never auto-finalised mid-batch."""
+    client = FakeMCPClient()
+    agent = make_agent(client)
+    agent._pending_by_context["ctx-1"] = PendingAction.from_call(
+        approval_id="ap-A",
+        agent_id="k8s-orchestrator",
+        tool_name="delete_k8s_pod",
+        arguments={"pod": "a"},
+    )
+    agent._graph = FakeGraph(
+        [
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {"name": "delete_k8s_pod", "args": {"pod": "a"}, "id": "callA", "type": "tool_call"},
+                    {"name": "delete_k8s_pod", "args": {"pod": "b"}, "id": "callB", "type": "tool_call"},
+                    {"name": "delete_k8s_pod", "args": {"pod": "c"}, "id": "callC", "type": "tool_call"},
+                ],
+            )
+        ]
+    )
+
+    # Approve the first pending write (callA).
+    first = [event async for event in agent.stream(
+        _approval_payload(agent._pending_by_context["ctx-1"]), "ctx-1"
+    )]
+
+    # Executed the first call only, then surfaced the NEXT approval instead of
+    # finalising the whole batch.
+    assert client.calls == [("delete_k8s_pod", {"pod": "a"})]
+    assert first[-1].type is RuntimeEventType.APPROVAL_REQUIRED
+    assert first[-1].data["tool_name"] == "delete_k8s_pod"
+    assert first[-1].data["arguments"] == {"pod": "b"}
+    assert "ctx-1" in agent._pending_by_context
+
+    # Approve the second (callB) -> surfaces callC, still not final.
+    second = [event async for event in agent.stream(
+        _approval_payload(agent._pending_by_context["ctx-1"]), "ctx-1"
+    )]
+    assert client.calls[-1] == ("delete_k8s_pod", {"pod": "b"})
+    assert second[-1].type is RuntimeEventType.APPROVAL_REQUIRED
+    assert second[-1].data["arguments"] == {"pod": "c"}
+
+    # Approve the last (callC) -> the batch is fully drained, so it finalises.
+    third = [event async for event in agent.stream(
+        _approval_payload(agent._pending_by_context["ctx-1"]), "ctx-1"
+    )]
+    assert client.calls[-1] == ("delete_k8s_pod", {"pod": "c"})
+    assert third[-1].type is RuntimeEventType.COMPLETED
+    assert third[-1].artifact_name == "specialist_result"
+    assert "ctx-1" not in agent._pending_by_context
+
+    # Every sibling call in the interrupted batch now has a ToolMessage, so the
+    # checkpoint is clean and a later user turn will not trip over dangling
+    # tool calls.
+    tool_results = {
+        m.tool_call_id for m in agent._graph.messages
+        if isinstance(m, ToolMessage)
+    }
+    assert tool_results == {"callA", "callB", "callC"}
 
 
 @pytest.mark.parametrize("query", ["1", "true", "null", "[]", '"approve"'])

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import asyncio
+import uuid
 from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import Any
@@ -15,7 +16,7 @@ from langgraph.prebuilt import ToolNode, create_react_agent
 from .config import AgentRuntimeConfig, load_llm_config
 from .checkpoint import PostgresCheckpointManager
 from .mcp_client import K8sMCPClient
-from .models import ApprovalRequired, PendingAction
+from .models import ApprovalRequired, PendingAction, PolicyAction
 from .streaming import RuntimeEvent, RuntimeEventType
 from .tool_adapter import MCPToolAdapter
 from .tool_policy import ToolPolicy
@@ -469,24 +470,147 @@ class RuntimeMCPAgent:
             return
         self._pending_by_context.pop(context_id, None)
         await self._close_pending_tool_call(context_id, pending, str(result))
+        async for event in self._settle_interrupted_batch(
+            context_id, pending, result
+        ):
+            yield event
+
+    def _requires_approval(
+        self, tool_name: str, arguments: dict[str, Any]
+    ) -> bool:
+        """Whether this tool call needs an approval before it may run.
+
+        Falls back to treating unknown calls as approval-gated so the settle
+        loop never auto-executes a call whose policy it cannot classify.
+        """
+        adapter = self._tool_adapter
+        policy = getattr(adapter, "policy", None) if adapter is not None else None
+        if policy is None:
+            return True
+        return (
+            policy.classify(tool_name, arguments).action
+            is PolicyAction.APPROVAL_REQUIRED
+        )
+
+    async def _settle_interrupted_batch(
+        self,
+        context_id: str,
+        pending: PendingAction,
+        result: Any,
+    ) -> AsyncIterable[RuntimeEvent]:
+        """Resolve every call of an interrupted batch before the graph resumes.
+
+        LangGraph's ToolNode aborts the whole batch on the first
+        ApprovalRequired, so the remaining sibling calls never ran and have no
+        ToolMessage. Resuming a partially-resolved batch crashes LangGraph (an
+        AIMessage whose sibling calls still lack results cannot be continued),
+        which is the source of the "Agent stream failed" failures. So this
+        helper drains the batch first: each remaining approval-gated call is
+        surfaced as its own serial approval, and any allowed sibling call that
+        ToolNode never reached is executed now. Only once every call in the
+        interrupted AIMessage has a ToolMessage is a terminal event emitted.
+        """
+        parts = [str(result)]
+        evidence = [
+            {
+                "tool": pending.tool_name,
+                "arguments": pending.arguments,
+                "result": result,
+            }
+        ]
+        while True:
+            unresolved = await self._pending_batch_unresolved(context_id)
+            if not unresolved:
+                break
+            call = unresolved[0]
+            name = str(call.get("name") or "")
+            arguments = dict(call.get("args") or {})
+            call_id = str(call.get("id") or "")
+            if self._requires_approval(name, arguments):
+                next_pending = PendingAction.from_call(
+                    approval_id=f"ap_{uuid.uuid4().hex}",
+                    agent_id=self.config.agent_id,
+                    tool_name=name,
+                    arguments=arguments,
+                    reason="Write operation requires explicit user approval",
+                )
+                self._pending_by_context[context_id] = next_pending
+                yield RuntimeEvent.approval_required(next_pending)
+                return
+            try:
+                sibling_result = await self.mcp_client.call_tool(
+                    name, arguments
+                )
+            except Exception as exc:
+                sibling_result = f"工具执行失败：{exc}"
+            await self._inject_tool_message(
+                context_id, call_id, str(sibling_result)
+            )
+            parts.append(str(sibling_result))
+            evidence.append(
+                {
+                    "tool": name,
+                    "arguments": arguments,
+                    "result": sibling_result,
+                }
+            )
+        content = "\n\n".join(parts)
         yield RuntimeEvent.completed(
-            content=result,
+            content=content,
             artifact_name="specialist_result",
             data={
                 "status": "completed",
-                "summary": str(result),
-                "evidence": [
-                    {
-                        "tool": pending.tool_name,
-                        "arguments": pending.arguments,
-                        "result": result,
-                    }
-                ],
+                "summary": content,
+                "evidence": evidence,
                 "continuation": {
                     "allowed": True,
-                    "reason": "approved MCP action completed",
+                    "reason": "approved MCP actions completed",
                 },
             },
+        )
+
+    async def _pending_batch_unresolved(
+        self, context_id: str
+    ) -> list[dict[str, Any]]:
+        """Return the interrupted AIMessage's tool calls that still lack results.
+
+        Only the most recent AIMessage that still has unresolved tool calls is
+        considered: those are the ones ToolNode aborted before recording a
+        result, and they must all be resolved before the graph can resume.
+        """
+        if self._graph is None:
+            return []
+        graph_config = {"configurable": {"thread_id": context_id}}
+        state = await self._graph.aget_state(graph_config)
+        messages = state.values.get("messages", [])
+        completed_call_ids = {
+            str(message.tool_call_id or "")
+            for message in messages
+            if isinstance(message, ToolMessage)
+        }
+        for message in reversed(messages):
+            if not isinstance(message, AIMessage):
+                continue
+            unresolved = [
+                call
+                for call in message.tool_calls
+                if (call.get("id") or "")
+                and str(call.get("id")) not in completed_call_ids
+            ]
+            if unresolved:
+                return unresolved
+        return []
+
+    async def _inject_tool_message(
+        self, context_id: str, call_id: str, content: str
+    ) -> None:
+        """Append a ToolMessage for a specific tool call id to the checkpoint."""
+        if self._graph is None:
+            return
+        await self._graph.aupdate_state(
+            {"configurable": {"thread_id": context_id}},
+            {"messages": [ToolMessage(content=content, tool_call_id=call_id)]},
+            as_node="tools",
         )
 
     async def _close_pending_tool_call(

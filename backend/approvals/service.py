@@ -126,6 +126,29 @@ class ApprovalService:
         approved = approval["status"] == "approved"
         execution_failed = result.get("state") in {"failed", "error"}
         succeeded = approved and not execution_failed
+
+        # Serial multi-write approvals: executing one approved write can drive
+        # the agent to request the NEXT approval of the same interrupted batch
+        # (it ends its task in input-required with a new pending action). The
+        # gateway has already persisted that follow-up approval record and set
+        # the run to approval_required. In that case we must NOT finalise the
+        # run here; surface the follow-up approval to the user and keep the run
+        # paused so the next decide() can continue draining the batch.
+        if succeeded and result.get("approval"):
+            followup = result["approval"]
+            persist(
+                RunEventType.APPROVAL_REQUIRED,
+                {"approval": followup},
+            )
+            persist(
+                RunEventType.TASK_STATUS_CHANGED,
+                {"state": "approval_required"},
+            )
+            if task_id:
+                self.repository.update_task(task_id, {"status": "working"})
+            self.repository.update_run_status(run_id, "approval_required")
+            return
+
         tool_call_id = (
             str(tool_call.data.get("tool_call_id") or tool_call.data.get("id") or "")
             if tool_call is not None
