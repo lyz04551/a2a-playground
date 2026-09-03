@@ -41,6 +41,7 @@ test('message, approval, artifact, and terminal events update their normalized c
 
   assert.deepEqual(state.messages, [{ id: 'msg-1', role: 'agent', content: 'Hello', taskId: 'task-1', agentId: '', source: 'host', completed: true }])
   assert.equal(state.approvals[0].id, 'approval-1')
+  assert.equal(state.approvals[0].taskId, 'task-1')
   assert.equal(state.artifacts[0].name, 'plan.yaml')
   assert.equal(state.run.status, 'completed')
 })

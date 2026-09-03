@@ -310,7 +310,15 @@ function reduceNormalizedEvent(state, event) {
   }
   if (event.type === 'approval.required') {
     const approval = data.approval || data
-    return { ...state, approvals: upsertById(state.approvals, approval), run: { ...state.run, status: 'approval_required' } }
+    return {
+      ...state,
+      approvals: upsertById(state.approvals, {
+        ...approval,
+        taskId: approval.taskId || approval.task_id || event.task_id,
+        parentTaskId: approval.parentTaskId || approval.parent_task_id || event.parent_task_id,
+      }),
+      run: { ...state.run, status: 'approval_required' },
+    }
   }
   if (event.type === 'approval.decided') {
     const id = data.id || data.approval_id
@@ -381,6 +389,10 @@ export function restoreRunEventState({ run = null, messages = [], approvals = []
     tasksById[task.id] = { ...(tasksById[task.id] || {}), ...task }
     if (!taskOrder.includes(task.id)) taskOrder.push(task.id)
   }
-  const restored = { ...state, run: { ...(state.run || {}), ...(run || {}) }, messages: messages.length ? messages : state.messages, approvals: approvals.length ? approvals : state.approvals, tasksById, taskOrder }
+  const restoredApprovals = approvals.reduce(
+    (items, approval) => upsertById(items, approval),
+    state.approvals,
+  )
+  const restored = { ...state, run: { ...(state.run || {}), ...(run || {}) }, messages: messages.length ? messages : state.messages, approvals: restoredApprovals, tasksById, taskOrder }
   return { ...restored, ...adaptRunStateForLegacy(restored) }
 }
