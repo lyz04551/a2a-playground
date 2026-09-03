@@ -40,6 +40,12 @@ export function diffArguments(previous = {}, current = {}) {
     })
 }
 
+export function formatArgumentValue(value) {
+  if (value === undefined) return '—'
+  if (typeof value === 'string') return value
+  return JSON.stringify(value, null, 2)
+}
+
 export function approvalRisk(approval = {}) {
   const explicit = approval.risk || approval.risk_level || approval.riskLevel
   if (explicit) return String(explicit).toLowerCase()

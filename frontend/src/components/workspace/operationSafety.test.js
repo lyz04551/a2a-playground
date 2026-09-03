@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { approvalRisk, diffArguments, redactSensitive } from './operationSafety.js'
+import { approvalRisk, diffArguments, formatArgumentValue, redactSensitive } from './operationSafety.js'
 
 test('recursively redacts sensitive values without mutating input', () => {
   const input = { token: 'one', nested: { api_key: 'two', safe: 3 }, rows: [{ password: 'three' }] }
@@ -14,6 +14,14 @@ test('approval argument diff reports added removed and changed paths', () => {
     { path: 'old', kind: 'removed', before: true, after: undefined },
     { path: 'replicas', kind: 'changed', before: 1, after: 2 },
   ])
+})
+
+test('formats multiline manifest values without escaped newline sequences', () => {
+  const manifest = 'apiVersion: v1\nkind: Pod\nmetadata:\n  name: nginx'
+
+  assert.equal(formatArgumentValue(manifest), manifest)
+  assert.equal(formatArgumentValue({ image: 'nginx:1.25' }), '{\n  "image": "nginx:1.25"\n}')
+  assert.equal(formatArgumentValue(undefined), '—')
 })
 
 test('approval risk respects explicit values and detects destructive tools', () => {

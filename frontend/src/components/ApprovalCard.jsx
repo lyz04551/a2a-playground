@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { Button, Tag } from 'antd'
 import { CheckOutlined, CloseOutlined, SafetyCertificateOutlined } from '@ant-design/icons'
-import { approvalRisk, diffArguments, redactSensitive } from './workspace/operationSafety'
+import { approvalRisk, diffArguments, formatArgumentValue, redactSensitive } from './workspace/operationSafety'
 
 export default function ApprovalCard({ approval, previousApproval, onDecide, language = 'zh-CN' }) {
   const [submitting, setSubmitting] = useState('')
@@ -33,7 +33,19 @@ export default function ApprovalCard({ approval, previousApproval, onDecide, lan
       <pre>{JSON.stringify(redactSensitive(approval.arguments || {}), null, 2)}</pre>
       {previousApproval && <details className="approval-card__diff" open={differences.length > 0}>
         <summary>{zh ? `与上次请求相比（${differences.length} 项变化）` : `Compared with previous request (${differences.length} changes)`}</summary>
-        {differences.length === 0 ? <p>{zh ? '参数未变化。' : 'No argument changes.'}</p> : <ul>{differences.map(item => <li key={item.path} className={`is-${item.kind}`}><code>{item.path}</code><span>{item.kind === 'added' ? '+ ' : item.kind === 'removed' ? '− ' : '↻ '}{JSON.stringify(item.before)} → {JSON.stringify(item.after)}</span></li>)}</ul>}
+        {differences.length === 0 ? <p>{zh ? '参数未变化。' : 'No argument changes.'}</p> : (
+          <ul className="approval-card__diff-list">
+            {differences.map(item => (
+              <li key={item.path} className={`is-${item.kind}`}>
+                <code>{item.path}</code>
+                <div className="approval-card__diff-value">
+                  {item.kind !== 'added' && <section><small>{zh ? '之前' : 'Before'}</small><pre>{formatArgumentValue(item.before)}</pre></section>}
+                  {item.kind !== 'removed' && <section><small>{zh ? '现在' : 'After'}</small><pre>{formatArgumentValue(item.after)}</pre></section>}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
       </details>}
       {status === 'pending' && (
         <div className="approval-card__actions">
