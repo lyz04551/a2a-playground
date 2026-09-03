@@ -172,3 +172,21 @@ export async function streamRun(command, handlers = {}, options = {}) {
     return { lastSequence }
   }
 }
+
+export async function catchUpAndStreamRun(command, handlers = {}, options = {}) {
+  const runId = command.run_id || command.runId
+  const initialSequence = Number(command.after_sequence ?? command.afterSequence) || 0
+  const persisted = await options.loadEvents(runId, initialSequence)
+  let latestSequence = initialSequence
+  for (const event of persisted) {
+    if (Number.isFinite(event?.sequence)) {
+      latestSequence = Math.max(latestSequence, event.sequence)
+    }
+    handlers.onEvent?.(event)
+  }
+  return streamRun(
+    { ...command, run_id: runId, after_sequence: latestSequence },
+    handlers,
+    options,
+  )
+}

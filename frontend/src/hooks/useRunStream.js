@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import * as api from '../api/api'
-import { streamRun } from '../api/runStream'
+import { catchUpAndStreamRun, streamRun } from '../api/runStream'
 import { emptyRunState, reduceRunEvent, restoreRunEventState } from '../state/runEvents'
 import { buildRunReconnectCommand, restoreWorkspaceState, selectLatestConversationRun } from '../components/workspace/workspaceState'
 
@@ -107,12 +107,12 @@ export default function useRunStream({ initialMode = 'auto', initialAgentId = ''
     const controller = new AbortController(); abortRef.current = controller
     setLoading(true); setError(''); setConnection({ state: 'connecting', attempt: 0 })
     try {
-      await streamRun(command, {
+      await catchUpAndStreamRun(command, {
         onEvent: event => dispatch({ type: 'event', event }),
         onError: cause => setError(cause.message || 'The run stream was interrupted.'),
         onReconnect: ({ attempt }) => setConnection({ state: 'reconnecting', attempt }),
         onConnectionChange: next => setConnection(next),
-      }, { signal: controller.signal })
+      }, { signal: controller.signal, loadEvents: api.listRunEvents })
     } catch (cause) {
       if (cause.name !== 'AbortError') {
         setError(cause.message || 'Unable to follow the resumed run.')

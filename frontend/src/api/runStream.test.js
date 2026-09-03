@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createSSEParser, streamRun } from './runStream.js'
+import { catchUpAndStreamRun, createSSEParser, streamRun } from './runStream.js'
 
 const encoder = new TextEncoder()
 
@@ -124,6 +124,32 @@ test('stream client reconnects network interruptions with the last received sequ
     { mode: 'auto', message: 'inspect' },
     { mode: 'auto', message: 'inspect', run_id: 'run-1', after_sequence: 7 },
   ])
+})
+
+test('approval follow-up replays persisted events before opening the live stream', async () => {
+  const received = []
+  const bodies = []
+  const completed = envelope('evt-completed', 50, 'tool.completed', { tool_call_id: 'call-write' })
+  const next = envelope('evt-next', 51, 'host.round_started', { round: 3 })
+
+  await catchUpAndStreamRun(
+    { run_id: 'run-1', after_sequence: 48, mode: 'auto', message: 'resume' },
+    { onEvent: event => received.push(event) },
+    {
+      loadEvents: async (runId, afterSequence) => {
+        assert.equal(runId, 'run-1')
+        assert.equal(afterSequence, 48)
+        return [completed]
+      },
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(init.body))
+        return response([`data: ${JSON.stringify(next)}\n\n`])
+      },
+    },
+  )
+
+  assert.deepEqual(received.map(event => event.sequence), [50, 51])
+  assert.equal(bodies[0].after_sequence, 50)
 })
 
 test('stream client does not reconnect an aborted request', async () => {
