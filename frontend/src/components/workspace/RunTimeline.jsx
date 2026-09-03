@@ -9,7 +9,7 @@ import {
   RobotOutlined,
 } from '@ant-design/icons'
 import { buildToolDetails, groupToolCalls, statusLabel } from './taskDetails'
-import { buildRoundTimeline } from './roundTimeline'
+import { buildRoundTimeline, roundDisplayText } from './roundTimeline'
 import { formatAgentOutput } from './agentOutput'
 
 function StatusIcon({ status }) {
@@ -94,7 +94,7 @@ export default function RunTimeline({ run = {}, tasks = [], rounds = [], onTaskS
       {timelineItems.map(item => item.kind === 'decision' ? (
         <li className={`run-timeline__node is-decision status-${item.round.status || 'working'}`} key={item.id}>
           <span className="run-timeline__rail"><NodeIndexOutlined /></span>
-          <section><strong>{zh ? `Host 第 ${item.round.round} 轮决策` : `Host decision round ${item.round.round}`}</strong><span>{item.round.reason}</span><small>{statusLabel(item.round.status || item.round.action, zh)}</small></section>
+          <section><strong>{zh ? `Host 第 ${item.round.round} 轮决策` : `Host decision round ${item.round.round}`}</strong><span>{roundDisplayText(item.round, zh)}</span><small>{statusLabel(item.round.status || item.round.action, zh)}</small></section>
         </li>
       ) : (
         <React.Fragment key={item.id}>

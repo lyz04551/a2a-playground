@@ -1,3 +1,8 @@
+export function roundDisplayText(round = {}, zh = false) {
+  if (round.reason) return round.reason
+  return zh ? '正在分析下一步…' : 'Analyzing the next step…'
+}
+
 export function buildRoundTimeline(tasks = [], rounds = []) {
   if (!rounds.length) {
     return tasks.map(task => ({ kind: 'task', id: task.id, task }))

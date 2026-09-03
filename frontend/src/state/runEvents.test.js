@@ -127,6 +127,23 @@ test('merges tool completion by tool_call_id and derives its duration', () => {
   })
 })
 
+test('terminal task event closes an orphaned working tool from an approval resume', () => {
+  let state = reduceRunEvent(emptyRunState, event('tool.called', 1, {
+    tool_call_id: 'call-write', tool: 'apply_k8s_yaml', arguments: { yaml: 'kind: Pod' },
+  }, { timestamp: '2026-09-03T10:00:00Z' }))
+
+  state = reduceRunEvent(state, event('task.completed', 2, {
+    result: 'Pod/nginx-secure-002 created',
+  }, { timestamp: '2026-09-03T10:00:28Z' }))
+
+  assert.deepEqual(state.tasksById['task-1'].tools[0], {
+    id: 'call-write', name: 'apply_k8s_yaml', arguments: { yaml: 'kind: Pod' },
+    status: 'completed', result: 'Pod/nginx-secure-002 created',
+    startedAt: '2026-09-03T10:00:00.000Z',
+    completedAt: '2026-09-03T10:00:28.000Z', durationMs: 28000,
+  })
+})
+
 test('failed tasks retain error details and completed tasks survive interruption', () => {
   let state = reduceRunEvent(emptyRunState, event('task.completed', 1, { result: 'healthy' }, { task_id: 'task-ok' }))
   state = reduceRunEvent(state, event('task.failed', 2, { error: { message: 'timeout', code: 'ETIMEDOUT' } }, { task_id: 'task-bad' }))

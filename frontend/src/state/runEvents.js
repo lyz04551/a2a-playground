@@ -233,9 +233,23 @@ function reduceNormalizedEvent(state, event) {
     const completedAt = normalizeTimestamp(event.timestamp)
     const startedMs = task?.startedAt ? Date.parse(task.startedAt) : NaN
     const completedMs = completedAt ? Date.parse(completedAt) : NaN
+    const terminalStatus = event.type === 'task.completed' ? 'completed' : 'failed'
+    const tools = (task?.tools || []).map(tool => {
+      if (['completed', 'failed'].includes(tool.status)) return tool
+      const toolStartedMs = tool.startedAt ? Date.parse(tool.startedAt) : NaN
+      return {
+        ...tool,
+        status: terminalStatus,
+        completedAt,
+        ...(Number.isFinite(toolStartedMs) && Number.isFinite(completedMs) ? { durationMs: Math.max(0, completedMs - toolStartedMs) } : {}),
+        ...(event.type === 'task.completed' && data.result !== undefined ? { result: data.result } : {}),
+        ...(event.type === 'task.failed' && data.error !== undefined ? { error: data.error } : {}),
+      }
+    })
     return updateTask(state, event, {
-      status: event.type === 'task.completed' ? 'completed' : 'failed',
+      status: terminalStatus,
       completedAt,
+      ...(task?.tools?.length ? { tools } : {}),
       ...(Number.isFinite(startedMs) && Number.isFinite(completedMs) ? { durationMs: Math.max(0, completedMs - startedMs) } : {}),
       ...(event.type === 'task.completed' ? { result: data.result } : { error: data.error }),
     })

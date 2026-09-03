@@ -1,6 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildRoundTimeline } from './roundTimeline.js'
+import { buildRoundTimeline, roundDisplayText } from './roundTimeline.js'
+
+test('shows live analysis text before a Host decision is available', () => {
+  assert.equal(roundDisplayText({ status: 'working' }, true), '正在分析下一步…')
+  assert.equal(roundDisplayText({ status: 'working' }, false), 'Analyzing the next step…')
+  assert.equal(roundDisplayText({ status: 'completed', reason: '需要验证 Pod' }, true), '需要验证 Pod')
+})
 
 test('groups parallel tasks under their react decision and appends later rounds', () => {
   const items = buildRoundTimeline(
