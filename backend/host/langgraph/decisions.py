@@ -59,6 +59,10 @@ Agent IDs and declared capabilities. Never repeat semantic work or a rejected
 write. A Kubernetes mutation requires a successful Security precheck observation;
 mutation and verification must never be delegated in the same round. Wait for a
 successful mutation observation, then delegate Ops verification in the next round. Return
+If verification proves the resource unhealthy or the write did not take effect,
+one corrective mutation is allowed. For an existing Kubernetes Pod whose immutable
+spec must change, instruct the write Agent to delete and recreate it; both writes
+must go through formal approval. Verify again after the correction. Return
 only a concise public reason. The Host must never ask for write approval in text;
 approval is created only by a delegated Agent's write tool.
 Do not reveal hidden chain-of-thought."""

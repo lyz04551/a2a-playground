@@ -88,16 +88,27 @@ def validate_decision(
                 raise PlanValidationError(
                     f"mutation task '{task.id}' must declare risk write"
                 )
-            previous_mutation = next((
+            previous_mutations = [
                 observed
                 for observed in state.observations.values()
                 if observed.task.workflow_role == "mutation"
-            ), None)
-            if previous_mutation is not None:
+            ]
+            completed_verification = any(
+                observed.task.workflow_role == "verification"
+                and observed.evaluation.outcome == "sufficient"
+                and task_id in state.successful
+                for task_id, observed in state.observations.items()
+            )
+            if previous_mutations and not completed_verification:
                 raise PlanValidationError(
                     f"mutation already attempted by task "
-                    f"'{previous_mutation.task.id}'; do not create a new "
-                    "mutation task in a later round"
+                    f"'{previous_mutations[0].task.id}'; verify its result "
+                    "before a corrective mutation"
+                )
+            if len(previous_mutations) >= 2:
+                raise PlanValidationError(
+                    "corrective mutation limit reached; stop instead of "
+                    "repeating writes"
                 )
             security_passed = any(
                 observed.task.workflow_role == "precheck"

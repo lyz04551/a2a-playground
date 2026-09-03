@@ -385,6 +385,34 @@ def test_react_rejects_second_mutation_after_prior_attempt_with_new_task_id():
         validate_decision(decision, AGENTS, state)
 
 
+def test_react_accepts_one_corrective_mutation_after_verification():
+    security = task("security", "k8s-security", workflow_role="precheck")
+    mutation = task(
+        "create", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    verification = task("verify", "k8s-ops", workflow_role="verification")
+    state = HostRunState(
+        goal="deploy nginx",
+        observations={
+            security.id: observed(security),
+            mutation.id: observed(mutation),
+            verification.id: observed(verification),
+        },
+        successful={security.id, mutation.id, verification.id},
+    )
+    corrective = task(
+        "recreate", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+
+    assert validate_decision(
+        HostDecision(action="delegate", reason="Repair", tasks=[corrective]),
+        AGENTS,
+        state,
+    )
+
+
 def test_react_rejects_verification_in_same_round_as_unfinished_mutation():
     security = task(
         "security", "k8s-security", workflow_role="precheck"
