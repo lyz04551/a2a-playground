@@ -176,17 +176,36 @@ export async function streamRun(command, handlers = {}, options = {}) {
 export async function catchUpAndStreamRun(command, handlers = {}, options = {}) {
   const runId = command.run_id || command.runId
   const initialSequence = Number(command.after_sequence ?? command.afterSequence) || 0
-  const persisted = await options.loadEvents(runId, initialSequence)
   let latestSequence = initialSequence
-  for (const event of persisted) {
+  let polling = false
+  const deliver = event => {
     if (Number.isFinite(event?.sequence)) {
       latestSequence = Math.max(latestSequence, event.sequence)
     }
     handlers.onEvent?.(event)
   }
-  return streamRun(
-    { ...command, run_id: runId, after_sequence: latestSequence },
-    handlers,
-    options,
-  )
+  const poll = async () => {
+    if (polling || options.signal?.aborted) return
+    polling = true
+    try {
+      const persisted = await options.loadEvents(runId, latestSequence)
+      persisted.forEach(deliver)
+    } finally {
+      polling = false
+    }
+  }
+
+  await poll()
+  const pollIntervalMs = options.pollIntervalMs ?? 500
+  const pollTimer = setInterval(() => { void poll() }, pollIntervalMs)
+  try {
+    return await streamRun(
+      { ...command, run_id: runId, after_sequence: latestSequence },
+      { ...handlers, onEvent: deliver },
+      options,
+    )
+  } finally {
+    clearInterval(pollTimer)
+    await poll()
+  }
 }

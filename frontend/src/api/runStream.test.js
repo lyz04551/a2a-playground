@@ -129,6 +129,7 @@ test('stream client reconnects network interruptions with the last received sequ
 test('approval follow-up replays persisted events before opening the live stream', async () => {
   const received = []
   const bodies = []
+  const cursors = []
   const completed = envelope('evt-completed', 50, 'tool.completed', { tool_call_id: 'call-write' })
   const next = envelope('evt-next', 51, 'host.round_started', { round: 3 })
 
@@ -138,8 +139,8 @@ test('approval follow-up replays persisted events before opening the live stream
     {
       loadEvents: async (runId, afterSequence) => {
         assert.equal(runId, 'run-1')
-        assert.equal(afterSequence, 48)
-        return [completed]
+        cursors.push(afterSequence)
+        return afterSequence === 48 ? [completed] : []
       },
       fetch: async (_url, init) => {
         bodies.push(JSON.parse(init.body))
@@ -149,7 +150,38 @@ test('approval follow-up replays persisted events before opening the live stream
   )
 
   assert.deepEqual(received.map(event => event.sequence), [50, 51])
+  assert.deepEqual(cursors, [48, 51])
   assert.equal(bodies[0].after_sequence, 50)
+})
+
+test('approval follow-up polls persisted events while the live stream is quiet', async () => {
+  const received = []
+  let reads = 0
+  let releaseStream
+  const quietStream = new Promise(resolve => { releaseStream = resolve })
+
+  const following = catchUpAndStreamRun(
+    { run_id: 'run-1', after_sequence: 48, mode: 'auto', message: 'resume' },
+    { onEvent: event => received.push(event) },
+    {
+      pollIntervalMs: 5,
+      loadEvents: async () => {
+        reads += 1
+        return reads === 2
+          ? [envelope('evt-completed', 49, 'tool.completed')]
+          : []
+      },
+      fetch: async () => {
+        await quietStream
+        return response([])
+      },
+    },
+  )
+
+  await new Promise(resolve => setTimeout(resolve, 20))
+  assert.deepEqual(received.map(event => event.sequence), [49])
+  releaseStream()
+  await following
 })
 
 test('stream client does not reconnect an aborted request', async () => {
