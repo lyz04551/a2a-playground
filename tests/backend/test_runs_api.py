@@ -193,6 +193,66 @@ async def test_auto_approval_endpoint_returns_before_execution_and_deduplicates(
     assert resumed[0][1]["text"] == "Pod created"
 
 
+@pytest.mark.anyio
+async def test_followup_approval_is_not_saved_as_host_summary(monkeypatch):
+    followup = {
+        "id": "approval-2",
+        "tool_name": "delete_k8s_pod",
+        "arguments": {"name": "nginx-2", "namespace": "default"},
+    }
+
+    class Repository:
+        def claim_approval_decision(self, approval_id, decision):
+            return {
+                "id": approval_id,
+                "run_id": "run-1",
+                "agent_id": "ops",
+                "tool_name": "delete_k8s_pod",
+                "arguments": {"name": "nginx-1", "namespace": "default"},
+                "action_digest": "a" * 64,
+                "status": decision,
+            }, True
+
+        def get_run(self, run_id):
+            return {"id": run_id, "mode": "direct"}
+
+    async def execute_claimed(_self, approval):
+        return {
+            "approval": approval,
+            "result": {
+                "state": "input-required",
+                "text": "Approval required for delete_k8s_pod",
+                "approval": followup,
+            },
+        }
+
+    monkeypatch.setattr(
+        "backend.api.runs.ApprovalService.execute_claimed", execute_claimed
+    )
+
+    class Service:
+        def __init__(self):
+            self.repository = Repository()
+            self.saved = []
+
+        def save_assistant_message(self, run_id, text, **kwargs):
+            self.saved.append(text)
+
+    service = Service()
+    app = FastAPI()
+    app.include_router(create_approval_router(service, object(), object()))
+
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post("/api/approvals/decide", json={
+            "approval_id": "approval-1", "decision": "approved",
+        })
+
+    assert response.json()["result"]["result"]["approval"] == followup
+    assert service.saved == []
+
+
 def make_app(tmp_path):
     from backend.api.runs import create_router
 

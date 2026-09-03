@@ -328,7 +328,12 @@ def create_approval_router(
                         f"- MCP 结果：{result_text}"
                     )
                     execution["text"] = result_text
-            if result_text:
+            # ``result_text`` on an input-required continuation is only the
+            # A2A status message (for example, "Approval required for …"),
+            # not a completed-operation summary.  The next checkpoint already
+            # carries this state, so do not persist the placeholder as a Host
+            # message.
+            if result_text and not followup_required:
                 run_service.save_assistant_message(
                     approval["run_id"],
                     result_text,
