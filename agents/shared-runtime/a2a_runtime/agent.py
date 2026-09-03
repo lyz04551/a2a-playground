@@ -56,6 +56,7 @@ class RuntimeMCPAgent:
             config.mcp_url, transport=config.mcp_transport
         )
         self._model = model
+        self._batch_results_by_context: dict[str, dict[str, str]] = {}
         self.checkpoint_database_url = (
             os.getenv("AGENT_CHECKPOINT_DATABASE_URL", "")
             if checkpoint_database_url is None
@@ -469,7 +470,6 @@ class RuntimeMCPAgent:
             )
             return
         self._pending_by_context.pop(context_id, None)
-        await self._close_pending_tool_call(context_id, pending, str(result))
         async for event in self._settle_interrupted_batch(
             context_id, pending, result
         ):
@@ -510,7 +510,18 @@ class RuntimeMCPAgent:
         ToolNode never reached is executed now. Only once every call in the
         interrupted AIMessage has a ToolMessage is a terminal event emitted.
         """
-        parts = [str(result)]
+        batch_results = self._batch_results_by_context.setdefault(context_id, {})
+        calls, completed_call_ids = await self._pending_batch_calls(context_id)
+        current_call = next((
+            call for call in calls
+            if call.get("name") == pending.tool_name
+            and call.get("args", {}) == pending.arguments
+            and str(call.get("id") or "") not in completed_call_ids
+            and str(call.get("id") or "") not in batch_results
+        ), None)
+        if current_call is not None:
+            batch_results[str(current_call["id"])] = str(result)
+        parts = list(batch_results.values())
         evidence = [
             {
                 "tool": pending.tool_name,
@@ -519,7 +530,11 @@ class RuntimeMCPAgent:
             }
         ]
         while True:
-            unresolved = await self._pending_batch_unresolved(context_id)
+            unresolved = [
+                call for call in calls
+                if str(call.get("id") or "") not in completed_call_ids
+                and str(call.get("id") or "") not in batch_results
+            ]
             if not unresolved:
                 break
             call = unresolved[0]
@@ -543,9 +558,7 @@ class RuntimeMCPAgent:
                 )
             except Exception as exc:
                 sibling_result = f"工具执行失败：{exc}"
-            await self._inject_tool_message(
-                context_id, call_id, str(sibling_result)
-            )
+            batch_results[call_id] = str(sibling_result)
             parts.append(str(sibling_result))
             evidence.append(
                 {
@@ -554,6 +567,11 @@ class RuntimeMCPAgent:
                     "result": sibling_result,
                 }
             )
+        await self._inject_tool_messages(context_id, [
+            ToolMessage(content=value, tool_call_id=call_id)
+            for call_id, value in batch_results.items()
+        ])
+        self._batch_results_by_context.pop(context_id, None)
         content = "\n\n".join(parts)
         yield RuntimeEvent.completed(
             content=content,
@@ -600,6 +618,36 @@ class RuntimeMCPAgent:
             if unresolved:
                 return unresolved
         return []
+
+    async def _pending_batch_calls(
+        self, context_id: str
+    ) -> tuple[list[dict[str, Any]], set[str]]:
+        if self._graph is None:
+            return [], set()
+        state = await self._graph.aget_state(
+            {"configurable": {"thread_id": context_id}}
+        )
+        messages = state.values.get("messages", [])
+        completed = {
+            str(message.tool_call_id or "")
+            for message in messages
+            if isinstance(message, ToolMessage)
+        }
+        for message in reversed(messages):
+            if isinstance(message, AIMessage) and message.tool_calls:
+                return list(message.tool_calls), completed
+        return [], completed
+
+    async def _inject_tool_messages(
+        self, context_id: str, messages: list[ToolMessage]
+    ) -> None:
+        if self._graph is None or not messages:
+            return
+        await self._graph.aupdate_state(
+            {"configurable": {"thread_id": context_id}},
+            {"messages": messages},
+            as_node="tools",
+        )
 
     async def _inject_tool_message(
         self, context_id: str, call_id: str, content: str

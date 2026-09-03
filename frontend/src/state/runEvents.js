@@ -326,8 +326,21 @@ function reduceNormalizedEvent(state, event) {
   }
   if (event.type === 'approval.required') {
     const approval = data.approval || data
+    const task = event.task_id ? state.tasksById[event.task_id] : null
+    const tools = (task?.tools || []).map(tool => {
+      const sameTool = tool.name === (approval.tool_name || approval.toolName)
+      const sameArguments = JSON.stringify(tool.arguments || {}) === JSON.stringify(approval.arguments || {})
+      if (sameTool && sameArguments && !['completed', 'failed'].includes(tool.status)) {
+        return { ...tool, status: 'approval_required' }
+      }
+      return tool.status === 'working' ? { ...tool, status: 'waiting' } : tool
+    })
+    const tasksById = task
+      ? { ...state.tasksById, [event.task_id]: { ...task, tools } }
+      : state.tasksById
     return {
       ...state,
+      tasksById,
       approvals: upsertById(state.approvals, {
         ...approval,
         taskId: approval.taskId || approval.task_id || event.task_id,

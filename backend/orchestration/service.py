@@ -288,6 +288,10 @@ class RunService:
                 return []
 
             execution_state = str(execution.get("state") or "").lower()
+            if execution_state == "input-required" and execution.get("approval"):
+                return self._record_followup_approval(
+                    run, paused, approval, execution["approval"]
+                )
             if execution_state not in {"completed", "failed", "error"}:
                 return []
 
@@ -519,6 +523,63 @@ class RunService:
                     data={},
                 ))
             return emitted
+
+    def _record_followup_approval(
+        self,
+        run: dict[str, Any],
+        paused: dict[str, Any],
+        approval: dict[str, Any],
+        followup: dict[str, Any],
+    ) -> list[RunEvent]:
+        """Close one approved call and expose the next call in its batch."""
+        run_id = run["id"]
+        persisted = self.repository.list_run_events(run_id)
+        sequence = persisted[-1].sequence + 1 if persisted else 1
+        emitted: list[RunEvent] = []
+
+        def persist(event_type: RunEventType, data: dict[str, Any]) -> None:
+            nonlocal sequence
+            saved = self._persist_event(RunEvent.create(
+                event_type=event_type,
+                run_id=run_id,
+                conversation_id=run["conversation_id"],
+                sequence=sequence,
+                task_id=paused["id"],
+                parent_task_id=paused.get("parent_task_id"),
+                data={"agent_id": approval["agent_id"], **data},
+            ))
+            self._apply_checkpoint_event(saved)
+            self._apply_task_event(saved)
+            emitted.append(saved)
+            sequence = saved.sequence + 1
+
+        persist(RunEventType.APPROVAL_DECIDED, {
+            "approval_id": approval["id"],
+            "decision": approval["status"],
+        })
+        completed_ids = {
+            str(event.data.get("tool_call_id") or event.data.get("id") or "")
+            for event in persisted if event.type == RunEventType.TOOL_COMPLETED
+        }
+        tool_call = next((
+            event for event in reversed(persisted)
+            if event.type == RunEventType.TOOL_CALLED
+            and event.task_id == paused["id"]
+            and str(event.data.get("tool_call_id") or event.data.get("id") or "") not in completed_ids
+            and (event.data.get("tool") or event.data.get("tool_name")) == approval["tool_name"]
+            and (event.data.get("arguments") or event.data.get("args") or {}) == approval["arguments"]
+        ), None)
+        if tool_call is not None:
+            persist(RunEventType.TOOL_COMPLETED, {
+                "tool_call_id": str(tool_call.data.get("tool_call_id") or tool_call.data.get("id") or ""),
+                "tool": approval["tool_name"],
+                "result": "已批准的操作执行完成，等待下一项审批。",
+            })
+        persist(RunEventType.APPROVAL_REQUIRED, {"approval": followup})
+        persist(RunEventType.TASK_STATUS_CHANGED, {"state": "approval_required"})
+        self.repository.update_task(paused["id"], {"status": "approval_required"})
+        self.repository.update_run_status(run_id, "approval_required")
+        return emitted
 
     def _host_checkpoint(self, run_id: str) -> dict[str, Any]:
         run = self.repository.get_run(run_id) or {}
