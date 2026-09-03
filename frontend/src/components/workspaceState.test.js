@@ -17,6 +17,9 @@ test('system status maps distinct operational states to accessible labels and ic
   assert.deepEqual(getSystemStatus({ state: 'running' }), {
     label: 'Run in progress', icon: 'running', tone: 'orchestration',
   })
+  assert.deepEqual(getSystemStatus({ state: 'planning' }), {
+    label: 'Run in progress', icon: 'running', tone: 'orchestration',
+  })
   assert.deepEqual(getSystemStatus({ state: 'approval_required' }), {
     label: 'Approval required', icon: 'approval', tone: 'approval',
   })

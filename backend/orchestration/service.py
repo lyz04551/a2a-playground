@@ -50,7 +50,13 @@ class RunService:
             asyncio.get_running_loop().create_task(notify())
         return persisted
 
-    async def wait_for_events(self, run_id: str, generation: int, timeout: float = 15.0) -> int:
+    async def wait_for_events(self, run_id: str, generation: int, timeout: float = 1.0) -> int:
+        """Wait briefly for an event notification, then recheck durable storage.
+
+        Notifications are only an optimization: approval execution can race with a
+        reconnecting SSE subscriber, so the short timeout bounds how long already
+        persisted events can remain invisible in the browser.
+        """
         current = self._event_generations.get(run_id, 0)
         if current != generation:
             return current

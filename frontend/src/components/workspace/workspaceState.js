@@ -2,6 +2,7 @@ const statusByState = {
   offline: { label: 'Agent offline', icon: 'offline', tone: 'muted' },
   missing_model: { label: 'Model configuration required', icon: 'settings', tone: 'approval' },
   running: { label: 'Run in progress', icon: 'running', tone: 'orchestration' },
+  planning: { label: 'Run in progress', icon: 'running', tone: 'orchestration' },
   approval_required: { label: 'Approval required', icon: 'approval', tone: 'approval' },
   failed: { label: 'Run failed', icon: 'failure', tone: 'danger' },
   completed: { label: 'Run completed', icon: 'success', tone: 'primary' },

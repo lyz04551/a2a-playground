@@ -296,6 +296,14 @@ async def test_stream_reconnect_replays_original_run_without_creating_another(tm
     assert len(repository.list_runs()) == 1
 
 
+def test_reconnect_event_polling_has_a_short_fallback_interval():
+    """A missed in-process notification must not leave the UI stale for 15s."""
+    import inspect
+
+    timeout = inspect.signature(RunService.wait_for_events).parameters["timeout"].default
+    assert timeout <= 1.0
+
+
 @pytest.mark.anyio
 async def test_run_query_replay_and_cancel_endpoints(tmp_path):
     app, repository, service = make_app(tmp_path)
