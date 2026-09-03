@@ -99,7 +99,23 @@ function reduceNormalizedEvent(state, event) {
     return { ...state, run: { id: event.run_id, conversationId: event.conversation_id, status: 'running', ...data } }
   }
   if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
-    return { ...state, run: { ...state.run, id: event.run_id, status: event.type.slice(4), ...data } }
+    const terminalStatus = event.type.slice(4)
+    const roundsByNumber = Object.fromEntries(Object.entries(state.roundsByNumber).map(([round, value]) => [
+      round,
+      value.status === 'working' ? { ...value, status: terminalStatus } : value,
+    ]))
+    const tasksById = Object.fromEntries(Object.entries(state.tasksById).map(([id, task]) => [
+      id,
+      ['working', 'delegated', 'retrying'].includes(task.status)
+        ? { ...task, status: terminalStatus }
+        : task,
+    ]))
+    return {
+      ...state,
+      run: { ...state.run, id: event.run_id, status: terminalStatus, ...data },
+      roundsByNumber,
+      tasksById,
+    }
   }
   if (event.type === 'stream.interrupted') {
     return { ...state, run: { ...state.run, id: event.run_id || state.run?.id, status: 'interrupted', ...data } }

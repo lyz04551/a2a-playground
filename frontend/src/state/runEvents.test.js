@@ -54,6 +54,17 @@ test('duplicate envelopes leave normalized state unchanged', () => {
   assert.strictEqual(twice, once)
 })
 
+test('terminal run failure closes an unfinished host round and active task', () => {
+  let state = reduceRunEvent(emptyRunState, event('run.started', 1))
+  state = reduceRunEvent(state, event('host.round_started', 2, { round: 5 }))
+  state = reduceRunEvent(state, event('task.started', 3, { agent_id: 'ops' }, { task_id: 'task-active' }))
+  state = reduceRunEvent(state, event('run.failed', 4, { error: 'Unable to create a valid Host decision' }, { task_id: null }))
+
+  assert.equal(state.roundsByNumber[5].status, 'failed')
+  assert.equal(state.tasksById['task-active'].status, 'failed')
+  assert.equal(state.run.status, 'failed')
+})
+
 test('status events retain task metadata when they omit it', () => {
   let state = reduceRunEvent(emptyRunState, event('task.delegated', 1, {
     agent_id: 'ops', label: 'Inspect cluster',
