@@ -41,10 +41,10 @@ def test_agent_configs_have_unique_stable_ids_and_urls(monkeypatch):
 def test_agent_configs_declare_orchestration_capabilities(monkeypatch):
     ops, orchestrator, security = load_configs(monkeypatch)
 
-    assert ops.read_only is False
+    assert ops.read_only is True
     assert security.read_only is True
     assert orchestrator.read_only is False
-    assert ops.risk_level == "write_approval"
+    assert ops.risk_level == "read_only"
     assert orchestrator.risk_level == "write_approval"
     assert "mutation requires approval" in orchestrator.limitations
 
@@ -85,10 +85,11 @@ def test_security_is_read_only_and_ops_only_approval_gates_pod_debug(monkeypatch
         )
 
     ops_policy = ToolPolicy(ops.tool_policy)
-    assert (
-        ops_policy.classify("run_command_in_k8s_pod", {}).action
-        is PolicyAction.APPROVAL_REQUIRED
-    )
+    for tool_name in (
+        "run_command_in_k8s_pod", "upload_file_to_k8s_pod",
+        "delete_pod_file", "delete_k8s_pod",
+    ):
+        assert ops_policy.classify(tool_name, {}).action is PolicyAction.DENY
     assert (
         ToolPolicy(security.tool_policy).classify(
             "run_command_in_k8s_pod", {}
@@ -115,5 +116,5 @@ def test_orchestrator_mutations_require_approval(monkeypatch):
 
     assert (
         policy.classify("run_command_in_k8s_pod", {}).action
-        is PolicyAction.DENY
+        is PolicyAction.APPROVAL_REQUIRED
     )

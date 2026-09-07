@@ -79,7 +79,19 @@ def validate_decision(
     for task in decision.tasks:
         _validate_task_agent(task, agents)
         fingerprint = task_fingerprint(task)
-        if fingerprint in state.task_fingerprints:
+        continues_incomplete_mutation = (
+            task.workflow_role == "mutation"
+            and any(
+                observed.task.workflow_role == "mutation"
+                and observed.evaluation.outcome == "insufficient"
+                and task_fingerprint(observed.task) == fingerprint
+                for observed in state.observations.values()
+            )
+        )
+        if (
+            fingerprint in state.task_fingerprints
+            and not continues_incomplete_mutation
+        ):
             raise PlanValidationError(
                 f"task '{task.id}' is a duplicate semantic task from an earlier round"
             )
@@ -88,10 +100,11 @@ def validate_decision(
                 raise PlanValidationError(
                     f"mutation task '{task.id}' must declare risk write"
                 )
-            previous_mutations = [
+            completed_mutations = [
                 observed
                 for observed in state.observations.values()
                 if observed.task.workflow_role == "mutation"
+                and observed.evaluation.outcome == "sufficient"
             ]
             completed_verification = any(
                 observed.task.workflow_role == "verification"
@@ -99,13 +112,13 @@ def validate_decision(
                 and task_id in state.successful
                 for task_id, observed in state.observations.items()
             )
-            if previous_mutations and not completed_verification:
+            if completed_mutations and not completed_verification:
                 raise PlanValidationError(
                     f"mutation already attempted by task "
-                    f"'{previous_mutations[0].task.id}'; verify its result "
+                    f"'{completed_mutations[0].task.id}'; verify its result "
                     "before a corrective mutation"
                 )
-            if len(previous_mutations) >= 2:
+            if len(completed_mutations) >= 2:
                 raise PlanValidationError(
                     "corrective mutation limit reached; stop instead of "
                     "repeating writes"

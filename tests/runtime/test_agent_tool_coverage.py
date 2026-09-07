@@ -83,7 +83,7 @@ MCP_TOOLS = {
 
 AGENTS = {
     "k8s-orchestrator": (8051, 40, "write_approval"),
-    "k8s-ops": (8052, 20, "write_approval"),
+    "k8s-ops": (8052, 20, "read_only"),
     "k8s-security": (8053, 30, "read_only"),
     "k8s-infrastructure": (8054, 35, "write_approval"),
     "k8s-helm": (8055, 38, "write_approval"),
@@ -197,7 +197,8 @@ def test_mutating_tools_are_never_directly_allowed(monkeypatch):
 @pytest.mark.parametrize(
     ("agent_id", "tool", "expected"),
     [
-        ("k8s-ops", "run_command_in_k8s_pod", PolicyAction.APPROVAL_REQUIRED),
+        ("k8s-ops", "run_command_in_k8s_pod", PolicyAction.DENY),
+        ("k8s-orchestrator", "run_command_in_k8s_pod", PolicyAction.APPROVAL_REQUIRED),
         ("k8s-security", "apply_k8s_yaml", PolicyAction.DENY),
         ("k8s-orchestrator", "delete_k8s_resource", PolicyAction.APPROVAL_REQUIRED),
         ("k8s-infrastructure", "drain_k8s_node", PolicyAction.APPROVAL_REQUIRED),

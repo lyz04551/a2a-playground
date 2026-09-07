@@ -40,6 +40,9 @@ tool_policy:
     - delete_k8s_resource
     - delete_k8s_yaml
     - delete_k8s_pod
+    - run_command_in_k8s_pod
+    - upload_file_to_k8s_pod
+    - delete_pod_file
     - scale_k8s_deployment
     - restart_k8s_deployment
     - restart_k8s_daemonset

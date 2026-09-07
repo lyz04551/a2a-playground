@@ -489,6 +489,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
         by_agent: defaultdict[str, list[_Delegation]] = defaultdict(list)
         accumulated = ""
         awaiting_approval = False
+        host_action = ""
 
         def new_delegation(
             agent_id: str,
@@ -849,6 +850,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                         },
                     )
                 elif event_type == "decision_created":
+                    host_action = str(upstream.get("action") or "")
                     decision_tasks = register_structured_tasks(
                         upstream.get("tasks", [])
                     )
@@ -1119,6 +1121,13 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                             task_id=root_task_id,
                             parent_task_id=None,
                             data={"state": "approval_required"},
+                        )
+                    elif host_action == "stop":
+                        yield builder.create(
+                            RunEventType.TASK_BLOCKED,
+                            task_id=root_task_id,
+                            parent_task_id=None,
+                            data={"reason": accumulated or "Host stopped before the goal was satisfied"},
                         )
                     else:
                         yield builder.create(

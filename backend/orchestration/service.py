@@ -19,6 +19,7 @@ from backend.host.orchestration.models import (
     Evaluation,
     HostPlan,
     HostRunState,
+    PlannedTask,
 )
 
 
@@ -195,6 +196,11 @@ class RunService:
             elif event.type == RunEventType.TASK_FAILED:
                 failure = event
             elif (
+                event.type == RunEventType.TASK_BLOCKED
+                and event.parent_task_id is None
+            ):
+                failure = event
+            elif (
                 event.type == RunEventType.TASK_STATUS_CHANGED
                 and event.data.get("state") == "approval_required"
             ):
@@ -226,7 +232,11 @@ class RunService:
                 run_id=run_id,
                 conversation_id=conversation_id,
                 sequence=next_sequence,
-                data={"error": str(failure.data.get("error") or "Run failed")},
+                data={"error": str(
+                    failure.data.get("error")
+                    or failure.data.get("reason")
+                    or "Run failed"
+                )},
                 task_id=root_task_id,
             )
             yield self._persist_event(terminal)
@@ -296,32 +306,47 @@ class RunService:
                 return []
 
             decision = approval.get("status", "")
-            completed = (
+            execution_succeeded = (
                 decision == "approved"
                 and execution.get("state") not in {"failed", "error"}
             )
             execution_failed = (
-                decision == "approved" and not completed
+                decision == "approved" and not execution_succeeded
             )
             result = DelegationResult(
-                state="completed" if completed else "failed",
+                state="completed" if execution_succeeded else "failed",
                 text=str(execution.get("text") or ""),
                 output=execution.get("specialist_output"),
-                error="" if completed else str(
+                error="" if execution_succeeded else str(
                     execution.get("error")
                     or execution.get("text")
                     or "approval rejected"
                 ),
             )
+            evaluation = Evaluation(
+                outcome=("failed" if execution_failed else "blocked"),
+                reason=result.error or "approval rejected",
+            )
+            if execution_succeeded:
+                task_definition = self._logical_task_definition(run, paused)
+                evaluation = await self.auto_host.evaluate_task(
+                    task_definition.model_dump(), result.model_dump()
+                )
+            task_completed = (
+                execution_succeeded
+                and evaluation.outcome == "sufficient"
+            )
             self.repository.update_task_data(
                 paused["id"],
                 {
                     "status": (
-                        "completed" if completed
+                        "completed" if task_completed
+                        else "working" if execution_succeeded
                         else "failed" if execution_failed
                         else "blocked"
                     ),
                     "delegation_result": result.model_dump(),
+                    "evaluation": evaluation.model_dump(),
                 },
             )
 
@@ -375,7 +400,7 @@ class RunService:
                     ),
                     "tool": approval.get("tool_name", ""),
                 }
-                if completed:
+                if execution_succeeded:
                     tool_result["result"] = result.text
                 else:
                     tool_result["error"] = result.error
@@ -411,7 +436,9 @@ class RunService:
             persist(RunEvent.create(
                 event_type=(
                     RunEventType.TASK_COMPLETED
-                    if completed
+                    if task_completed
+                    else RunEventType.TASK_STATUS_CHANGED
+                    if execution_succeeded
                     else (
                         RunEventType.TASK_FAILED
                         if execution_failed
@@ -425,9 +452,11 @@ class RunService:
                 parent_task_id=paused.get("parent_task_id"),
                 data={
                     "agent_id": approval["agent_id"],
+                    **({"state": "working"} if execution_succeeded and not task_completed else {}),
                     "result": result.text,
                     "reason": result.error,
                     "delegation_result": result.model_dump(),
+                    "evaluation": evaluation.model_dump(),
                 },
             ))
 
@@ -492,6 +521,11 @@ class RunService:
                 ):
                     root_output = str(candidate.data.get("content") or "")
                 elif candidate.type == RunEventType.TASK_FAILED:
+                    failed = True
+                elif (
+                    candidate.type == RunEventType.TASK_BLOCKED
+                    and candidate.parent_task_id is None
+                ):
                     failed = True
                 elif candidate.type == RunEventType.APPROVAL_REQUIRED:
                     awaiting_approval = True
@@ -598,22 +632,36 @@ class RunService:
                 raw_result = stored.get("delegation_result") if stored else None
                 if raw_result and pending_id in state.observations:
                     result = DelegationResult.model_validate(raw_result)
+                    stored_evaluation = stored.get("evaluation") if stored else None
+                    evaluation = (
+                        Evaluation.model_validate(stored_evaluation)
+                        if stored_evaluation
+                        else Evaluation(
+                            outcome=(
+                                "sufficient"
+                                if stored.get("status") == "completed"
+                                and result.state == "completed"
+                                else "blocked"
+                            ),
+                            reason=(
+                                "approved operation completed"
+                                if stored.get("status") == "completed"
+                                else result.error or "approval rejected"
+                            ),
+                        )
+                    )
                     completed = (
                         stored.get("status") == "completed"
                         and result.state == "completed"
+                        and evaluation.outcome == "sufficient"
                     )
                     observed = state.observations[pending_id]
                     observed.result = result
-                    observed.evaluation = Evaluation(
-                        outcome="sufficient" if completed else "blocked",
-                        reason=(
-                            "approved operation completed"
-                            if completed
-                            else result.error or "approval rejected"
-                        ),
-                    )
+                    observed.evaluation = evaluation
                     if completed:
                         state.successful.add(pending_id)
+                    else:
+                        state.successful.discard(pending_id)
                     state.pending_approval_task_id = None
             return {"state": state}
         plan_data = run.get("host_plan") or {}
@@ -641,6 +689,25 @@ class RunService:
             if task.get("status") == "completed" and result.state == "completed":
                 successful.add(logical_id)
         return {"plan": plan, "results": results, "successful": successful}
+
+    @staticmethod
+    def _logical_task_definition(
+        run: dict[str, Any], paused: dict[str, Any]
+    ) -> PlannedTask:
+        logical_id = paused.get("logical_id") or paused["id"]
+        host_state = run.get("host_state") or {}
+        observed = (host_state.get("observations") or {}).get(logical_id)
+        if observed and observed.get("task"):
+            return PlannedTask.model_validate(observed["task"])
+        for task in (run.get("host_plan") or {}).get("tasks", []):
+            if (task.get("logical_id") or task.get("id")) == logical_id:
+                normalized = dict(task)
+                normalized["id"] = logical_id
+                normalized["depends_on"] = normalized.get(
+                    "logical_depends_on", normalized.get("depends_on", [])
+                )
+                return PlannedTask.model_validate(normalized)
+        return PlannedTask.model_validate({**paused, "id": logical_id})
 
     def events(
         self, run_id: str, after_sequence: int = 0

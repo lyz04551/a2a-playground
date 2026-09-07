@@ -6,7 +6,11 @@ from typing import AsyncIterable, Optional
 from backend.host.langgraph.agent import LangGraphHostAgent
 from backend.host.langgraph.decisions import LangGraphDecisionPort
 from backend.host.orchestration.engine import HostOrchestrationEngine
-from backend.host.orchestration.models import DelegationResult
+from backend.host.orchestration.models import (
+    DelegationResult,
+    Evaluation,
+    PlannedTask,
+)
 from a2a.types import AgentCard
 from backend import database
 from backend.a2a_gateway import A2AGateway
@@ -63,6 +67,15 @@ class LangGraphHostManager:
         return await self._host_agent.summarize_approval_result(
             approval,
             execution_result,
+        )
+
+    async def evaluate_task(
+        self, task: dict, result: dict
+    ) -> Evaluation:
+        """Evaluate the whole logical task after an approved Agent turn."""
+        return await self._decisions.evaluate(
+            PlannedTask.model_validate(task),
+            DelegationResult.model_validate(result),
         )
 
     async def process_message_stream(self, text: str, session_id: str) -> AsyncIterable[dict]:

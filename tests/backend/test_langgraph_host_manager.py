@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from backend.host.langgraph.manager import LangGraphHostManager
+from backend.host.orchestration.models import Evaluation
 
 
 class FakeRegistry:
@@ -66,3 +67,23 @@ async def test_delegate_task_preserves_approval_request_through_done():
     assert result.state == "approval_required"
     assert result.approval["id"] == "ap-1"
     assert result.approval["arguments"] == {"yaml": "kind: Deployment"}
+
+
+@pytest.mark.anyio
+async def test_evaluate_task_checks_full_completion_criteria():
+    class Decisions:
+        async def evaluate(self, task, result):
+            assert task.completion_criteria == ["新 Pod 已创建"]
+            assert result.text == "旧 Pod 已删除"
+            return Evaluation(outcome="insufficient", reason="尚未重新创建")
+
+    manager = LangGraphHostManager.__new__(LangGraphHostManager)
+    manager._decisions = Decisions()
+
+    evaluation = await manager.evaluate_task({
+        "id": "repair", "agent_id": "k8s-orchestrator",
+        "objective": "删除并重建 Pod", "completion_criteria": ["新 Pod 已创建"],
+        "risk": "write", "workflow_role": "mutation",
+    }, {"state": "completed", "text": "旧 Pod 已删除"})
+
+    assert evaluation.outcome == "insufficient"

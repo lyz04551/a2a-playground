@@ -413,6 +413,80 @@ def test_react_accepts_one_corrective_mutation_after_verification():
     )
 
 
+def test_incomplete_mutation_does_not_consume_another_correction_slot():
+    security = task("security", "k8s-security", workflow_role="precheck")
+    initial = task(
+        "create", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    verification = task("verify", "k8s-ops", workflow_role="verification")
+    incomplete = task(
+        "replace", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    state = HostRunState(
+        goal="replace unhealthy nginx",
+        observations={
+            security.id: observed(security),
+            initial.id: observed(initial),
+            verification.id: observed(verification),
+            incomplete.id: ObservedTask(
+                task=incomplete,
+                result=DelegationResult(state="completed", text="old Pod deleted"),
+                evaluation=Evaluation(
+                    outcome="insufficient", reason="new Pod not created"
+                ),
+                actual_agent_id="k8s-orchestrator",
+            ),
+        },
+        successful={security.id, initial.id, verification.id},
+    )
+    finish = task(
+        "finish-replace", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+
+    assert validate_decision(
+        HostDecision(action="delegate", reason="finish replacement", tasks=[finish]),
+        AGENTS,
+        state,
+    )
+
+
+def test_exact_incomplete_mutation_can_continue_without_duplicate_rejection():
+    security = task("security", "k8s-security", workflow_role="precheck")
+    incomplete = task(
+        "replace", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    state = HostRunState(
+        goal="replace nginx",
+        observations={
+            security.id: observed(security),
+            incomplete.id: ObservedTask(
+                task=incomplete,
+                result=DelegationResult(state="completed", text="old Pod deleted"),
+                evaluation=Evaluation(
+                    outcome="insufficient", reason="new Pod not created"
+                ),
+                actual_agent_id="k8s-orchestrator",
+            ),
+        },
+        successful={security.id},
+        task_fingerprints={task_fingerprint(incomplete)},
+    )
+    continuation = incomplete.model_copy(update={"id": "replace-continuation"})
+
+    assert validate_decision(
+        HostDecision(
+            action="delegate", reason="continue incomplete replacement",
+            tasks=[continuation],
+        ),
+        AGENTS,
+        state,
+    )
+
+
 def test_react_rejects_verification_in_same_round_as_unfinished_mutation():
     security = task(
         "security", "k8s-security", workflow_role="precheck"

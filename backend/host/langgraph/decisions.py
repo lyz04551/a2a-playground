@@ -67,7 +67,10 @@ successful mutation observation, then delegate Ops verification in the next roun
 If verification proves the resource unhealthy or the write did not take effect,
 one corrective mutation is allowed. For an existing Kubernetes Pod whose immutable
 spec must change, instruct the write Agent to delete and recreate it; both writes
-must go through formal approval. Verify again after the correction. Return
+must go through formal approval. If a mutation observation is insufficient, delegate
+the unmet remainder back to the same mutation-capable Agent; this continues the
+logical correction and is not a new corrective mutation. Never send mutation work
+to a read-only diagnostics Agent. Verify again after the correction. Return
 only a concise public reason. The Host must never ask for write approval in text;
 approval is created only by a delegated Agent's write tool.
 Use payload.response_language for every user-visible string. When it is zh-CN,

@@ -8,6 +8,7 @@ from backend.orchestration.events import RunEventType
 from backend.orchestration.events import RunEvent
 from tests.postgres_helpers import create_test_repository
 from backend.registry.service import AgentRegistry
+from backend.host.orchestration.models import Evaluation
 
 
 class FakeGateway:
@@ -89,7 +90,7 @@ def test_service_persists_react_checkpoint_from_round_event(tmp_path):
     assert repository.get_run("run-react")["host_state"] == checkpoint
 
 
-def test_service_rebuilds_react_checkpoint_with_approved_task_result(tmp_path):
+def test_service_rebuilds_react_checkpoint_with_evaluated_task_result(tmp_path):
     repository, service = make_service(tmp_path, [])
     task_payload = {
         "id": "change",
@@ -150,14 +151,18 @@ def test_service_rebuilds_react_checkpoint_with_approved_task_result(tmp_path):
         "agent_id": "orchestrator",
         "status": "completed",
         "delegation_result": approval_result,
+        "evaluation": {
+            "outcome": "insufficient",
+            "reason": "Pod was deleted but not recreated",
+        },
     })
 
     checkpoint = service._host_checkpoint("run-react")
 
     assert checkpoint["state"].pending_approval_task_id is None
     assert checkpoint["state"].observations["change"].result.text == "Deployment created"
-    assert checkpoint["state"].observations["change"].evaluation.outcome == "sufficient"
-    assert "change" in checkpoint["state"].successful
+    assert checkpoint["state"].observations["change"].evaluation.outcome == "insufficient"
+    assert "change" not in checkpoint["state"].successful
 
 
 @pytest.mark.anyio
@@ -497,6 +502,11 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
     repository, service = make_service(tmp_path, [])
 
     class ResumingHost:
+        async def evaluate_task(self, task, result):
+            return Evaluation(
+                outcome="sufficient", reason="resource created"
+            )
+
         async def resume_message_stream(
             self, text, session_id, *, plan, results, successful
         ):

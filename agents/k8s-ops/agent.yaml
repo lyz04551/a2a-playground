@@ -1,10 +1,10 @@
 agent_id: k8s-ops
 name: K8s Ops Agent
-description: Kubernetes inspection, diagnostics, logs, events, resource usage, and approved Pod debugging.
-read_only: false
-risk_level: write_approval
+description: Read-only Kubernetes inspection, diagnostics, logs, events, and resource usage.
+read_only: true
+risk_level: read_only
 limitations:
-  - Pod mutations and command execution require approval
+  - Does not mutate Kubernetes resources or execute commands in Pods
 priority: 20
 port: 8052
 public_url: ${AGENT_PUBLIC_URL}
@@ -18,8 +18,8 @@ skills:
       - Check the health and resource usage of a namespace.
   - id: pod.debug
     name: Kubernetes Pod Debugging
-    description: Inspect Pod relationships and perform explicitly approved command or file operations.
-    tags: [kubernetes, pod, debugging, exec, files]
+    description: Inspect Pod relationships, logs, events, files, and linked resources without mutation.
+    tags: [kubernetes, pod, debugging, inspection, files]
     examples:
       - Inspect Pod logs, files, services, endpoints, and storage links.
 tool_policy:
@@ -31,8 +31,4 @@ tool_policy:
     - list_files_in_k8s_pod
     - list_pod_all_files
   deny: []
-  approval_required:
-    - run_command_in_k8s_pod
-    - upload_file_to_k8s_pod
-    - delete_pod_file
-    - delete_k8s_pod
+  approval_required: []

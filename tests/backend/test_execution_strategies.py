@@ -1208,3 +1208,4 @@ async def test_auto_normalizes_incremental_react_round_events():
         "security", "capacity"
     ]
     assert decisions[1].data["tasks"] == []
+    assert events[-1].type == RunEventType.TASK_BLOCKED
