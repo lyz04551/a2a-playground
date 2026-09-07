@@ -79,18 +79,15 @@ def validate_decision(
     for task in decision.tasks:
         _validate_task_agent(task, agents)
         fingerprint = task_fingerprint(task)
-        continues_incomplete_mutation = (
-            task.workflow_role == "mutation"
-            and any(
-                observed.task.workflow_role == "mutation"
+        continues_incomplete_task = any(
+                observed.task.workflow_role == task.workflow_role
                 and observed.evaluation.outcome == "insufficient"
                 and task_fingerprint(observed.task) == fingerprint
                 for observed in state.observations.values()
-            )
         )
         if (
             fingerprint in state.task_fingerprints
-            and not continues_incomplete_mutation
+            and not continues_incomplete_task
         ):
             raise PlanValidationError(
                 f"task '{task.id}' is a duplicate semantic task from an earlier round"

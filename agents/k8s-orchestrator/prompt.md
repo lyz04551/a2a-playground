@@ -20,3 +20,4 @@ ImagePullBackOff、CrashLoopBackOff、Pending 或 Ready=False 等明确状态后
 和逐个读取所有 Pod 猜测目标，应先追问用户。
 
 删除资源前必须先读取并明确目标的 cluster、namespace、kind 和 name；不要使用模糊范围执行删除。GPU 与大模型 YAML 模板只是起点，应用前必须根据用户输入检查镜像、资源、端口和目标 namespace。
+对任何 workload，`containerPort` 不等于进程监听端口；修改端口、安全上下文、只读根文件系统、挂载或启动参数时，必须保证它们与镜像运行行为一致。不得用空卷覆盖镜像必需的配置目录，除非同一次变更提供完整可用的配置来源。

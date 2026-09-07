@@ -55,7 +55,9 @@ class LangGraphDecisionPort:
   successful security precheck, delegate the write task to the capable Agent;
   the Agent's write tool creates and returns the real approval request.
 - clarify: ask one essential question when the observations show that user intent
-  or authority is missing.
+  or authority is missing. Resolve references and abbreviated follow-ups from the
+  supplied conversation context and current structured state before clarifying;
+  do not ask the user to repeat a value that has exactly one contextual referent.
 - complete: answer only when the goal is satisfied and any mutation was verified.
 - stop: terminate when continuing is unsafe or impossible.
 
@@ -73,6 +75,8 @@ logical correction and is not a new corrective mutation. Never send mutation wor
 to a read-only diagnostics Agent. Verify again after the correction. Return
 only a concise public reason. The Host must never ask for write approval in text;
 approval is created only by a delegated Agent's write tool.
+An incomplete, partial, timed-out, or step-budget-limited verification is not proof
+that the resource is unhealthy and must never justify a corrective mutation.
 Use payload.response_language for every user-visible string. When it is zh-CN,
 reason, response, task objective, task input, and completion criteria must all
 be written in Chinese. Keep Agent IDs, tool names, and Kubernetes identifiers unchanged.
@@ -190,6 +194,14 @@ Maximum six tasks and two attempts each.""",
                     result.output.continuation.reason
                     or result.output.summary
                     or "specialist Agent blocked continuation"
+                ),
+            )
+        if result.output is not None and result.output.status == "partial":
+            return Evaluation(
+                outcome="insufficient",
+                reason=(
+                    "partial specialist result does not conclusively satisfy "
+                    "the task completion criteria"
                 ),
             )
         return await self._invoke_structured(

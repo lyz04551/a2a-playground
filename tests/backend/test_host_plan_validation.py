@@ -487,6 +487,42 @@ def test_exact_incomplete_mutation_can_continue_without_duplicate_rejection():
     )
 
 
+def test_exact_incomplete_verification_can_continue_without_mutation():
+    security = task("security", "k8s-security", workflow_role="precheck")
+    mutation = task(
+        "change", "k8s-orchestrator", risk="write",
+        workflow_role="mutation",
+    )
+    verification = task("verify", "k8s-ops", workflow_role="verification")
+    state = HostRunState(
+        goal="change and verify workload",
+        observations={
+            security.id: observed(security),
+            mutation.id: observed(mutation),
+            verification.id: ObservedTask(
+                task=verification,
+                result=DelegationResult(state="completed", text="partial evidence"),
+                evaluation=Evaluation(
+                    outcome="insufficient", reason="verification timed out"
+                ),
+                actual_agent_id="k8s-ops",
+            ),
+        },
+        successful={security.id, mutation.id},
+        task_fingerprints={task_fingerprint(verification)},
+    )
+    continuation = verification.model_copy(update={"id": "verify-continuation"})
+
+    assert validate_decision(
+        HostDecision(
+            action="delegate", reason="finish verification",
+            tasks=[continuation],
+        ),
+        AGENTS,
+        state,
+    )
+
+
 def test_react_rejects_verification_in_same_round_as_unfinished_mutation():
     security = task(
         "security", "k8s-security", workflow_role="precheck"

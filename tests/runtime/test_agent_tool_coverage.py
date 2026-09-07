@@ -220,3 +220,15 @@ def test_orchestrator_prompt_clarifies_incomplete_create_requests_before_tools()
 
     assert "资源名称、namespace 或镜像版本" in prompt
     assert "不得调用任何工具" in prompt
+    assert "containerPort` 不等于进程监听端口" in prompt
+    assert "不得用空卷覆盖镜像必需的配置目录" in prompt
+
+
+def test_security_prompt_requires_runtime_compatible_hardening():
+    prompt = (
+        PROJECT_ROOT / "agents" / "k8s-security" / "prompt.md"
+    ).read_text(encoding="utf-8")
+
+    assert "containerPort` 只是元数据" in prompt
+    assert "必须与目标镜像的 UID、文件权限和启动行为兼容" in prompt
+    assert "将建议标记为“需验证”" in prompt

@@ -130,6 +130,38 @@ async def test_decide_next_wraps_invalid_output_with_decision_error():
 
 
 @pytest.mark.anyio
+async def test_partial_specialist_result_is_deterministically_insufficient():
+    model = FakeModel()
+    result = DelegationResult(
+        state="completed",
+        text="time budget reached",
+        output={
+            "status": "partial",
+            "summary": "only some checks completed",
+            "continuation": {
+                "allowed": True,
+                "reason": "investigation time budget reached",
+            },
+        },
+    )
+
+    evaluation = await LangGraphDecisionPort(model).evaluate(
+        PlannedTask(
+            id="verify",
+            agent_id="ops",
+            objective="verify resource health",
+            completion_criteria=["health conclusively established"],
+            workflow_role="verification",
+        ),
+        result,
+    )
+
+    assert evaluation.outcome == "insufficient"
+    assert "partial" in evaluation.reason
+    assert model.calls == []
+
+
+@pytest.mark.anyio
 async def test_decide_next_retries_semantically_invalid_decision_with_feedback():
     agents = [
         *AGENTS,

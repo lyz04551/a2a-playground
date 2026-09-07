@@ -111,6 +111,27 @@ def test_deleting_a_conversation_preserves_live_run_event_history(tmp_path):
     ]
 
 
+def test_supersedes_pending_approvals_for_a_conversation(tmp_path):
+    repository = create_test_repository()
+    repository.initialize()
+    repository.create_conversation({"id": "conv-1", "agent_id": "host"})
+    repository.create_run("run-1", "conv-1", "approval_required")
+    repository.create_approval(
+        approval_id="approval-1",
+        run_id="run-1",
+        agent_id="orchestrator",
+        tool_name="patch_resource",
+        arguments={"name": "workload", "image": "v1"},
+        action_digest="a" * 64,
+    )
+
+    superseded = repository.supersede_pending_approvals("conv-1")
+
+    assert superseded == ["run-1"]
+    assert repository.get_approval("approval-1")["status"] == "rejected"
+    assert repository.get_run("run-1")["status"] == "cancelled"
+
+
 def test_lists_tasks_in_parent_before_descendant_order(tmp_path):
     repository = create_test_repository()
     repository.initialize()

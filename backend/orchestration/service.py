@@ -89,6 +89,8 @@ class RunService:
 
     async def _stream(self, command: RunCommand) -> AsyncIterator[RunEvent]:
         conversation_id = self._conversation_id(command)
+        if command.conversation_id:
+            self.repository.supersede_pending_approvals(conversation_id)
         execution_message = self._conversation_context_message(
             conversation_id, command.message
         )

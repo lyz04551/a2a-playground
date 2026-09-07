@@ -628,6 +628,50 @@ class DatabaseRepository:
                 for row in connection.execute(statement).mappings()
             ]
 
+    def supersede_pending_approvals(
+        self, conversation_id: str
+    ) -> list[str]:
+        """Invalidate paused writes when a new instruction replaces them."""
+        with self.engine.begin() as connection:
+            rows = connection.execute(
+                select(runs.c.id, runs.c.data)
+                .where(
+                    runs.c.conversation_id == conversation_id,
+                    runs.c.id.in_(
+                        select(approvals.c.run_id).where(
+                            approvals.c.status == "pending"
+                        )
+                    ),
+                )
+            ).all()
+            run_ids = [str(row.id) for row in rows]
+            if not run_ids:
+                return []
+            connection.execute(
+                update(approvals)
+                .where(
+                    approvals.c.run_id.in_(run_ids),
+                    approvals.c.status == "pending",
+                )
+                .values(status="rejected")
+            )
+            for row in rows:
+                payload = {**dict(row.data), "status": "cancelled"}
+                connection.execute(
+                    update(runs)
+                    .where(runs.c.id == row.id)
+                    .values(status="cancelled", data=payload)
+                )
+            connection.execute(
+                update(orchestration_tasks)
+                .where(
+                    orchestration_tasks.c.run_id.in_(run_ids),
+                    orchestration_tasks.c.status == "approval_required",
+                )
+                .values(status="cancelled")
+            )
+            return run_ids
+
     def decide_approval(
         self, approval_id: str, decision: str
     ) -> dict[str, Any]:
