@@ -171,6 +171,42 @@ async def test_decide_next_retries_semantically_invalid_decision_with_feedback()
 
 
 @pytest.mark.anyio
+async def test_first_round_rejects_invented_previous_round_history():
+    model = FakeModel(
+        json.dumps({
+            "action": "delegate",
+            "reason": "上一轮因缺少安全预检结果而失败，本轮先执行安全预检。",
+            "tasks": [{
+                "id": "security",
+                "agent_id": "ops",
+                "objective": "执行安全预检",
+                "completion_criteria": ["返回预检结果"],
+                "workflow_role": "precheck",
+            }],
+        }, ensure_ascii=False),
+        json.dumps({
+            "action": "delegate",
+            "reason": "创建 Pod 前需要先完成安全预检。",
+            "tasks": [{
+                "id": "security",
+                "agent_id": "ops",
+                "objective": "执行安全预检",
+                "completion_criteria": ["返回预检结果"],
+                "workflow_role": "precheck",
+            }],
+        }, ensure_ascii=False),
+    )
+
+    decision = await LangGraphDecisionPort(model).decide_next(
+        "创建 nginx Pod", AGENTS, HostRunState(goal="创建 nginx Pod")
+    )
+
+    assert decision.reason == "创建 Pod 前需要先完成安全预检。"
+    assert len(model.calls) == 2
+    assert "current decision" in str(model.calls[1])
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("action", ["direct_response", "clarification"])
 async def test_langgraph_decision_port_accepts_host_only_decisions(action):
     model = FakeModel(json.dumps({

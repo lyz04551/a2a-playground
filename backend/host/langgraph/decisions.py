@@ -84,6 +84,7 @@ Do not reveal hidden chain-of-thought."""
                     HostDecision, instruction, payload
                 )
                 try:
+                    self._validate_reason_history(decision, state)
                     return validate_decision(decision, profiles, state)
                 except PlanValidationError as exc:
                     if semantic_attempt:
@@ -95,9 +96,11 @@ Do not reveal hidden chain-of-thought."""
                             mode="json"
                         ),
                         "correction": (
-                            "Choose a different action that satisfies the "
-                            "deterministic guardrail. Do not repeat the "
-                            "rejected decision."
+                            "This is a validation retry for the current decision, "
+                            "not a previous Host round or prior run. Choose a "
+                            "different action that satisfies the deterministic "
+                            "guardrail. Do not repeat the rejected decision or "
+                            "invent prior events."
                         ),
                     }
             raise AssertionError("unreachable semantic decision loop")
@@ -105,6 +108,27 @@ Do not reveal hidden chain-of-thought."""
             raise RuntimeError(
                 "Unable to create a valid Host decision"
             ) from exc
+
+    @staticmethod
+    def _validate_reason_history(
+        decision: HostDecision, state: HostRunState
+    ) -> None:
+        """Reject invented history when the run has no prior Host decision."""
+        if state.decisions or state.observations:
+            return
+        reason = decision.reason.casefold()
+        invented_history_markers = (
+            "上一轮",
+            "前一轮",
+            "previous round",
+            "last round",
+            "earlier round",
+        )
+        if any(marker in reason for marker in invented_history_markers):
+            raise PlanValidationError(
+                "the current decision is the first Host round; its public "
+                "reason must not claim a previous round or prior failure"
+            )
 
     async def create_plan(
         self, request: str, agents: list[dict]
