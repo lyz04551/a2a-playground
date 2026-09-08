@@ -111,6 +111,15 @@ def test_deleting_a_conversation_preserves_live_run_event_history(tmp_path):
     ]
 
 
+def test_lists_runs_by_creation_time_not_random_id(tmp_path):
+    repository = create_test_repository()
+    repository.initialize()
+    repository.create_run("z-old", "conv-1", "completed", {"created_at": "2026-09-08T10:00:00Z"})
+    repository.create_run("a-new", "conv-2", "completed", {"created_at": "2026-09-08T11:00:00Z"})
+
+    assert [run["id"] for run in repository.list_runs()] == ["a-new", "z-old"]
+
+
 def test_supersedes_pending_approvals_for_a_conversation(tmp_path):
     repository = create_test_repository()
     repository.initialize()

@@ -1,7 +1,7 @@
 import React from 'react'
-import { CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined, RobotOutlined, SafetyCertificateOutlined, ToolOutlined } from '@ant-design/icons'
+import { CheckCircleOutlined, ClockCircleOutlined, ExclamationCircleOutlined, FileTextOutlined, MessageOutlined, RobotOutlined, SafetyCertificateOutlined, ToolOutlined } from '@ant-design/icons'
 
-const icons = { host: <RobotOutlined />, round: <ClockCircleOutlined />, agent: <RobotOutlined />, tool: <ToolOutlined />, approval: <SafetyCertificateOutlined /> }
+const icons = { host: <RobotOutlined />, round: <ClockCircleOutlined />, agent: <RobotOutlined />, tool: <ToolOutlined />, approval: <SafetyCertificateOutlined />, result: <MessageOutlined />, summary: <FileTextOutlined /> }
 const stateIcon = status => ['failed', 'blocked', 'rejected'].includes(status) ? <ExclamationCircleOutlined /> : status === 'completed' || status === 'approved' ? <CheckCircleOutlined /> : <ClockCircleOutlined />
 
 export default function TaskFlow({ nodes, selectedId, onSelect, zh }) {

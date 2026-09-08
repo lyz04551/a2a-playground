@@ -4,13 +4,14 @@ import { buildTaskFlow, filterTaskRuns, summarizeTaskRun } from './taskExplorer.
 
 test('builds Host rounds and Agent children for Auto runs', () => {
   const state = {
-    run: { id: 'auto-1', mode: 'auto', status: 'completed' },
+    run: { id: 'auto-1', mode: 'auto', status: 'completed' }, hostSummary: '整体检查完成',
     roundOrder: [1], roundsByNumber: { 1: { round: 1, reason: '先检查', taskIds: ['security'] } },
-    taskOrder: ['security'], tasksById: { security: { id: 'security', agentId: 'sec', objective: '安全预检', status: 'completed', tools: [{ id: 'call-1', name: 'list_k8s_pod', status: 'completed' }] } },
+    taskOrder: ['security'], tasksById: { security: { id: 'security', agentId: 'sec', objective: '安全预检', status: 'completed', output: '预检通过', tools: [{ id: 'call-1', name: 'list_k8s_pod', status: 'completed' }] } },
     approvals: [], messages: [], rawEvents: [],
   }
   const nodes = buildTaskFlow(state, [{ id: 'sec', name: 'Security Agent' }])
-  assert.deepEqual(nodes.map(node => [node.kind, node.depth]), [['host', 0], ['round', 1], ['agent', 2], ['tool', 3]])
+  assert.deepEqual(nodes.map(node => [node.kind, node.depth]), [['host', 0], ['round', 1], ['agent', 2], ['tool', 3], ['result', 3], ['summary', 1]])
+  assert.equal(nodes.at(-1).content, '整体检查完成')
 })
 
 test('builds Direct flows without a Host node', () => {

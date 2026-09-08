@@ -347,7 +347,10 @@ class DatabaseRepository:
             return dict(data) if data else None
 
     def list_runs(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
-        statement = select(runs.c.data).order_by(runs.c.id.desc())
+        statement = select(runs.c.data).order_by(
+            runs.c.data["created_at"].as_string().desc(),
+            runs.c.id.desc(),
+        )
         if limit is not None:
             statement = statement.limit(limit).offset(offset)
         with self.engine.connect() as connection:

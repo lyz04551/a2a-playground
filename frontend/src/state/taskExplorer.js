@@ -1,4 +1,5 @@
 const value = (item, camel, snake = camel) => item?.[camel] ?? item?.[snake]
+const printable = value => typeof value === 'string' ? value : value == null ? '' : JSON.stringify(value, null, 2)
 
 export function filterTaskRuns(runs = [], { mode = 'all', status = 'all', agent = 'all', query = '' } = {}) {
   const needle = query.trim().toLowerCase()
@@ -32,7 +33,7 @@ function agentNode(task, depth, names) {
   }
 }
 
-function taskChildren(task, depth, approvals) {
+function taskChildren(task, depth, approvals, names) {
   const nodes = (task.tools || []).map(tool => ({
     id: `tool:${task.id}:${tool.id || tool.name || tool.tool}`, kind: 'tool', depth,
     title: tool.name || tool.tool || 'MCP tool', subtitle: tool.result || tool.error || '',
@@ -45,6 +46,12 @@ function taskChildren(task, depth, approvals) {
       subtitle: approval.risk || 'write', status: approval.status || 'pending', data: approval,
     })
   }
+  const output = printable(task.output || task.streamingOutput || task.result)
+  if (output) nodes.push({
+    id: `result:${task.id}`, kind: 'result', depth,
+    title: `${names.get(task.agentId) || task.agentName || task.agentId || 'Agent'} 输出`,
+    subtitle: output, content: output, status: task.status || 'completed', data: task,
+  })
   return nodes
 }
 
@@ -58,7 +65,7 @@ export function buildTaskFlow(state = {}, agents = []) {
   const addTask = (task, depth) => {
     if (!task || emitted.has(task.id)) return
     emitted.add(task.id)
-    nodes.push(agentNode(task, depth, names), ...taskChildren(task, depth + 1, approvals))
+    nodes.push(agentNode(task, depth, names), ...taskChildren(task, depth + 1, approvals, names))
   }
 
   if ((run.mode || 'auto') === 'direct') {
@@ -73,5 +80,11 @@ export function buildTaskFlow(state = {}, agents = []) {
     ;(round.taskIds || []).forEach(id => addTask(state.tasksById?.[id], 2))
   }
   tasks.forEach(task => addTask(task, 2))
+  const hostSummary = printable(state.hostSummary || run.hostSummary)
+  if (hostSummary) nodes.push({
+    id: `summary:${run.id || 'run'}`, kind: 'summary', depth: 1,
+    title: 'Host Agent 最终总结', subtitle: hostSummary, content: hostSummary,
+    status: run.status || 'completed', data: { content: hostSummary, run_id: run.id },
+  })
   return nodes
 }
