@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react'
-import { BugOutlined, LoadingOutlined, StopOutlined } from '@ant-design/icons'
+import { BranchesOutlined, BugOutlined, LoadingOutlined, StopOutlined } from '@ant-design/icons'
 import { Button, Drawer, Tag } from 'antd'
+import { useNavigate } from 'react-router-dom'
 import SystemStatus from './SystemStatus'
 import RunTimeline from './RunTimeline'
 import { buildTaskDetails } from './taskDetails'
@@ -8,6 +9,7 @@ import ApprovalCard from '../ApprovalCard'
 
 export default function RunTracePanel({ run = {}, stage, agents = [], language = 'en-US', loading = false, error, canCancel = false, cancelling = false, onCancel, onApproval, onArtifactOpen, onDebug }) {
   const zh = language.startsWith('zh')
+  const navigate = useNavigate()
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const tasks = run.tasks || run.steps || []
   const selectedTask = tasks.find(task => task.id === selectedTaskId)
@@ -26,7 +28,7 @@ export default function RunTracePanel({ run = {}, stage, agents = [], language =
     : ''
   return (
     <aside className="workspace-trace" aria-label="Run trace">
-      <header><div><span className="workspace-eyebrow">Execution</span><h2>Run trace</h2></div><div className="workspace-trace__actions"><SystemStatus status={{ state: run.status || 'online' }} />{canCancel && <Button danger size="small" loading={cancelling} aria-label={zh ? '停止当前运行' : 'Stop current run'} icon={<StopOutlined />} onClick={onCancel}>{zh ? '停止' : 'Stop'}</Button>}<Button type="text" size="small" aria-label="Open run debugger" icon={<BugOutlined />} onClick={onDebug} /></div></header>
+      <header><div><span className="workspace-eyebrow">Execution</span><h2>Run trace</h2></div><div className="workspace-trace__actions"><SystemStatus status={{ state: run.status || 'online' }} />{run.id && <Button type="text" size="small" aria-label={zh ? '打开完整任务流' : 'Open full task flow'} icon={<BranchesOutlined />} onClick={() => navigate(`/tasks?run=${encodeURIComponent(run.id)}`)} />}{canCancel && <Button danger size="small" loading={cancelling} aria-label={zh ? '停止当前运行' : 'Stop current run'} icon={<StopOutlined />} onClick={onCancel}>{zh ? '停止' : 'Stop'}</Button>}<Button type="text" size="small" aria-label="Open run debugger" icon={<BugOutlined />} onClick={onDebug} /></div></header>
       {stage?.textZh && <section className={`run-stage is-${stage.state || 'working'}`}><strong>{stage?.state === 'failed' ? (zh ? '运行失败' : 'Run failed') : stageText}</strong>{failureDetail && <details><summary>{zh ? '查看失败原因' : 'View failure reason'}</summary><p>{failureDetail}</p></details>}{stage.active?.map(item => <small key={item.id}>{item.agentName}{item.objective ? ` · ${item.objective}` : ''}</small>)}</section>}
       {loading && <p className="workspace-state" role="status"><LoadingOutlined /> Awaiting run events…</p>}
       {error && <p className="workspace-state workspace-state--error" role="alert">{error}</p>}

@@ -9,6 +9,7 @@ import './styles/shell.css'
 import './styles/dashboard.css'
 import './styles/agents.css'
 import './styles/events.css'
+import './styles/tasks.css'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(

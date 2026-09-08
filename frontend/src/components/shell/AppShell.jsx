@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { Badge, Button, Drawer, Tooltip } from 'antd'
 import {
   FileTextOutlined,
+  BranchesOutlined,
   DashboardOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -21,6 +22,7 @@ const NAV_ITEMS = [
   { key: '/dashboard', icon: <DashboardOutlined />, zh: '总览', en: 'Dashboard' },
   { key: '/agents', icon: <RobotOutlined />, zh: 'Agents', en: 'Agents' },
   { key: '/workspace', icon: <MessageOutlined />, zh: '工作台', en: 'Workspace' },
+  { key: '/tasks', icon: <BranchesOutlined />, zh: '任务', en: 'Tasks' },
   { key: '/events', icon: <FileTextOutlined />, zh: '事件', en: 'Events' },
 ]
 
