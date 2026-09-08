@@ -14,7 +14,9 @@
     "antd": "^6.5.1",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
-    "react-router-dom": "^6.21.0"
+    "react-markdown": "^10.1.0",
+    "react-router-dom": "^6.21.0",
+    "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.0",

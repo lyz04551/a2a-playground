@@ -12,6 +12,7 @@ import { buildToolDetails, groupToolCalls, statusLabel } from './taskDetails'
 import { buildRoundTimeline, roundDisplayText } from './roundTimeline'
 import { formatAgentOutput } from './agentOutput'
 import ApprovalCard from '../ApprovalCard'
+import MarkdownContent from '../MarkdownContent'
 
 function StatusIcon({ status }) {
   if (status === 'completed') return <CheckCircleFilled />
@@ -101,7 +102,7 @@ export default function RunTimeline({ run = {}, tasks = [], rounds = [], approva
         <React.Fragment key={item.id}>
           <li className={`run-timeline__node is-agent status-${item.task.status || 'queued'}`}>
             <span className="run-timeline__rail"><RobotOutlined /></span>
-            <button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {statusLabel(item.task.status || 'queued', zh)} · {formatDuration(item.task.durationMs)}</small>{(item.task.output || item.task.streamingOutput || item.task.result) && <pre className="run-timeline__agent-output">{formatAgentOutput(item.task.output || item.task.streamingOutput || item.task.result)}</pre>}{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}</button>
+            <button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {statusLabel(item.task.status || 'queued', zh)} · {formatDuration(item.task.durationMs)}</small>{(item.task.output || item.task.streamingOutput || item.task.result) && <div className="run-timeline__agent-output"><MarkdownContent compact interactiveLinks={false}>{formatAgentOutput(item.task.output || item.task.streamingOutput || item.task.result)}</MarkdownContent></div>}{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}</button>
           </li>
           {(item.task.tools || []).length > 0 && <ToolActivity tools={item.task.tools} zh={zh} />}
           {approvals.filter(approval => (approval.taskId || approval.task_id) === item.task.id).map(approval => (
@@ -111,7 +112,7 @@ export default function RunTimeline({ run = {}, tasks = [], rounds = [], approva
           ))}
         </React.Fragment>
       ))}
-      {run.hostSummary && <li className="run-timeline__node is-host-summary"><span className="run-timeline__rail"><NodeIndexOutlined /></span><section><strong>{zh ? 'Host 最终总结' : 'Host final summary'}</strong><pre>{formatAgentOutput(run.hostSummary)}</pre></section></li>}
+      {run.hostSummary && <li className="run-timeline__node is-host-summary"><span className="run-timeline__rail"><NodeIndexOutlined /></span><section><strong>{zh ? 'Host 最终总结' : 'Host final summary'}</strong><div className="run-timeline__agent-output"><MarkdownContent compact>{formatAgentOutput(run.hostSummary)}</MarkdownContent></div></section></li>}
     </ol>
   )
 }
