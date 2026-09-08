@@ -21,7 +21,7 @@
   overflow-y: auto;
   overflow-wrap: anywhere;
   word-break: break-word;
-  overscroll-behavior: contain;
+  overscroll-behavior-y: auto;
   scrollbar-gutter: stable;
 }
 .workspace-tool { margin-top: var(--space-12); padding: var(--space-8) var(--space-12); border: 1px solid var(--color-border); border-radius: var(--radius-8); background: var(--color-surface-subtle); }.workspace-tool__summary { display: flex; align-items: center; gap: var(--space-8); color: var(--color-orchestration); font-size: 12px; font-weight: 700; }.workspace-tool__summary small { margin-left: auto; color: var(--color-text-muted); font-weight: 500; }.workspace-tool details { margin-top: var(--space-8); }.workspace-tool summary, .workspace-trace details summary { cursor: pointer; color: var(--color-text-muted); font-size: 12px; }.workspace-tool pre, .workspace-trace pre { max-height: 180px; overflow: auto; margin: var(--space-8) 0 0; padding: var(--space-8); border-radius: var(--radius-8); color: var(--color-text); background: var(--color-page); font-size: 11px; white-space: pre-wrap; }

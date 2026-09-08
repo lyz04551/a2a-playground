@@ -43,4 +43,6 @@ test('long agent messages scroll internally without widening the conversation', 
   assert.match(messageRule, /overflow-y:\s*auto/)
   assert.match(messageRule, /overflow-x:\s*hidden/)
   assert.match(messageRule, /overflow-wrap:\s*anywhere/)
+  assert.match(messageRule, /overscroll-behavior-y:\s*auto/)
+  assert.doesNotMatch(messageRule, /overscroll-behavior:\s*contain/)
 })
