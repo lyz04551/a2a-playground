@@ -175,16 +175,43 @@ class DatabaseRepository:
 
     def delete_conversation(self, conversation_id: str) -> bool:
         with self.engine.begin() as connection:
+            run_ids = list(
+                connection.execute(
+                    select(runs.c.id).where(
+                        runs.c.conversation_id == conversation_id
+                    )
+                ).scalars()
+            )
+            if run_ids:
+                connection.execute(
+                    delete(remote_bindings).where(
+                        remote_bindings.c.run_id.in_(run_ids)
+                    )
+                )
+                connection.execute(
+                    delete(approvals).where(approvals.c.run_id.in_(run_ids))
+                )
+                connection.execute(
+                    delete(artifacts).where(artifacts.c.run_id.in_(run_ids))
+                )
+                connection.execute(
+                    delete(orchestration_tasks).where(
+                        orchestration_tasks.c.run_id.in_(run_ids)
+                    )
+                )
+                connection.execute(
+                    delete(events).where(events.c.run_id.in_(run_ids))
+                )
+                connection.execute(
+                    delete(runs).where(runs.c.id.in_(run_ids))
+                )
             connection.execute(
                 delete(messages).where(
                     messages.c.conversation_id == conversation_id
                 )
             )
             connection.execute(
-                delete(events).where(
-                    events.c.conversation_id == conversation_id,
-                    events.c.event_type != RUN_EVENT_DISCRIMINATOR,
-                )
+                delete(events).where(events.c.conversation_id == conversation_id)
             )
             result = connection.execute(
                 delete(conversations).where(

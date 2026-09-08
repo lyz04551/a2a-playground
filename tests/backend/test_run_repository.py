@@ -95,22 +95,43 @@ def test_run_events_ignore_generic_events_with_incidental_run_fields(tmp_path):
     ]
 
 
-def test_deleting_a_conversation_preserves_live_run_event_history(tmp_path):
+def test_deleting_a_conversation_removes_its_orchestration_history(tmp_path):
     repository = create_test_repository()
     repository.initialize()
     repository.create_conversation({"id": "conv-1", "agent_id": "host"})
     repository.create_run("run-1", "conv-1", "running")
+    repository.create_task(
+        {
+            "id": "task-1",
+            "run_id": "run-1",
+            "parent_task_id": None,
+            "agent_id": "host",
+            "status": "working",
+        }
+    )
+    repository.upsert_remote_binding(
+        run_id="run-1",
+        agent_id="k8s-ops",
+        context_id="context-1",
+        task_id="task-1",
+    )
+    repository.create_approval(
+        approval_id="approval-1",
+        run_id="run-1",
+        agent_id="k8s-orchestrator",
+        tool_name="apply_k8s_yaml",
+        arguments={"yaml": "kind: Pod"},
+        action_digest="a" * 64,
+    )
     repository.append_run_event(_event("event-1"))
 
     repository.delete_conversation("conv-1")
-    next_event = repository.append_run_event(_event("event-2"))
 
-    assert repository.get_run("run-1")["id"] == "run-1"
-    assert next_event.sequence == 2
-    assert [event.sequence for event in repository.list_run_events("run-1")] == [
-        1,
-        2,
-    ]
+    assert repository.get_run("run-1") is None
+    assert repository.list_tasks("run-1") == []
+    assert repository.get_remote_binding("run-1", "k8s-ops") is None
+    assert repository.list_approvals("run-1") == []
+    assert repository.list_run_events("run-1") == []
 
 
 def test_lists_runs_by_creation_time_not_random_id(tmp_path):
