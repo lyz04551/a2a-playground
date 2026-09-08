@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from backend.orchestration.events import RunEvent, RunEventType
@@ -114,8 +116,17 @@ def test_deleting_a_conversation_preserves_live_run_event_history(tmp_path):
 def test_lists_runs_by_creation_time_not_random_id(tmp_path):
     repository = create_test_repository()
     repository.initialize()
-    repository.create_run("z-old", "conv-1", "completed", {"created_at": "2026-09-08T10:00:00Z"})
-    repository.create_run("a-new", "conv-2", "completed", {"created_at": "2026-09-08T11:00:00Z"})
+    repository.create_run("z-old", "conv-1", "completed")
+    repository.create_run("a-new", "conv-2", "completed")
+    for event_id, run_id, conversation_id, hour in (
+        ("old-event", "z-old", "conv-1", 10),
+        ("new-event", "a-new", "conv-2", 11),
+    ):
+        repository.append_run_event(RunEvent(
+            event_id=event_id, sequence=1, run_id=run_id,
+            conversation_id=conversation_id, type=RunEventType.RUN_STARTED,
+            timestamp=datetime(2026, 9, 8, hour, tzinfo=timezone.utc),
+        ))
 
     assert [run["id"] for run in repository.list_runs()] == ["a-new", "z-old"]
 

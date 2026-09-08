@@ -102,6 +102,7 @@ class RunService:
         root_agent_id = (
             command.target_agent_id if command.mode == "direct" else "host"
         )
+        created_at = self._now()
 
         self.repository.create_run(
             run_id,
@@ -113,6 +114,8 @@ class RunService:
                 "root_task_id": root_task_id,
                 "title": command.message[:80],
                 "request": command.message,
+                "created_at": created_at,
+                "updated_at": created_at,
             },
         )
         self.repository.create_task(

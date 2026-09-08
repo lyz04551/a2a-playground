@@ -347,8 +347,19 @@ class DatabaseRepository:
             return dict(data) if data else None
 
     def list_runs(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
+        first_event_at = (
+            select(func.min(events.c.created_at))
+            .where(
+                events.c.run_id == runs.c.id,
+                events.c.event_type == RUN_EVENT_DISCRIMINATOR,
+            )
+            .correlate(runs)
+            .scalar_subquery()
+        )
         statement = select(runs.c.data).order_by(
-            runs.c.data["created_at"].as_string().desc(),
+            func.coalesce(
+                runs.c.data["created_at"].as_string(), first_event_at
+            ).desc().nullslast(),
             runs.c.id.desc(),
         )
         if limit is not None:
