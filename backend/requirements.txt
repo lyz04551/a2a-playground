@@ -13,3 +13,4 @@ psycopg[binary,pool]>=3.2,<4
 langgraph>=1.2.9
 langchain-openai>=0.3.0
 langchain-core>=1.4.9
+cryptography>=43,<46

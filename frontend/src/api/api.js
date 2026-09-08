@@ -55,6 +55,9 @@ export const getRun = (runId) => request('/runs/get', { run_id: runId })
 export const listRunEvents = (runId, afterSequence = 0) => request('/runs/events', { run_id: runId, after_sequence: afterSequence })
 export const cancelRun = (runId) => request('/runs/cancel', { run_id: runId })
 export const getSystemStatus = () => request('/system/status')
+export const getModelConfig = () => request('/model-config/get')
+export const updateModelConfig = data => request('/model-config/update', data)
+export const resetModelConfig = () => request('/model-config/reset')
 export const listApprovals = (runId = '') =>
   request('/approvals/list', { run_id: runId })
 export const decideApproval = (approvalId, decision) =>

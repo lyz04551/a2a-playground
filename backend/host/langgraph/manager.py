@@ -23,13 +23,13 @@ logger = logging.getLogger(__name__)
 class LangGraphHostManager:
     """Manages the LangGraph HostAgent lifecycle and bridges to the playground backend."""
 
-    def __init__(self, *, registry=None, gateway=None, decisions=None):
+    def __init__(self, *, registry=None, gateway=None, decisions=None, config_loader=None):
         settings = AppSettings.from_env()
         self._gateway = gateway or A2AGateway(database.repository)
         self._registry = registry or AgentRegistry(database.repository)
-        self._host_agent = LangGraphHostAgent(gateway=self._gateway)
+        self._host_agent = LangGraphHostAgent(gateway=self._gateway, config_loader=config_loader)
         self._decisions = decisions or LangGraphDecisionPort(
-            self._host_agent._make_model(streaming=False)
+            model_factory=lambda: self._host_agent._make_model(streaming=False)
         )
         self._engine = HostOrchestrationEngine(
             self._registry,
@@ -173,8 +173,14 @@ class LangGraphHostManager:
 _manager: Optional[LangGraphHostManager] = None
 
 
-def get_manager() -> LangGraphHostManager:
+def get_manager(config_loader=None) -> LangGraphHostManager:
     global _manager
     if _manager is None:
-        _manager = LangGraphHostManager()
+        _manager = LangGraphHostManager(config_loader=config_loader)
+    elif config_loader is not None:
+        _manager._host_agent._config_loader = config_loader
+        _manager._decisions = LangGraphDecisionPort(
+            model_factory=lambda: _manager._host_agent._make_model(streaming=False)
+        )
+        _manager._engine._decisions = _manager._decisions
     return _manager

@@ -135,3 +135,10 @@ artifacts = Table(
     Column("name", String, nullable=False),
     Column("data", JSON, nullable=False),
 )
+
+runtime_settings = Table(
+    "runtime_settings",
+    metadata,
+    Column("key", String, primary_key=True),
+    Column("data", JSON, nullable=False),
+)

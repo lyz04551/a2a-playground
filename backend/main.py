@@ -212,16 +212,18 @@ from backend.a2a_gateway import A2AGateway
 from backend.registry.service import AgentRegistry
 from backend.orchestration.service import RunService
 from backend.api.runs import create_approval_router, create_router as create_runs_router
+from backend.model_config import ModelConfigService
 
 run_gateway = A2AGateway(db.repository)
-run_host = get_lg_manager()
+model_config_service = ModelConfigService(db.repository)
+run_host = get_lg_manager(config_loader=model_config_service.resolve)
 run_service = RunService(
     db.repository,
     AgentRegistry(db.repository),
     run_gateway,
     run_host,
 )
-app.include_router(create_runs_router(run_service))
+app.include_router(create_runs_router(run_service, model_config_service))
 app.include_router(
     create_approval_router(
         run_service,

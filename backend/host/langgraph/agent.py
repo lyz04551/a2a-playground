@@ -16,9 +16,10 @@ logger = logging.getLogger(__name__)
 class LangGraphHostAgent:
     """Supplies the Host model, registered cards, and approval summaries."""
 
-    def __init__(self, gateway=None):
+    def __init__(self, gateway=None, config_loader=None):
         self.cards: dict[str, AgentCard] = {}
         self.agents: dict[str, dict] = {}
+        self._config_loader = config_loader or (lambda: load_llm_config("HOST"))
 
     def register_agent_card(self, agent_id: str, card: AgentCard):
         self.cards[agent_id] = card
@@ -32,9 +33,8 @@ class LangGraphHostAgent:
         self.cards.pop(agent_id, None)
         self.agents.pop(agent_id, None)
 
-    @staticmethod
-    def _make_model(*, streaming: bool = True):
-        config = load_llm_config("HOST")
+    def _make_model(self, *, streaming: bool = True):
+        config = self._config_loader()
         return ChatOpenAI(
             model=config.model,
             openai_api_key=config.api_key,

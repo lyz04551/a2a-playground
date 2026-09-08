@@ -28,6 +28,7 @@ function staticCommands(zh) {
     { id: 'page-agents', type: 'page', title: 'Agents', subtitle: '/agents', path: '/agents', keywords: ['智能体'] },
     { id: 'page-tasks', type: 'page', title: zh ? '任务流转' : 'Task flows', subtitle: '/tasks', path: '/tasks', keywords: ['a2a', 'run', '链路', '任务'] },
     { id: 'page-events', type: 'page', title: zh ? '执行事件' : 'Events', subtitle: '/events', path: '/events', keywords: ['日志', 'event'] },
+    { id: 'page-model-settings', type: 'page', title: zh ? 'Host 模型设置' : 'Host model settings', subtitle: '/model-settings', path: '/model-settings', keywords: ['model', 'llm', 'host', '模型'] },
     { id: 'action-new', type: 'action', title: zh ? '新建会话' : 'New conversation', subtitle: zh ? '打开自动编排工作台' : 'Open auto orchestration', path: '/workspace?mode=auto&new=1', keywords: ['new', 'chat'] },
   ]
 }

@@ -100,7 +100,7 @@ def _schedule_auto_approval_execution(
     return task
 
 
-def create_router(service) -> APIRouter:
+def create_router(service, model_config_service=None) -> APIRouter:
     router = APIRouter()
     background_runs: set[asyncio.Task] = set()
 
@@ -222,6 +222,15 @@ def create_router(service) -> APIRouter:
 
     @router.post("/api/system/status")
     async def system_status():
+        if model_config_service is not None:
+            public_model = model_config_service.public()
+            return ApiResponse(result={
+                "model": {"configured": public_model["configured"]},
+                "model_details": {
+                    key: public_model[key]
+                    for key in ("provider", "base_url", "model", "source")
+                },
+            })
         model = load_llm_config("HOST")
         return ApiResponse(
             result={
@@ -233,6 +242,27 @@ def create_router(service) -> APIRouter:
                 },
             }
         )
+
+    @router.post("/api/model-config/get")
+    async def model_config_get():
+        if model_config_service is None:
+            return _error("Model configuration service is unavailable", status_code=503)
+        return ApiResponse(result=model_config_service.public())
+
+    @router.post("/api/model-config/update")
+    async def model_config_update(data: dict[str, Any]):
+        if model_config_service is None:
+            return _error("Model configuration service is unavailable", status_code=503)
+        try:
+            return ApiResponse(result=model_config_service.update(data))
+        except ValueError as exc:
+            return _error(str(exc))
+
+    @router.post("/api/model-config/reset")
+    async def model_config_reset():
+        if model_config_service is None:
+            return _error("Model configuration service is unavailable", status_code=503)
+        return ApiResponse(result=model_config_service.reset())
 
     return router
 

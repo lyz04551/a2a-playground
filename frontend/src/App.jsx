@@ -9,6 +9,7 @@ const EventsPage = lazy(() => import('./pages/EventsPage'))
 const WorkspacePage = lazy(() => import('./pages/WorkspacePage'))
 const DashboardPage = lazy(() => import('./pages/DashboardPage'))
 const TasksPage = lazy(() => import('./pages/TasksPage'))
+const ModelSettingsPage = lazy(() => import('./pages/ModelSettingsPage'))
 
 export default function App() {
   const { settings } = useConsoleSettings()
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/workspace" element={<WorkspacePage />} />
             <Route path="/agents" element={<AgentsPage />} />
             <Route path="/events" element={<EventsPage />} />
+            <Route path="/model-settings" element={<ModelSettingsPage />} />
             <Route path="/tasks" element={<TasksPage />} />
             <Route path="/chat" element={<Navigate to="/workspace?mode=direct" replace />} />
             <Route path="/chat/:agentId" element={<LegacyChatRedirect />} />

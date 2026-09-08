@@ -24,6 +24,7 @@ const NAV_ITEMS = [
   { key: '/workspace', icon: <MessageOutlined />, zh: '工作台', en: 'Workspace' },
   { key: '/tasks', icon: <BranchesOutlined />, zh: '任务', en: 'Tasks' },
   { key: '/events', icon: <FileTextOutlined />, zh: '事件', en: 'Events' },
+  { key: '/model-settings', icon: <SettingOutlined />, zh: '模型设置', en: 'Model settings' },
 ]
 
 function ConsoleNav({ collapsed, onNavigate }) {

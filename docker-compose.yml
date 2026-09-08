@@ -147,6 +147,7 @@ services:
       HOST_LLM_API_KEY: ${HOST_LLM_API_KEY:-}
       HOST_LLM_BASE_URL: ${HOST_LLM_BASE_URL:-https://api.deepseek.com/v1}
       HOST_LLM_MODEL: ${HOST_LLM_MODEL:-deepseek-chat}
+      HOST_MODEL_CONFIG_KEY: ${HOST_MODEL_CONFIG_KEY:-}
       BOOTSTRAP_AGENTS: >-
         [{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"}]
       PLAYGROUND_ALLOW_PRIVATE_AGENTS: "true"

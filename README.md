@@ -291,6 +291,7 @@ a2a-playground/
 | `HOST_LLM_BASE_URL` | Yes | Host model endpoint, for example DeepSeek or a local vLLM `/v1` URL |
 | `HOST_LLM_MODEL` | Yes | Host model name |
 | `HOST_LLM_PROVIDER` | No | Display label such as `deepseek` or `vllm` |
+| `HOST_MODEL_CONFIG_KEY` | For UI API-key changes | Fernet key used to encrypt the Host API key stored by Model Settings; generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
 | `AGENT_LLM_API_KEY` | Yes | K8s specialist Agents' independent API key |
 | `AGENT_LLM_BASE_URL` | Yes | K8s specialist Agents' OpenAI-compatible endpoint |
 | `AGENT_LLM_MODEL` | Yes | K8s specialist Agents' model name |

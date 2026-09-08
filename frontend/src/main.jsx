@@ -10,6 +10,7 @@ import './styles/dashboard.css'
 import './styles/agents.css'
 import './styles/events.css'
 import './styles/tasks.css'
+import './styles/model-settings.css'
 import './index.css'
 
 ReactDOM.createRoot(document.getElementById('root')).render(

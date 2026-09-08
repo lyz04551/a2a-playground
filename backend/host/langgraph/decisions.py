@@ -29,8 +29,12 @@ def _response_language(request: str) -> str:
 
 
 class LangGraphDecisionPort:
-    def __init__(self, model):
+    def __init__(self, model=None, *, model_factory=None):
         self._model = model
+        self._model_factory = model_factory
+
+    def _current_model(self):
+        return self._model_factory() if self._model_factory else self._model
 
     async def decide_next(
         self,
@@ -218,7 +222,7 @@ concise reason. Approval-required work is blocked, never sufficient.""",
         plan: HostPlan,
         results: dict[str, DelegationResult],
     ) -> str:
-        response = await self._model.ainvoke(
+        response = await self._current_model().ainvoke(
             [
                 SystemMessage(content=(
                     "你是 Host Agent。根据结构化计划和各子任务终态，用中文"
@@ -264,7 +268,7 @@ concise reason. Approval-required work is blocked, never sufficient.""",
                     f"The previous response was invalid: {error}. "
                     "Return only corrected JSON."
                 )))
-            response = await self._model.ainvoke(current)
+            response = await self._current_model().ainvoke(current)
             try:
                 content = str(response.content).strip()
                 if content.startswith("```") and content.endswith("```"):

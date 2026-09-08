@@ -20,6 +20,7 @@ from .models import (
     orchestration_tasks,
     remote_bindings,
     runs,
+    runtime_settings,
 )
 
 RUN_EVENT_DISCRIMINATOR = "run_event"
@@ -41,6 +42,29 @@ class DatabaseRepository:
         from .migrate import upgrade_database
 
         upgrade_database(self.database_url)
+
+    def get_runtime_setting(self, key: str) -> dict[str, Any] | None:
+        with self.engine.connect() as connection:
+            data = connection.execute(
+                select(runtime_settings.c.data).where(runtime_settings.c.key == key)
+            ).scalar_one_or_none()
+            return dict(data) if data else None
+
+    def set_runtime_setting(self, key: str, data: dict[str, Any]) -> dict[str, Any]:
+        statement = postgresql_insert(runtime_settings).values(key=key, data=data)
+        statement = statement.on_conflict_do_update(
+            index_elements=[runtime_settings.c.key], set_={"data": data}
+        )
+        with self.engine.begin() as connection:
+            connection.execute(statement)
+        return dict(data)
+
+    def delete_runtime_setting(self, key: str) -> bool:
+        with self.engine.begin() as connection:
+            result = connection.execute(
+                delete(runtime_settings).where(runtime_settings.c.key == key)
+            )
+            return result.rowcount > 0
 
     def upsert_agent(self, data: dict[str, Any]) -> dict[str, Any]:
         statement = postgresql_insert(agents).values(
