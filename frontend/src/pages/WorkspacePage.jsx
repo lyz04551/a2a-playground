@@ -66,7 +66,7 @@ export default function WorkspacePage() {
 
   const sendState = getWorkspaceSendState({ mode: workspace.mode, selectedAgentId: workspace.selectedAgentId, agents, modelConfigured })
   const trace = useMemo(() => ({ ...workspace.state.run, hostSummary: workspace.state.hostSummary, tasks: workspace.state.taskOrder.map(id => { const task = workspace.state.tasksById[id]; return { ...task, agentName: agents.find(agent => agent.id === (task.replacedAgentId || task.agentId))?.name || task.agentName } }), rounds: workspace.state.roundOrder.map(round => workspace.state.roundsByNumber[round]), approvals: workspace.state.approvals, artifacts: workspace.state.artifacts, rawEvents: workspace.state.rawEvents || [] }), [workspace.state, agents])
-  const timelineMessages = useMemo(() => enrichWorkspaceMessages(workspace.state.messages, { agents, tasksById: workspace.state.tasksById, language }), [workspace.state.messages, workspace.state.tasksById, agents, language])
+  const timelineMessages = useMemo(() => enrichWorkspaceMessages(workspace.state.messages, { agents, tasksById: workspace.state.tasksById, hostSummary: workspace.state.hostSummary, language }), [workspace.state.messages, workspace.state.tasksById, workspace.state.hostSummary, agents, language])
   const runStage = useMemo(() => deriveRunStage(trace.rawEvents, agents), [trace.rawEvents, agents])
   const changeMode = mode => {
     if (workspace.state.messages.length > 0) workspace.beginNewConversation(mode, mode === 'direct' ? workspace.selectedAgentId : '')

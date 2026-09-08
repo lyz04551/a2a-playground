@@ -46,13 +46,19 @@ export function approvalStatusAfterDecision(response = {}, decision) {
   return response.result?.state === 'accepted' ? 'executing' : decision
 }
 
-export function enrichWorkspaceMessages(messages = [], { agents = [], tasksById = {}, language = 'zh-CN' } = {}) {
+const comparableContent = value => typeof value === 'string' ? value.trim() : JSON.stringify(value ?? '')
+
+export function enrichWorkspaceMessages(messages = [], { agents = [], tasksById = {}, hostSummary = '', language = 'zh-CN' } = {}) {
   const namesById = new Map(agents.map(agent => [agent.id, agent.name || agent.id]))
+  const tasks = Object.values(tasksById)
   const zh = language === 'zh-CN'
   return messages.map(message => {
     if (message.role === 'user') return { ...message, agentName: zh ? '你' : 'You' }
-    if (message.source === 'host') return { ...message, agentName: zh ? 'Host Agent 总结' : 'Host Agent summary' }
-    const agentId = message.agentId || tasksById[message.taskId]?.agentId || ''
+    const content = comparableContent(message.content)
+    const inferredTask = tasks.find(task => [task.output, task.streamingOutput, task.result].some(output => output != null && comparableContent(output) === content))
+    const isHost = message.source === 'host' || (hostSummary && comparableContent(hostSummary) === content)
+    if (isHost) return { ...message, source: 'host', agentName: zh ? 'Host Agent 总结' : 'Host Agent summary' }
+    const agentId = message.agentId || tasksById[message.taskId]?.agentId || inferredTask?.agentId || ''
     return { ...message, agentId, agentName: message.agentName || namesById.get(agentId) || agentId || 'Agent' }
   })
 }

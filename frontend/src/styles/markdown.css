@@ -11,9 +11,9 @@
 .markdown-content pre { max-width: 100%; max-height: 320px; padding: 12px; overflow: auto; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-page); white-space: pre; }
 .markdown-content pre code { padding: 0; background: transparent; }
 .markdown-content__table { width: 100%; max-width: 100%; margin: .8em 0; overflow-x: auto; border: 1px solid var(--color-border); border-radius: 8px; }
-.markdown-content table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: .92em; }
-.markdown-content th, .markdown-content td { max-width: 360px; padding: 7px 10px; border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; white-space: normal; }
+.markdown-content table { width: 100%; min-width: 560px; table-layout: auto; border-collapse: collapse; font-size: .92em; }
+.markdown-content th, .markdown-content td { max-width: 360px; padding: 7px 10px; overflow-wrap: anywhere; word-break: break-word; border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); text-align: left; vertical-align: top; white-space: normal; }
 .markdown-content th { background: var(--color-surface-subtle); font-weight: 700; }.markdown-content tr:last-child td { border-bottom: 0; }
 .markdown-content a { color: var(--color-primary); text-decoration: underline; }
-.markdown-content.is-compact { font-size: 11px; line-height: 1.55; }.markdown-content.is-compact pre { max-height: 200px; }
+.markdown-content.is-compact { min-width: 0; max-width: 100%; font-size: 11px; line-height: 1.55; }.markdown-content.is-compact table { min-width: 420px; }.markdown-content.is-compact pre { max-height: 200px; }
 .workspace-message__body:has(.markdown-content) { white-space: normal; }

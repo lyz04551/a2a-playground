@@ -94,6 +94,20 @@ test('workspace messages display their concrete Agent or Host source', () => {
   ])
 })
 
+test('restored legacy messages infer Agent and Host labels from run outputs', () => {
+  const messages = enrichWorkspaceMessages([
+    { id: 'agent-output', role: 'agent', content: '检查完成' },
+    { id: 'host-output', role: 'agent', content: '集群检查总结' },
+  ], {
+    agents: [{ id: 'ops', name: 'K8s Ops Agent' }],
+    tasksById: { task: { id: 'task', agentId: 'ops', output: '检查完成' } },
+    hostSummary: '集群检查总结',
+    language: 'zh-CN',
+  })
+
+  assert.deepEqual(messages.map(message => message.agentName), ['K8s Ops Agent', 'Host Agent 总结'])
+})
+
 test('restoring a direct conversation uses the deterministically latest run target before legacy agent fallback', () => {
   const latestRun = selectLatestConversationRun('conv-1', [
     { id: 'run-older', conversation_id: 'conv-1', target_agent_id: 'legacy-agent', updated_at: '2026-07-30T10:00:00Z' },

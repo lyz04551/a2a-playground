@@ -245,7 +245,7 @@ function reduceNormalizedEvent(state, event) {
     blockedReason: data.reason,
   })
   if (event.type === 'task.completed' || event.type === 'task.failed') {
-    const task = state.tasksById[event.task_id]
+    const task = state.tasksById[event.task_id] || state.tasksById[event.parent_task_id]
     const completedAt = normalizeTimestamp(event.timestamp)
     const startedMs = task?.startedAt ? Date.parse(task.startedAt) : NaN
     const completedMs = completedAt ? Date.parse(completedAt) : NaN
@@ -318,7 +318,7 @@ function reduceNormalizedEvent(state, event) {
       id,
       role: data.role || current?.role || 'agent',
       content,
-      taskId: event.task_id,
+      taskId: task?.id || event.task_id,
       agentId: data.agent_id || current?.agentId || task?.agentId || '',
       ...(data.agent_name || current?.agentName ? { agentName: data.agent_name || current.agentName } : {}),
       source: isHostMessage ? 'host' : (current?.source || 'agent'),
