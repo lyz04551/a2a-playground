@@ -85,14 +85,17 @@ async def test_approval_service_resumes_same_agent_run_with_exact_digest(
     assert repository.get_run("run-1")["status"] == "completed"
     assert repository.get_task("run-1:root")["status"] == "completed"
     events = repository.list_run_events("run-1")
-    assert [event.type for event in events[-4:]] == [
+    assert [event.type for event in events[-5:]] == [
         RunEventType.APPROVAL_DECIDED,
         RunEventType.TOOL_COMPLETED,
+        RunEventType.MESSAGE_COMPLETED,
         RunEventType.TASK_COMPLETED,
         RunEventType.RUN_COMPLETED,
     ]
-    assert events[-3].data["tool_call_id"] == "call-1"
-    assert events[-3].data["result"] == "executed"
+    assert events[-4].data["tool_call_id"] == "call-1"
+    assert events[-4].data["result"] == "executed"
+    assert events[-3].data["content"] == "executed"
+    assert events[-3].data["agent_id"] == "k8s-orchestrator"
     assert gateway.calls[0][0:2] == ("run-1", "k8s-orchestrator")
     assert '"action_digest": "bbbb' in gateway.calls[0][2]
     assert '"decision": "approved"' in gateway.calls[0][2]

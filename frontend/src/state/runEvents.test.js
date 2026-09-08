@@ -46,6 +46,19 @@ test('message, approval, artifact, and terminal events update their normalized c
   assert.equal(state.run.status, 'completed')
 })
 
+test('direct root messages belong to the selected agent instead of Host', () => {
+  let state = reduceRunEvent(emptyRunState, event('run.started', 1, {
+    mode: 'direct', target_agent_id: 'k8s-orchestrator',
+  }))
+  state = reduceRunEvent(state, event('message.completed', 2, {
+    content: 'deleted', agent_id: 'k8s-orchestrator', message_id: 'msg-direct',
+  }))
+
+  assert.equal(state.messages[0].source, 'agent')
+  assert.equal(state.messages[0].agentId, 'k8s-orchestrator')
+  assert.equal(state.hostSummary, '')
+})
+
 test('duplicate envelopes leave normalized state unchanged', () => {
   const started = event('run.started', 1)
   const once = reduceRunEvent(emptyRunState, started)

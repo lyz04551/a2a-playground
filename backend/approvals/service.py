@@ -167,6 +167,10 @@ class ApprovalService:
         persist(RunEventType.TOOL_COMPLETED, tool_data)
 
         if succeeded:
+            persist(
+                RunEventType.MESSAGE_COMPLETED,
+                {"content": result.get("text") or "操作已完成。"},
+            )
             task_event = RunEventType.TASK_COMPLETED
             task_status = "completed"
             run_event = RunEventType.RUN_COMPLETED

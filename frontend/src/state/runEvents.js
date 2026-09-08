@@ -309,9 +309,10 @@ function reduceNormalizedEvent(state, event) {
         streamingOutput: output,
         ...(event.type === 'message.completed' ? { output } : {}),
       })
-    } else if (event.type === 'message.completed') {
+    } else if (event.type === 'message.completed' && state.run?.mode !== 'direct') {
       next = { ...state, hostSummary: content }
     }
+    const isHostMessage = event.parent_task_id === null && state.run?.mode !== 'direct'
     return { ...next, messages: upsertById(next.messages, {
       ...current,
       id,
@@ -320,7 +321,7 @@ function reduceNormalizedEvent(state, event) {
       taskId: event.task_id,
       agentId: data.agent_id || current?.agentId || task?.agentId || '',
       ...(data.agent_name || current?.agentName ? { agentName: data.agent_name || current.agentName } : {}),
-      source: event.parent_task_id === null ? 'host' : (current?.source || 'agent'),
+      source: isHostMessage ? 'host' : (current?.source || 'agent'),
       completed: event.type === 'message.completed',
     }) }
   }

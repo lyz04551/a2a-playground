@@ -70,6 +70,8 @@ def _unwrap_artifact_text(text: str) -> str:
 
 
 def _extract_text_from_artifact(artifact) -> str:
+    if getattr(artifact, "name", "") == "pending_action":
+        return ""
     return "".join(
         _unwrap_artifact_text(_get_text_from_part(part))
         for part in (artifact.parts or [])
