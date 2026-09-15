@@ -324,6 +324,35 @@ async def test_agent_returns_deterministic_partial_result_when_summary_model_is_
     assert "没有可用的已完成工具结果" in events[0].content
 
 
+@pytest.mark.anyio
+async def test_deterministic_partial_summary_turns_security_results_into_findings():
+    config = AgentRuntimeConfig(
+        agent_id="security", name="Security", port=8053,
+        public_url="http://security", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+
+    summary = await agent._deterministic_partial_summary(
+        {
+            "cluster": '[{"name":"default","version":"v1.33.4"}]',
+            "namespaces": '[{"name":"default"},{"name":"kube-system"}]',
+            "rbac": '[{"name":"tools-cluster-admin-rolebinding"},{"name":"reader"}]',
+        },
+        "总结模型超时",
+        {
+            "cluster": "list_k8s_cluster",
+            "namespaces": "list_k8s_namespace",
+            "rbac": "list_k8s_cluster_rolebinding",
+        },
+    )
+
+    assert "Kubernetes v1.33.4" in summary
+    assert "2 个命名空间" in summary
+    assert "tools-cluster-admin-rolebinding" in summary
+    assert "roleRef 与 subjects" in summary
+    assert "工具调用" not in summary
+
+
 def test_current_run_summary_evidence_is_deduplicated_and_bounded():
     evidence = RuntimeMCPAgent._current_run_evidence({
         "call-1": "a" * 5_000,

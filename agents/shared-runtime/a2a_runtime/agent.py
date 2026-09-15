@@ -230,6 +230,7 @@ class RuntimeMCPAgent:
             self._tool_adapter.reset_budget(context_id)
         seen_tool_calls: set[str] = set()
         seen_tool_results: set[str] = set()
+        current_tool_names: dict[str, str] = {}
         current_tool_results: dict[str, str] = {}
         try:
             previous = await self._graph.aget_state(graph_config)
@@ -259,6 +260,7 @@ class RuntimeMCPAgent:
                                 if call["id"] in seen_tool_calls:
                                     continue
                                 seen_tool_calls.add(call["id"])
+                                current_tool_names[call["id"]] = call["name"]
                                 yield RuntimeEvent(
                                     type=RuntimeEventType.TOOL_CALL,
                                     content=call["name"],
@@ -297,13 +299,15 @@ class RuntimeMCPAgent:
                 content = await self._force_summary(query, evidence)
             except TimeoutError:
                 content = await self._deterministic_partial_summary(
-                    evidence,
+                    current_tool_results,
                     "强制总结模型也达到时间限制",
+                    current_tool_names,
                 )
             except Exception as exc:
                 content = await self._deterministic_partial_summary(
-                    evidence,
+                    current_tool_results,
                     f"强制总结模型不可用：{exc}",
+                    current_tool_names,
                 )
             yield RuntimeEvent.completed(
                 content=content,
@@ -363,13 +367,72 @@ class RuntimeMCPAgent:
         return content
 
     async def _deterministic_partial_summary(
-        self, evidence: str, reason: str
+        self,
+        results: dict[str, str],
+        reason: str,
+        tool_names: dict[str, str] | None = None,
     ) -> str:
+        tool_names = tool_names or {}
+        findings: list[str] = []
+        evidence_notes: list[str] = []
+        for call_id, content in results.items():
+            tool = tool_names.get(call_id, "").lower()
+            try:
+                payload = json.loads(content)
+            except (TypeError, json.JSONDecodeError):
+                payload = None
+            rows = payload if isinstance(payload, list) else []
+            if "namespace" in tool and rows:
+                names = [
+                    str(row.get("name"))
+                    for row in rows
+                    if isinstance(row, dict) and row.get("name")
+                ]
+                evidence_notes.append(
+                    f"已读取 {len(names)} 个命名空间：{', '.join(names[:12])}"
+                )
+            elif "rolebinding" in tool and rows:
+                names = [
+                    str(row.get("name"))
+                    for row in rows
+                    if isinstance(row, dict) and row.get("name")
+                ]
+                elevated = [
+                    name
+                    for name in names
+                    if any(
+                        marker in name.lower()
+                        for marker in (
+                            "cluster-admin",
+                            "full-access",
+                            "admin",
+                            "writer",
+                        )
+                    )
+                ]
+                if elevated:
+                    findings.append(
+                        "发现名称提示高权限的 RBAC 绑定："
+                        f"{', '.join(elevated[:8])}；仅凭名称不能确认实际授权范围，"
+                        "需继续核对 roleRef 与 subjects。"
+                    )
+                evidence_notes.append(f"已读取 {len(names)} 条 RBAC 绑定记录")
+            elif rows and any(isinstance(row, dict) and row.get("version") for row in rows):
+                row = next(row for row in rows if isinstance(row, dict) and row.get("version"))
+                evidence_notes.append(
+                    f"已连接集群 {row.get('name', 'default')}（Kubernetes {row['version']}）"
+                )
+
+        if not findings:
+            findings.append("现有证据尚不足以确认具体安全漏洞，不能据此判定集群安全或不安全。")
+        if not evidence_notes:
+            evidence_notes.append("没有可用的已完成工具结果。")
         return (
-            "本次调查已达到时间预算，已停止继续调用工具。\n\n"
-            f"已取得的结果：\n{evidence[:6_000]}\n\n"
-            f"限制：{reason}。以上是部分结果；后续检查和任何尚未进入审批的写操作"
-            "均未执行。"
+            "本次安全检查已达到时间预算，以下结论基于已完成的只读检查。\n\n"
+            "初步结论：\n- " + "\n- ".join(findings) + "\n\n"
+            "已核实证据：\n- " + "\n- ".join(evidence_notes) + "\n\n"
+            "建议：优先复核疑似高权限绑定的 roleRef、subjects 和实际权限，遵循最小权限原则。\n\n"
+            f"限制：{reason}；工作负载配置、网络策略、Secret 暴露等未完成项未作结论，未执行任何写操作。"
         )
 
     @staticmethod
