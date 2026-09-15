@@ -370,6 +370,24 @@ def test_current_run_summary_evidence_is_deduplicated_and_bounded():
     assert "call-7" not in evidence
 
 
+def test_agent_bounds_model_output_and_disables_thinking_by_default(
+    monkeypatch,
+):
+    monkeypatch.delenv("AGENT_ENABLE_THINKING", raising=False)
+    monkeypatch.delenv("AGENT_MAX_OUTPUT_TOKENS", raising=False)
+    monkeypatch.delenv("AGENT_SUMMARY_MAX_TOKENS", raising=False)
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="Ops", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+
+    assert agent.enable_thinking is False
+    assert agent.max_output_tokens == 4096
+    assert agent.summary_max_tokens == 1024
+
+
 @pytest.mark.anyio
 async def test_agent_stream_emits_every_result_from_parallel_tool_batch():
     calls = [

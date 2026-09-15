@@ -98,6 +98,15 @@ class RuntimeMCPAgent:
             )
         self.max_steps = int(os.getenv("AGENT_MAX_STEPS", "30"))
         self.max_tool_calls = int(os.getenv("AGENT_MAX_TOOL_CALLS", "40"))
+        self.max_output_tokens = int(
+            os.getenv("AGENT_MAX_OUTPUT_TOKENS", "4096")
+        )
+        self.summary_max_tokens = int(
+            os.getenv("AGENT_SUMMARY_MAX_TOKENS", "1024")
+        )
+        self.enable_thinking = os.getenv(
+            "AGENT_ENABLE_THINKING", "false"
+        ).strip().lower() in {"1", "true", "yes", "on"}
         self.tool_budget_warning_ratio = float(
             os.getenv("AGENT_TOOL_BUDGET_WARNING_RATIO", "0.6")
         )
@@ -146,6 +155,12 @@ class RuntimeMCPAgent:
             openai_api_base=llm.base_url,
             temperature=0,
             streaming=True,
+            max_tokens=self.max_output_tokens,
+            extra_body={
+                "chat_template_kwargs": {
+                    "enable_thinking": self.enable_thinking,
+                }
+            },
         )
         self._model = model
         self._graph = create_react_agent(
@@ -360,7 +375,15 @@ class RuntimeMCPAgent:
             f"用户问题：{query}\n\n已取得证据：\n{evidence}"
         )
         async with asyncio.timeout(self.summary_reserve_seconds):
-            response = await self._model.ainvoke([HumanMessage(content=prompt)])
+            summary_model = self._model.bind(
+                max_tokens=self.summary_max_tokens,
+                extra_body={
+                    "chat_template_kwargs": {"enable_thinking": False}
+                },
+            )
+            response = await summary_model.ainvoke(
+                [HumanMessage(content=prompt)]
+            )
         content = str(getattr(response, "content", "") or "").strip()
         if not content:
             raise RuntimeError("Agent model returned an empty forced summary")
