@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 
 import pytest
@@ -51,6 +52,11 @@ class SchemaAwareModel:
                 "completion_criteria": ["evidence returned"],
             }],
         }))
+
+
+class HangingModel:
+    async def ainvoke(self, _messages):
+        await asyncio.Event().wait()
 
 
 AGENTS = [
@@ -427,3 +433,21 @@ async def test_langgraph_decision_port_honors_explicit_structured_block_without_
     assert evaluation.outcome == "blocked"
     assert evaluation.reason == "privileged container"
     assert model.calls == []
+
+
+@pytest.mark.anyio
+async def test_structured_host_decision_has_hard_total_timeout(monkeypatch):
+    monkeypatch.setenv("HOST_DECISION_TIMEOUT_SECONDS", "0.01")
+    port = LangGraphDecisionPort(HangingModel())
+    task = PlannedTask(
+        id="inspect",
+        agent_id="ops",
+        objective="inspect",
+        completion_criteria=["evidence"],
+    )
+
+    with pytest.raises(TimeoutError):
+        await port.evaluate(
+            task,
+            DelegationResult(state="completed", text="incomplete"),
+        )

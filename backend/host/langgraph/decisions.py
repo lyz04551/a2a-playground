@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from typing import TypeVar
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -32,6 +34,9 @@ class LangGraphDecisionPort:
     def __init__(self, model=None, *, model_factory=None):
         self._model = model
         self._model_factory = model_factory
+        self._decision_timeout_seconds = float(
+            os.getenv("HOST_DECISION_TIMEOUT_SECONDS", "45")
+        )
 
     def _current_model(self):
         return self._model_factory() if self._model_factory else self._model
@@ -273,22 +278,23 @@ concise reason. Approval-required work is blocked, never sufficient.""",
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
         ]
         error = ""
-        for attempt in range(2):
-            current = list(messages)
-            if attempt:
-                current.append(HumanMessage(content=(
-                    f"The previous response was invalid: {error}. "
-                    "Return only corrected JSON."
-                )))
-            response = await self._current_model().ainvoke(current)
-            try:
-                content = str(response.content).strip()
-                if content.startswith("```") and content.endswith("```"):
-                    content = content[3:-3].strip()
-                    if content.startswith("json"):
-                        content = content[4:].lstrip()
-                raw = json.loads(content)
-                return schema.model_validate(raw)
-            except (json.JSONDecodeError, TypeError, ValidationError) as exc:
-                error = str(exc)
+        async with asyncio.timeout(self._decision_timeout_seconds):
+            for attempt in range(2):
+                current = list(messages)
+                if attempt:
+                    current.append(HumanMessage(content=(
+                        f"The previous response was invalid: {error}. "
+                        "Return only corrected JSON."
+                    )))
+                response = await self._current_model().ainvoke(current)
+                try:
+                    content = str(response.content).strip()
+                    if content.startswith("```") and content.endswith("```"):
+                        content = content[3:-3].strip()
+                        if content.startswith("json"):
+                            content = content[4:].lstrip()
+                    raw = json.loads(content)
+                    return schema.model_validate(raw)
+                except (json.JSONDecodeError, TypeError, ValidationError) as exc:
+                    error = str(exc)
         raise RuntimeError(f"Model did not return valid {schema.__name__}")

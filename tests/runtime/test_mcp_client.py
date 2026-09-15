@@ -320,7 +320,7 @@ async def test_agent_returns_deterministic_partial_result_when_summary_model_is_
     assert events[0].is_task_complete is True
     assert events[0].type is RuntimeEventType.COMPLETED
     assert events[0].data["status"] == "partial"
-    assert "时间预算" in events[0].content
+    assert "预算" in events[0].content
     assert "没有可用的已完成工具结果" in events[0].content
 
 
@@ -430,7 +430,7 @@ async def test_agent_stream_emits_every_result_from_parallel_tool_batch():
     ]
 
     assert result_ids == ["call-1", "call-2"]
-    assert graph.received_config["recursion_limit"] == 30
+    assert graph.received_config["recursion_limit"] == 82
 
 
 @pytest.mark.anyio
@@ -478,3 +478,41 @@ async def test_agent_stream_does_not_replay_tools_from_existing_context():
     ]
 
     assert public_ids == ["new", "new"]
+
+
+@pytest.mark.anyio
+async def test_agent_converts_step_limit_message_into_partial_evidence():
+    call = AIMessage(content="", tool_calls=[
+        {"id": "check", "name": "list_k8s_resource", "args": {}},
+    ])
+    result = ToolMessage(
+        content='[{"name":"nginx"}]', tool_call_id="check"
+    )
+
+    class StepLimitedGraph:
+        async def astream(self, *_args, **_kwargs):
+            yield {"messages": [call]}
+            yield {"messages": [call, result]}
+
+        async def aget_state(self, _config):
+            class State:
+                values = {"messages": [AIMessage(
+                    content="Sorry, need more steps to process this request."
+                )]}
+            return State()
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+    agent._tools_loaded = True
+    agent._graph = StepLimitedGraph()
+
+    events = [event async for event in agent.stream("verify", "ctx")]
+    completed = events[-1]
+
+    assert completed.data["status"] == "partial"
+    assert "list_k8s_resource 已返回" in completed.content
+    assert "nginx" in completed.content
+    assert "Sorry" not in completed.content

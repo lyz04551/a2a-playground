@@ -239,7 +239,12 @@ class RuntimeMCPAgent:
 
         graph_config = {
             "configurable": {"thread_id": context_id},
-            "recursion_limit": self.max_steps,
+            # A ReAct tool turn consumes an agent step and a tool step. Keep
+            # the graph recursion budget consistent with the configured tool
+            # budget so the framework does not terminate before ToolPolicy.
+            "recursion_limit": max(
+                self.max_steps, self.max_tool_calls * 2 + 2
+            ),
         }
         if self._tool_adapter is not None:
             self._tool_adapter.reset_budget(context_id)
@@ -350,6 +355,32 @@ class RuntimeMCPAgent:
         content = ""
         if messages and isinstance(messages[-1], AIMessage):
             content = str(messages[-1].content or "")
+        if "Sorry, need more steps to process this request." in content:
+            content = await self._deterministic_partial_summary(
+                current_tool_results,
+                "调查步骤预算已用尽",
+                current_tool_names,
+            )
+            yield RuntimeEvent.completed(
+                content=content,
+                artifact_name="specialist_result",
+                data={
+                    "status": "partial",
+                    "summary": content,
+                    "findings": [],
+                    "resources": [],
+                    "evidence": [],
+                    "recommendations": [],
+                    "continuation": {
+                        "allowed": True,
+                        "reason": "investigation step budget reached",
+                    },
+                    "limitations": [
+                        "调查步骤预算已用尽，结论仅基于已完成的工具结果。"
+                    ],
+                },
+            )
+            return
         yield RuntimeEvent.completed(
             content=content or "处理完成，但未生成文本响应。",
             artifact_name="specialist_result",
@@ -447,14 +478,20 @@ class RuntimeMCPAgent:
                 )
 
         if not findings:
-            findings.append("现有证据尚不足以确认具体安全漏洞，不能据此判定集群安全或不安全。")
+            findings.append("现有证据不足以完整满足任务要求，仅报告已完成的检查。")
+        if not evidence_notes:
+            for call_id, content in list(results.items())[:4]:
+                tool = tool_names.get(call_id, "unknown")
+                evidence_notes.append(
+                    f"{tool} 已返回：{content[:500]}"
+                )
         if not evidence_notes:
             evidence_notes.append("没有可用的已完成工具结果。")
         return (
-            "本次安全检查已达到时间预算，以下结论基于已完成的只读检查。\n\n"
+            f"{self.config.name} 本次检查已达到执行预算，以下结论基于已完成的只读检查。\n\n"
             "初步结论：\n- " + "\n- ".join(findings) + "\n\n"
             "已核实证据：\n- " + "\n- ".join(evidence_notes) + "\n\n"
-            "建议：优先复核疑似高权限绑定的 roleRef、subjects 和实际权限，遵循最小权限原则。\n\n"
+            "建议：根据上述已取得证据继续完成尚未覆盖的检查。\n\n"
             f"限制：{reason}；工作负载配置、网络策略、Secret 暴露等未完成项未作结论，未执行任何写操作。"
         )
 
