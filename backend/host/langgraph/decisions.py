@@ -84,6 +84,10 @@ logical correction and is not a new corrective mutation. Never send mutation wor
 to a read-only diagnostics Agent. Verify again after the correction. Return
 only a concise public reason. The Host must never ask for write approval in text;
 approval is created only by a delegated Agent's write tool.
+An identical incomplete task may be continued only once. If the second result is
+still transitional, empty, or reports a tool argument/schema error, stop and report
+that state; do not poll or delegate the same mutation again. A tool validation error
+is not a successful mutation and must not be described as completed.
 An incomplete, partial, timed-out, or step-budget-limited verification is not proof
 that the resource is unhealthy and must never justify a corrective mutation.
 Use payload.response_language for every user-visible string. When it is zh-CN,

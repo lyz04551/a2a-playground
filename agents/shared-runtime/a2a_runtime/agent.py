@@ -381,6 +381,34 @@ class RuntimeMCPAgent:
                 },
             )
             return
+        failed_tool_results = [
+            result
+            for result in current_tool_results.values()
+            if result.lstrip().startswith("工具执行失败：")
+        ]
+        if failed_tool_results:
+            failure = failed_tool_results[-1]
+            summary = content.strip() or failure
+            yield RuntimeEvent.completed(
+                content=summary,
+                artifact_name="specialist_result",
+                data={
+                    "status": "partial",
+                    "summary": summary,
+                    "findings": [],
+                    "resources": [],
+                    "evidence": [],
+                    "recommendations": [],
+                    "continuation": {
+                        "allowed": False,
+                        "reason": failure,
+                    },
+                    "limitations": [
+                        "工具调用失败，本任务未完成；不得将其视为成功变更。"
+                    ],
+                },
+            )
+            return
         yield RuntimeEvent.completed(
             content=content or "处理完成，但未生成文本响应。",
             artifact_name="specialist_result",

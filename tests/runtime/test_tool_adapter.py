@@ -50,6 +50,26 @@ def test_schema_model_enforces_required_and_accepts_nested_values():
         model(patch={"replicas": 2})
 
 
+def test_schema_model_serializes_structured_values_for_string_fields():
+    model = schema_to_model(
+        "PatchStringArgs",
+        {
+            "type": "object",
+            "required": ["patch_data"],
+            "properties": {
+                "patch_data": {
+                    "type": "string",
+                    "description": "JSON merge patch",
+                },
+            },
+        },
+    )
+
+    parsed = model(patch_data={"spec": {"replicas": 2}})
+
+    assert parsed.patch_data == '{"spec":{"replicas":2}}'
+
+
 @pytest.mark.anyio
 async def test_allowed_tool_calls_real_client_boundary():
     client = FakeMCPClient()

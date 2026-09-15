@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import uuid
 import math
-from typing import Any
+import json
+from typing import Annotated, Any
 
 from langchain_core.tools import StructuredTool
 from langchain_core.runnables import RunnableConfig
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, BeforeValidator, Field, create_model
 
 from .models import (
     ApprovalRequired,
@@ -28,7 +29,22 @@ _PRIMITIVE_TYPES: dict[str, type] = {
 
 
 def _schema_type(schema: dict[str, Any]) -> type:
-    return _PRIMITIVE_TYPES.get(schema.get("type", "string"), Any)
+    schema_type = schema.get("type", "string")
+    if schema_type == "string":
+        # Some tool-calling models emit a JSON object for parameters whose
+        # contract is a JSON-encoded string. Normalize that representation at
+        # the schema boundary so the exact same validated string is used by
+        # approval policy and the MCP call. JSON is also valid YAML, making
+        # this safe for string-based YAML payloads without tool-name rules.
+        def normalize_string(value: Any) -> Any:
+            if isinstance(value, (dict, list)):
+                return json.dumps(
+                    value, ensure_ascii=False, separators=(",", ":")
+                )
+            return value
+
+        return Annotated[str, BeforeValidator(normalize_string)]
+    return _PRIMITIVE_TYPES.get(schema_type, Any)
 
 
 def schema_to_model(name: str, schema: dict[str, Any]) -> type[BaseModel]:

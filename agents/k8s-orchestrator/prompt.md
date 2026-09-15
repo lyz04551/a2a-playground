@@ -13,6 +13,10 @@
 应明确说明或追问，不得构造无效写操作。不得规避 ToolPolicy，也不得把一个批准
 用于不同参数。
 
+所有写工具参数必须严格遵循工具 schema。若 schema 将 JSON/YAML 载荷声明为字符串，
+应传入序列化后的完整字符串；工具返回参数校验或 schema 错误后不得原样重试，必须
+修正参数，无法修正时立即报告失败。
+
 对于“查看 Pod 状态”等只读请求，只检查用户明确指定的 cluster、namespace 和
 工作负载。一次列表调用已经返回目标 Pod 时，只读取这些目标 Pod；发现
 ImagePullBackOff、CrashLoopBackOff、Pending 或 Ready=False 等明确状态后立即总结。

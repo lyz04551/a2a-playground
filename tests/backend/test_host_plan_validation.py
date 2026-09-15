@@ -523,6 +523,44 @@ def test_exact_incomplete_verification_can_continue_without_mutation():
     )
 
 
+def test_react_rejects_third_identical_incomplete_attempt():
+    first = task("verify-first", "k8s-ops", workflow_role="verification")
+    second = first.model_copy(update={"id": "verify-second"})
+    state = HostRunState(
+        goal="deploy nginx",
+        observations={
+            first.id: ObservedTask(
+                task=first,
+                result=DelegationResult(state="completed", text="pending"),
+                evaluation=Evaluation(
+                    outcome="insufficient", reason="still pending"
+                ),
+                actual_agent_id="k8s-ops",
+            ),
+            second.id: ObservedTask(
+                task=second,
+                result=DelegationResult(state="completed", text="pending"),
+                evaluation=Evaluation(
+                    outcome="insufficient", reason="still pending"
+                ),
+                actual_agent_id="k8s-ops",
+            ),
+        },
+        task_fingerprints={task_fingerprint(first)},
+    )
+
+    with pytest.raises(PlanValidationError, match="continuation limit"):
+        validate_decision(
+            HostDecision(
+                action="delegate",
+                reason="poll again",
+                tasks=[first.model_copy(update={"id": "verify-third"})],
+            ),
+            AGENTS,
+            state,
+        )
+
+
 def test_react_rejects_verification_in_same_round_as_unfinished_mutation():
     security = task(
         "security", "k8s-security", workflow_role="precheck"

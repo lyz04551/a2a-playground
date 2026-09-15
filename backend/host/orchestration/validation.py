@@ -85,6 +85,16 @@ def validate_decision(
                 and task_fingerprint(observed.task) == fingerprint
                 for observed in state.observations.values()
         )
+        prior_incomplete_attempts = sum(
+            observed.evaluation.outcome == "insufficient"
+            and task_fingerprint(observed.task) == fingerprint
+            for observed in state.observations.values()
+        )
+        if continues_incomplete_task and prior_incomplete_attempts >= 2:
+            raise PlanValidationError(
+                f"task '{task.id}' continuation limit reached; stop and "
+                "report the latest state instead of polling or retrying again"
+            )
         if (
             fingerprint in state.task_fingerprints
             and not continues_incomplete_task
