@@ -504,7 +504,7 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
     class ResumingHost:
         async def evaluate_task(self, task, result):
             return Evaluation(
-                outcome="sufficient", reason="resource created"
+                outcome="blocked", reason="approval metadata absent from text"
             )
 
         async def resume_message_stream(
@@ -576,6 +576,8 @@ async def test_approved_auto_run_resumes_pending_verification_and_host_summary(
                         "agent_id": "orchestrator",
                         "objective": "create nginx",
                         "completion_criteria": ["resource created"],
+                        "risk": "write",
+                        "workflow_role": "mutation",
                     },
                     {
                         "id": "root:plan:verify",

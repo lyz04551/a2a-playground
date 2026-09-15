@@ -334,9 +334,20 @@ class RunService:
             )
             if execution_succeeded:
                 task_definition = self._logical_task_definition(run, paused)
-                evaluation = await self.auto_host.evaluate_task(
-                    task_definition.model_dump(), result.model_dump()
-                )
+                if task_definition.workflow_role == "mutation":
+                    # The approval record plus a terminal successful tool
+                    # execution is the authoritative mutation observation.
+                    # Re-evaluating that result with the model can incorrectly
+                    # demand another approval because the Agent's final text
+                    # does not repeat the approval metadata.
+                    evaluation = Evaluation(
+                        outcome="sufficient",
+                        reason="approved mutation tool execution completed",
+                    )
+                else:
+                    evaluation = await self.auto_host.evaluate_task(
+                        task_definition.model_dump(), result.model_dump()
+                    )
             task_completed = (
                 execution_succeeded
                 and evaluation.outcome == "sufficient"
