@@ -182,71 +182,78 @@ class HostOrchestrationEngine:
                 }
 
             progress: asyncio.Queue[dict] = asyncio.Queue()
-            executions_task = asyncio.ensure_future(asyncio.gather(
-                *(
+            execution_tasks = {
+                asyncio.create_task(
                     self._run_task(
                         run_id, task, prompts[task.id], progress.put
                     )
-                    for task in ready
-                )
-            ))
+                ): task
+                for task in ready
+            }
+            pending = set(execution_tasks)
             progress_task: asyncio.Task | None = asyncio.create_task(progress.get())
-            while not executions_task.done():
+            approval_encountered = False
+            while pending:
                 done, _ = await asyncio.wait(
-                    {executions_task, progress_task},
+                    pending | {progress_task},
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if progress_task in done:
                     yield progress_task.result()
                     progress_task = asyncio.create_task(progress.get())
+                for completed in done & pending:
+                    pending.remove(completed)
+                    task = execution_tasks[completed]
+                    result, evaluation, agent_id, recovery_events = (
+                        await completed
+                    )
+                    for event in recovery_events:
+                        yield event
+                    results[task.id] = result
+                    remaining.remove(task.id)
+                    yield {
+                        "type": "task_evaluated",
+                        "task_id": task.id,
+                        "agent_id": agent_id,
+                        "outcome": evaluation.outcome,
+                        "reason": evaluation.reason,
+                    }
+                    if (
+                        evaluation.outcome == "sufficient"
+                        and result.state == "completed"
+                    ):
+                        successful.add(task.id)
+                        yield {
+                            "type": "task_completed",
+                            "task_id": task.id,
+                            "agent_id": agent_id,
+                            "result": result.text,
+                            "delegation_result": result.model_dump(),
+                            "evaluation": evaluation.model_dump(),
+                        }
+                    elif result.state == "approval_required":
+                        approval_encountered = True
+                        yield {
+                            "type": "approval_required",
+                            "task_id": task.id,
+                            "agent_id": agent_id,
+                            "approval": result.approval or {},
+                            "delegation_result": result.model_dump(),
+                            "evaluation": evaluation.model_dump(),
+                        }
+                    else:
+                        yield {
+                            "type": "task_failed",
+                            "task_id": task.id,
+                            "agent_id": agent_id,
+                            "error": result.error or evaluation.reason,
+                            "delegation_result": result.model_dump(),
+                            "evaluation": evaluation.model_dump(),
+                        }
             if progress_task and not progress_task.done():
                 progress_task.cancel()
             while not progress.empty():
                 yield progress.get_nowait()
-            executions = await executions_task
-            approval_encountered = False
-            for task, execution in zip(ready, executions, strict=True):
-                result, evaluation, agent_id, recovery_events = execution
-                for event in recovery_events:
-                    yield event
-                results[task.id] = result
-                remaining.remove(task.id)
-                yield {
-                    "type": "task_evaluated",
-                    "task_id": task.id,
-                    "agent_id": agent_id,
-                    "outcome": evaluation.outcome,
-                    "reason": evaluation.reason,
-                }
-                if evaluation.outcome == "sufficient" and result.state == "completed":
-                    successful.add(task.id)
-                    yield {
-                        "type": "task_completed",
-                        "task_id": task.id,
-                        "agent_id": agent_id,
-                        "result": result.text,
-                        "delegation_result": result.model_dump(),
-                        "evaluation": evaluation.model_dump(),
-                    }
-                elif result.state == "approval_required":
-                    approval_encountered = True
-                    yield {
-                        "type": "approval_required",
-                        "task_id": task.id,
-                        "agent_id": agent_id,
-                        "approval": result.approval or {},
-                        "delegation_result": result.model_dump(),
-                        "evaluation": evaluation.model_dump(),
-                    }
-                else:
-                    yield {
-                        "type": "task_failed",
-                        "task_id": task.id,
-                        "agent_id": agent_id,
-                        "error": result.error or evaluation.reason,
-                        "delegation_result": result.model_dump(),
-                        "evaluation": evaluation.model_dump(),
-                    }
 
             if approval_encountered:
                 return

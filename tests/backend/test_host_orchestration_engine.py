@@ -380,6 +380,42 @@ async def test_independent_tasks_execute_concurrently():
 
 
 @pytest.mark.anyio
+async def test_fast_parallel_task_completes_before_slow_task_finishes():
+    plan = HostPlan(
+        summary="parallel status",
+        tasks=[planned("ops", "ops"), planned("security", "security")],
+    )
+    release_security = asyncio.Event()
+
+    async def delegate(agent_id, prompt):
+        if agent_id == "security":
+            await release_security.wait()
+        return DelegationResult(state="completed", text=agent_id)
+
+    engine = HostOrchestrationEngine(
+        FakeRegistry("ops", "security"), FakeDecisions(plan), delegate
+    )
+    stream = engine.stream("user request", "run-1")
+    seen = []
+    while True:
+        event = await asyncio.wait_for(anext(stream), timeout=0.5)
+        seen.append(event)
+        if event["type"] == "task_completed":
+            break
+
+    assert seen[-1]["task_id"] == "ops"
+    assert release_security.is_set() is False
+
+    release_security.set()
+    remaining_events = [event async for event in stream]
+    assert any(
+        event["type"] == "task_completed"
+        and event["task_id"] == "security"
+        for event in remaining_events
+    )
+
+
+@pytest.mark.anyio
 async def test_delegate_progress_is_streamed_before_task_completion():
     plan = HostPlan(summary="trace", tasks=[planned("inspect", "ops")])
     release = asyncio.Event()
