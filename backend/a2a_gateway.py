@@ -76,7 +76,11 @@ class A2AGateway:
         self.transport = transport or SDKTransport()
 
     def _remote_context_id(
-        self, run_id: str, agent_id: str, binding: dict | None
+        self,
+        run_id: str,
+        agent_id: str,
+        binding: dict | None,
+        logical_task_id: str | None = None,
     ) -> str:
         if binding:
             return str(binding["context_id"])
@@ -85,7 +89,8 @@ class A2AGateway:
             (run or {}).get("conversation_id") or ""
         )
         if conversation_id:
-            return f"ctx_{conversation_id}_{agent_id}"
+            suffix = f"_{logical_task_id}" if logical_task_id else ""
+            return f"ctx_{conversation_id}_{agent_id}{suffix}"
         return f"ctx_{uuid.uuid4().hex}"
 
     async def delegate(
@@ -165,12 +170,19 @@ class A2AGateway:
         run_id: str,
         agent: dict[str, Any],
         message: str,
+        logical_task_id: str | None = None,
     ) -> AsyncIterator[dict[str, Any]]:
         """Expose only public remote execution events, with blocking fallback."""
         agent_id = agent["id"]
-        binding = self.repository.get_remote_binding(run_id, agent_id)
+        # Ordinary Host tasks are independent investigations. Reusing the
+        # run/agent binding here would feed all prior tool history back into
+        # the specialist checkpoint on every Host round. Approval continuation
+        # uses the blocking delegate() path and still reuses its binding.
+        binding = None if logical_task_id else self.repository.get_remote_binding(
+            run_id, agent_id
+        )
         context_id = self._remote_context_id(
-            run_id, agent_id, binding
+            run_id, agent_id, binding, logical_task_id
         )
         remote_task_id = ""
 

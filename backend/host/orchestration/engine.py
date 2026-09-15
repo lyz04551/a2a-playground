@@ -45,6 +45,9 @@ class HostOrchestrationEngine:
         self._delegate_accepts_progress = len(
             inspect.signature(delegate).parameters
         ) >= 4
+        self._delegate_accepts_task_id = len(
+            inspect.signature(delegate).parameters
+        ) >= 5
         self._semaphore = asyncio.Semaphore(max_concurrency)
         self._max_tasks = max_tasks
         self._max_attempts = max_attempts
@@ -555,8 +558,10 @@ class HostOrchestrationEngine:
                             "task_id": task_id,
                             "agent_id": agent_id,
                         })
-                    return await self._delegate(
-                        run_id, agent_id, prompt, emit
-                    )
+                    if self._delegate_accepts_task_id:
+                        return await self._delegate(
+                            run_id, agent_id, prompt, emit, task_id
+                        )
+                    return await self._delegate(run_id, agent_id, prompt, emit)
                 return await self._delegate(run_id, agent_id, prompt)
             return await self._delegate(agent_id, prompt)

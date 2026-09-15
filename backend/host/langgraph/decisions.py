@@ -201,6 +201,18 @@ Maximum six tasks and two attempts each.""",
                 ),
             )
         if result.output is not None and result.output.status == "partial":
+            if (
+                result.output.summary.strip()
+                and task.risk == "read"
+                and task.workflow_role != "verification"
+            ):
+                return Evaluation(
+                    outcome="sufficient",
+                    reason=(
+                        "partial diagnostic evidence is usable; the Host must "
+                        "summarize its limitations instead of repeating the audit"
+                    ),
+                )
             return Evaluation(
                 outcome="insufficient",
                 reason=(

@@ -51,6 +51,10 @@ class RuntimeMCPAgent:
             "每批工具结果返回后，必须先判断现有证据是否已经足以回答用户；"
             "证据足够时立即停止调用并输出结论。继续调用前必须能指出尚缺的关键"
             "证据，且不得擅自扩大 cluster、namespace、资源类型或对象范围。"
+            "只读诊断默认最多执行两批工具调用：第一批获取概览，第二批只补充"
+            "影响最高优先级结论的证据；不得为了穷尽所有检查项继续调用。最终"
+            "报告优先控制在 1500 个中文字符以内，先回答最重要的发现，并将未"
+            "覆盖范围压缩为简短限制说明。"
         )
         self.mcp_client = mcp_client or K8sMCPClient(
             config.mcp_url, transport=config.mcp_transport
@@ -226,6 +230,7 @@ class RuntimeMCPAgent:
             self._tool_adapter.reset_budget(context_id)
         seen_tool_calls: set[str] = set()
         seen_tool_results: set[str] = set()
+        current_tool_results: dict[str, str] = {}
         try:
             previous = await self._graph.aget_state(graph_config)
             for message in previous.values.get("messages", []):
@@ -268,6 +273,7 @@ class RuntimeMCPAgent:
                             if call_id in seen_tool_results:
                                 continue
                             seen_tool_results.add(call_id)
+                            current_tool_results[call_id] = str(message.content)
                             yield RuntimeEvent(
                                 type=RuntimeEventType.TOOL_RESULT,
                                 content=str(message.content),
@@ -286,16 +292,17 @@ class RuntimeMCPAgent:
                 if isinstance(cutoff, TimeoutError)
                 else "investigation step budget reached"
             )
+            evidence = self._current_run_evidence(current_tool_results)
             try:
-                content = await self._force_summary(query, graph_config)
+                content = await self._force_summary(query, evidence)
             except TimeoutError:
                 content = await self._deterministic_partial_summary(
-                    graph_config,
+                    evidence,
                     "强制总结模型也达到时间限制",
                 )
             except Exception as exc:
                 content = await self._deterministic_partial_summary(
-                    graph_config,
+                    evidence,
                     f"强制总结模型不可用：{exc}",
                 )
             yield RuntimeEvent.completed(
@@ -339,10 +346,9 @@ class RuntimeMCPAgent:
             },
         )
 
-    async def _force_summary(self, query: str, graph_config: dict) -> str:
+    async def _force_summary(self, query: str, evidence: str) -> str:
         if self._model is None:
             raise RuntimeError("Agent model is unavailable for forced summary")
-        evidence = await self._bounded_checkpoint_evidence(graph_config)
         prompt = (
             "调查阶段的时间预算已经用完。禁止调用任何工具。请仅根据下面已经取得的"
             "证据回答用户，优先说明已确认的问题、证据和建议，并明确指出哪些检查尚未"
@@ -357,9 +363,8 @@ class RuntimeMCPAgent:
         return content
 
     async def _deterministic_partial_summary(
-        self, graph_config: dict, reason: str
+        self, evidence: str, reason: str
     ) -> str:
-        evidence = await self._bounded_checkpoint_evidence(graph_config)
         return (
             "本次调查已达到时间预算，已停止继续调用工具。\n\n"
             f"已取得的结果：\n{evidence[:6_000]}\n\n"
@@ -367,24 +372,16 @@ class RuntimeMCPAgent:
             "均未执行。"
         )
 
-    async def _bounded_checkpoint_evidence(self, graph_config: dict) -> str:
-        try:
-            state = await self._graph.aget_state(graph_config)
-            messages = state.values.get("messages", [])
-        except (AttributeError, KeyError, TypeError, ValueError):
-            messages = []
-
+    @staticmethod
+    def _current_run_evidence(results: dict[str, str]) -> str:
         chunks: list[str] = []
-        remaining = 40_000
-        for message in messages:
-            if not isinstance(message, ToolMessage):
-                continue
-            content = str(message.content or "")
+        remaining = 12_000
+        for call_id, content in results.items():
             if not content:
                 continue
-            excerpt = content[: min(6_000, remaining)]
+            excerpt = content[: min(2_000, remaining)]
             chunks.append(
-                f"- 工具调用 {message.tool_call_id or 'unknown'} 的结果：{excerpt}"
+                f"- 工具调用 {call_id or 'unknown'} 的结果：{excerpt}"
             )
             remaining -= len(excerpt)
             if remaining <= 0:

@@ -158,6 +158,31 @@ async def test_gateway_uses_distinct_context_for_another_agent(tmp_path):
 
 
 @pytest.mark.anyio
+async def test_gateway_uses_distinct_context_for_independent_logical_tasks(tmp_path):
+    repository = create_test_repository()
+    repository.initialize()
+    repository.create_run("run-1", "conv-1", "running")
+    transport = StreamingTransport()
+    gateway = A2AGateway(repository, transport=transport)
+    agent = {"id": "ops", "url": "http://ops"}
+
+    first = [
+        event async for event in gateway.delegate_stream(
+            "run-1", agent, "diagnose", "inspect-1"
+        )
+    ]
+    second = [
+        event async for event in gateway.delegate_stream(
+            "run-1", agent, "targeted follow-up", "inspect-2"
+        )
+    ]
+
+    assert first[0]["context_id"] != second[0]["context_id"]
+    assert first[0]["context_id"].endswith("_inspect-1")
+    assert second[0]["context_id"].endswith("_inspect-2")
+
+
+@pytest.mark.anyio
 async def test_gateway_reuses_agent_context_across_runs_in_one_conversation(tmp_path):
     repository = create_test_repository()
     repository.initialize()

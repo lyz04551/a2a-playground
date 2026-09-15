@@ -324,6 +324,23 @@ async def test_agent_returns_deterministic_partial_result_when_summary_model_is_
     assert "没有可用的已完成工具结果" in events[0].content
 
 
+def test_current_run_summary_evidence_is_deduplicated_and_bounded():
+    evidence = RuntimeMCPAgent._current_run_evidence({
+        "call-1": "a" * 5_000,
+        "call-2": "b" * 5_000,
+        "call-3": "c" * 20_000,
+        "call-4": "d" * 20_000,
+        "call-5": "e" * 20_000,
+        "call-6": "f" * 20_000,
+        "call-7": "g" * 20_000,
+    })
+
+    assert evidence.count("工具调用 call-1") == 1
+    assert "a" * 2_001 not in evidence
+    assert len(evidence) < 12_500
+    assert "call-7" not in evidence
+
+
 @pytest.mark.anyio
 async def test_agent_stream_emits_every_result_from_parallel_tool_batch():
     calls = [

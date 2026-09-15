@@ -112,7 +112,12 @@ class LangGraphHostManager:
             yield event
 
     async def _delegate_task(
-        self, run_id: str, agent_id: str, message: str, on_event
+        self,
+        run_id: str,
+        agent_id: str,
+        message: str,
+        on_event,
+        logical_task_id: str | None = None,
     ) -> DelegationResult:
         agent = self._registry.get(agent_id)
         if agent is None:
@@ -122,7 +127,14 @@ class LangGraphHostManager:
         response = {"state": "completed", "text": ""}
         accumulated = ""
         specialist_output = None
-        async for event in self._gateway.delegate_stream(run_id, agent, message):
+        stream = (
+            self._gateway.delegate_stream(
+                run_id, agent, message, logical_task_id
+            )
+            if logical_task_id
+            else self._gateway.delegate_stream(run_id, agent, message)
+        )
+        async for event in stream:
             event_type = str(event.get("type") or "")
             if event_type in {"tool_call", "tool_result", "status"}:
                 await on_event(event)

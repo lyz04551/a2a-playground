@@ -162,6 +162,39 @@ async def test_partial_specialist_result_is_deterministically_insufficient():
 
 
 @pytest.mark.anyio
+async def test_partial_diagnostic_with_summary_is_usable_without_model_call():
+    model = FakeModel()
+    result = DelegationResult(
+        state="completed",
+        text="time budget reached",
+        output={
+            "status": "partial",
+            "summary": "memory-hog restarted repeatedly; remaining checks were not run",
+            "continuation": {
+                "allowed": True,
+                "reason": "investigation time budget reached",
+            },
+        },
+    )
+
+    evaluation = await LangGraphDecisionPort(model).evaluate(
+        PlannedTask(
+            id="inspect",
+            agent_id="ops",
+            objective="inspect cluster health",
+            completion_criteria=["report confirmed findings and limitations"],
+            workflow_role="standard",
+            risk="read",
+        ),
+        result,
+    )
+
+    assert evaluation.outcome == "sufficient"
+    assert "limitations" in evaluation.reason
+    assert model.calls == []
+
+
+@pytest.mark.anyio
 async def test_decide_next_retries_semantically_invalid_decision_with_feedback():
     agents = [
         *AGENTS,
