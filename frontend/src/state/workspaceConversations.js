@@ -12,3 +12,12 @@ export function filterConversations(conversations = [], query = '') {
 export function normalizeConversationTitle(value) {
   return String(value || '').trim().slice(0, 80)
 }
+
+export function workspaceConversationSearch(search = '', conversationId = '') {
+  const params = new URLSearchParams(search)
+  params.delete('prompt')
+  params.delete('new')
+  if (conversationId) params.set('conversation', conversationId)
+  else params.delete('conversation')
+  return params.toString()
+}

@@ -13,6 +13,7 @@ import DebugDrawer from '../components/workspace/DebugDrawer'
 import { useConsoleSettings } from '../context/ConsoleSettingsContext'
 import { approvalStatusAfterDecision, enrichWorkspaceMessages, getWorkspaceSendState } from '../components/workspace/workspaceState'
 import { deriveRunStage } from '../state/runStage'
+import { workspaceConversationSearch } from '../state/workspaceConversations'
 
 export default function WorkspacePage() {
   const location = useLocation()
@@ -55,11 +56,17 @@ export default function WorkspacePage() {
     if (conversation) workspace.restoreConversation(conversation)
     if (prompt) setDraft(prompt)
     if (conversation || prompt || isNew) {
-      const clean = new URLSearchParams(location.search)
-      clean.delete('conversation'); clean.delete('prompt'); clean.delete('new')
-      navigate(`/workspace${clean.toString() ? `?${clean}` : ''}`, { replace: true })
+      const clean = workspaceConversationSearch(location.search, conversation)
+      navigate(`/workspace${clean ? `?${clean}` : ''}`, { replace: true })
     }
   }, [initialAgentId, initialMode, location.search, navigate, query, workspace])
+  useEffect(() => {
+    if (!workspace.conversationId) return
+    const current = new URLSearchParams(location.search).get('conversation')
+    if (current === workspace.conversationId) return
+    const next = workspaceConversationSearch(location.search, workspace.conversationId)
+    navigate(`/workspace?${next}`, { replace: true })
+  }, [workspace.conversationId])
   useEffect(() => {
     if (!workspace.loading && workspace.conversationId) refresh().catch(() => {})
   }, [workspace.loading, workspace.conversationId])
@@ -69,7 +76,11 @@ export default function WorkspacePage() {
   const timelineMessages = useMemo(() => enrichWorkspaceMessages(workspace.state.messages, { agents, tasksById: workspace.state.tasksById, hostSummary: workspace.state.hostSummary, language }), [workspace.state.messages, workspace.state.tasksById, workspace.state.hostSummary, agents, language])
   const runStage = useMemo(() => deriveRunStage(trace.rawEvents, agents), [trace.rawEvents, agents])
   const changeMode = mode => {
-    if (workspace.state.messages.length > 0) workspace.beginNewConversation(mode, mode === 'direct' ? workspace.selectedAgentId : '')
+    if (workspace.state.messages.length > 0) {
+      workspace.beginNewConversation(mode, mode === 'direct' ? workspace.selectedAgentId : '')
+      const next = workspaceConversationSearch(location.search, '')
+      navigate(`/workspace${next ? `?${next}` : ''}`, { replace: true })
+    }
     else workspace.setMode(mode)
   }
   const submit = () => {
@@ -78,7 +89,11 @@ export default function WorkspacePage() {
   const deleteConversation = async id => {
     try {
       await api.deleteConversation(id)
-      if (workspace.conversationId === id) workspace.beginNewConversation()
+      if (workspace.conversationId === id) {
+        workspace.beginNewConversation()
+        const next = workspaceConversationSearch(location.search, '')
+        navigate(`/workspace${next ? `?${next}` : ''}`, { replace: true })
+      }
       await refresh()
       message.success(zh ? '会话已删除' : 'Conversation deleted')
     } catch (cause) { message.error(cause.message || (zh ? '无法删除会话' : 'Unable to delete conversation')) }
@@ -91,7 +106,7 @@ export default function WorkspacePage() {
     } catch (cause) { message.error(cause.message || (zh ? '无法重命名会话' : 'Unable to rename conversation')); throw cause }
   }
 
-  const sidebar = <ConversationSidebar conversations={conversations} activeId={workspace.conversationId} language={language} onSelect={id => { workspace.restoreConversation(id); setDrawer('') }} onNew={() => { workspace.beginNewConversation(); setDrawer('') }} onDelete={deleteConversation} onRename={renameConversation} />
+  const sidebar = <ConversationSidebar conversations={conversations} activeId={workspace.conversationId} language={language} onSelect={id => { workspace.restoreConversation(id); setDrawer('') }} onNew={() => { workspace.beginNewConversation(); const next = workspaceConversationSearch(location.search, ''); navigate(`/workspace${next ? `?${next}` : ''}`, { replace: true }); setDrawer('') }} onDelete={deleteConversation} onRename={renameConversation} />
   const stopRun = async () => {
     setCancelling(true)
     try { await workspace.cancel() }
