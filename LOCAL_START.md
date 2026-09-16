@@ -31,6 +31,14 @@ backend/.venv/bin/python -m backend.persistence.migrate
 
 分别在三个终端执行以下命令。
 
+这三个 Agent 是默认 Compose profile 中的核心 Agent。Infrastructure 和 Helm
+Agent 源码也包含在仓库中，可按需分别在 8054、8055 端口手动启动：
+
+```bash
+agents/.venv/bin/python agents/k8s-infrastructure/main.py
+agents/.venv/bin/python agents/k8s-helm/main.py
+```
+
 K8s Resource Orchestrator Agent：
 
 ```bash
@@ -78,6 +86,8 @@ npm --prefix frontend run dev -- --host 127.0.0.1
 | K8s Resource Orchestrator Agent | 8051 |
 | K8s Ops Agent | 8052 |
 | K8s Security Agent | 8053 |
+| K8s Infrastructure Agent（可选） | 8054 |
+| K8s Helm Agent（可选） | 8055 |
 
 ## Docker Compose 一键启动
 
@@ -98,6 +108,9 @@ docker compose up -d --build
 ```bash
 docker compose down
 ```
+
+该命令会保留 `postgres_data` 命名卷。只有显式执行
+`docker compose down -v` 才会删除本地业务数据和 Agent checkpoint；这是不可恢复的重置操作。
 
 ## 访问地址
 

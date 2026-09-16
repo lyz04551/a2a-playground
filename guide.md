@@ -161,11 +161,14 @@ docker compose up --build
 - Frontend：<http://127.0.0.1:5173>
 - Backend：<http://127.0.0.1:8050>
 
-停止并保留 SQLite 数据卷：
+停止并保留 PostgreSQL 命名卷（业务数据和 Agent checkpoint 均保留）：
 
 ```bash
 docker compose down
 ```
+
+该命令保留 `postgres_data` 命名卷。`docker compose down -v` 会永久删除本地
+业务数据和 Agent checkpoint，只应在明确需要重置开发数据库时使用。
 
 ## 6. 首次安装依赖
 
@@ -182,7 +185,7 @@ Backend 使用独立虚拟环境：
 ```bash
 python3 -m venv backend/.venv
 backend/.venv/bin/pip install --upgrade pip
-backend/.venv/bin/pip install fastapi uvicorn httpx pydantic python-dotenv a2a-sdk langgraph langchain-openai langchain-core
+backend/.venv/bin/pip install -r backend/requirements.txt
 ```
 
 安装前端依赖：
@@ -308,7 +311,9 @@ Events 页面提供：
 - 仅异常：失败、阻塞、取消和重试事件。
 - 仅工具：工具调用和工具完成事件。
 
-运行、事件和审批记录保存在 SQLite 中。SSE 连接中断后，Frontend 使用相同 `run_id` 和事件序号继续读取，不会创建新的 Run。
+运行、事件、审批和其他业务记录保存在 PostgreSQL 的 `playground` 数据库中；
+Agent 的 LangGraph checkpoint 保存在 `langgraph` 数据库中。SSE 连接中断后，
+Frontend 使用相同 `run_id` 和事件序号继续读取，不会创建新的 Run。
 
 ## 11. 回归测试
 

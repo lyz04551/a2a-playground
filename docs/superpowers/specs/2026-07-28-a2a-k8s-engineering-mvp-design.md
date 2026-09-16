@@ -1,5 +1,10 @@
 # A2A Kubernetes 多智能体工程化 MVP 设计
 
+> **历史文档（2026-07-28）**：本文记录最初的 SQLite/三个 Agent MVP 方案，
+> 不代表当前运行架构。当前系统已采用 PostgreSQL-only 持久化；请以根目录
+> [README](../../../README.md)、[DESIGN](../../../DESIGN.md) 和
+> [Postgres 持久化设计](2026-08-26-postgres-only-persistence-design.md) 为准。
+
 ## 1. 目标
 
 在保留现有单智能体聊天能力的基础上，将 A2A Playground 建设成可扩展、

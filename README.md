@@ -2,6 +2,10 @@
 
 A full-stack web application for managing and chatting with A2A (Agent-to-Agent) protocol agents. Built with **FastAPI** backend and **React + Ant Design** frontend. Features **Host Agent** multi-agent routing powered by LangGraph / LLM.
 
+For a detailed Chinese explanation of the architecture, A2A/MCP/LLM collaboration,
+and Kubernetes capabilities, see
+[`docs/A2A_K8S_INTELLIGENT_PLATFORM_DESIGN_ZH.md`](docs/A2A_K8S_INTELLIGENT_PLATFORM_DESIGN_ZH.md).
+
 ## Engineering MVP
 
 The current architecture keeps every Kubernetes specialist as an independent
@@ -17,7 +21,7 @@ The current architecture keeps every Kubernetes specialist as an independent
 
 The LangGraph Host lives in the backend and delegates only through A2A. It routes
 with stable IDs and reuses each child Agent's A2A context inside an orchestration
-run. The run is a durable SQLite trace, not a fixed workflow: the Host LLM remains
+run. The run is a durable PostgreSQL trace, not a fixed workflow: the Host LLM remains
 responsible for asking questions, selecting Agents, and deciding when to summarize.
 
 The shared runtime under `agents/shared-runtime` provides MCP connection handling,
@@ -34,16 +38,19 @@ cp backend/.env.example .env
 docker compose up --build
 ```
 
-Open `http://localhost:5173`. Compose starts the frontend, backend, and three
-independent A2A Agent servers on ports 8051–8053. The backend discovers them through
-their Agent Cards and stores data in `/app/data/playground.db`.
+Open `http://localhost:5173`. Compose starts PostgreSQL, the frontend, the backend,
+and three core A2A Agent servers on ports 8051–8053. The backend discovers the Agents
+through their Agent Cards. Business data is stored in the `playground` PostgreSQL
+database and Agent LangGraph checkpoints are stored in the `langgraph` database.
+The Infrastructure and Helm Agent sources are included and can be started manually
+on ports 8054–8055; they are not part of the default Compose profile.
 
 The backend has no startup dependency on these local Agents. It remains healthy with
 zero or partial local Agents, and arbitrary external A2A servers can be registered at
 runtime through the Agent API or UI.
 
-The existing JSON files are imported into SQLite once on first startup and remain
-unchanged as backups.
+New deployments start with empty PostgreSQL databases. The current runtime does not
+import legacy SQLite databases or JSON data files.
 
 ### Safety model
 
@@ -65,13 +72,13 @@ unchanged as backups.
 │                          │ HTTP │                          │JSON  │                  │
 │   Port 5173              │      │   Port 8050              │ RPC  │   Ports vary     │
 └──────────────────────────┘      └──────────────────────────┘      └──────────────────┘
-                                         │
-                                         v
-                                 ┌──────────────────┐     ┌─────────────────────┐
-                                 │  SQLite DB        │     │  Host Agent         │
-                                 │  (data/*.json)    │     │  LangGraph / ADK    │
-                                 └──────────────────┘     │  + DeepSeek Chat     │
-                                                          └─────────────────────┘
+                           ┌─────────────┴─────────────┐
+                           v                           v
+                 ┌──────────────────┐       ┌─────────────────────┐
+                 │ PostgreSQL       │       │ Host Agent          │
+                 │ business data    │       │ LangGraph + LLM     │
+                 │ + checkpoints    │       └─────────────────────┘
+                 └──────────────────┘
 ```
 
 ---
@@ -84,7 +91,7 @@ unchanged as backups.
 | **Single Chat** | Chat with individual agents, SSE streaming responses |
 | **Multi-Agent Chat** | Host Agent routes requests to the best sub-agent via LLM |
 | **Tool Visibility** | Tool calls (send_task, list_remote_agents) shown in chat |
-| **Persistent History** | Conversations, messages, runs, approvals, and events saved transactionally in SQLite |
+| **Persistent History** | Conversations, messages, runs, approvals, events, and Agent checkpoints persisted in PostgreSQL |
 | **Task Events** | Full event log with tool_call, tool_result, routing events |
 | **Pagination** | Agent cards paginated (9 per page) |
 
@@ -119,47 +126,31 @@ analytics remain follow-up features.
 
 - Python 3.11+
 - Node.js 18+
-- At least one running A2A agent (e.g., from [a2a-samples](https://github.com/GoogleCloudPlatform/a2a-samples))
+- Docker with Compose for the recommended startup path
 - A DeepSeek API key with balance (for Host Agent routing)
+- An OpenAI-compatible model API key for the bundled specialist Agents
+- A reachable Kubernetes MCP endpoint for Kubernetes operations
 
-### 1. Start A2A Agents
-
-Start your A2A agents first (examples from a2a-samples):
+### 1. Configure the services
 
 ```bash
-# Travel planner agent
-cd samples/python/agents/travel_planner_agent && uv run
-# Currency agent
-cd samples/python/agents/langgraph && uv run app
+cp backend/.env.example .env
+# Fill HOST_LLM_*, AGENT_LLM_*, K8S_MCP_URL, and MCP_TRANSPORT in .env.
 ```
 
-### 2. Start the Backend and Frontend
+### 2. Start the stack
 
 ```bash
-# Backend (from the project root)
-PLAYGROUND_ALLOW_PRIVATE_AGENTS=true backend/.venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8050
-
-# Frontend (in another terminal)
-npm --prefix frontend run dev -- --host 127.0.0.1
+docker compose up --build
 ```
 
 ### 3. Open the UI
 
 Open [http://127.0.0.1:5173](http://127.0.0.1:5173) in your browser.
 
-### Manual Setup
-
-```bash
-# Backend (run from the repository root)
-python3 -m venv backend/.venv
-backend/.venv/bin/pip install -r backend/requirements.txt
-PLAYGROUND_ALLOW_PRIVATE_AGENTS=true backend/.venv/bin/python3 -m uvicorn backend.main:app --host 127.0.0.1 --port 8050 --log-level info
-
-# Frontend
-cd frontend
-npm install
-npx vite --host 127.0.0.1 --port 5173
-```
+For separate local processes, migrations, optional Agents, and dependency setup,
+see the [local development guide](guide.md) or the shorter
+[local startup checklist](LOCAL_START.md).
 
 ---
 
@@ -259,7 +250,8 @@ a2a-playground/
 ├── backend/
 │   ├── main.py               # FastAPI app (30+ endpoints)
 │   ├── models.py             # Pydantic models
-│   ├── database.py           # JSON file persistence
+│   ├── database.py           # PostgreSQL repository facade
+│   ├── persistence/          # SQLAlchemy repository and Alembic migrations
 │   ├── a2a_client.py         # A2A SDK wrapper
 │   └── host/
 │       ├── langgraph_agent.py    # LangGraph Host Agent
@@ -292,6 +284,8 @@ a2a-playground/
 | `HOST_LLM_MODEL` | Yes | Host model name |
 | `HOST_LLM_PROVIDER` | No | Display label such as `deepseek` or `vllm` |
 | `HOST_MODEL_CONFIG_KEY` | For UI API-key changes | Fernet key used to encrypt the Host API key stored by Model Settings; generate with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"` |
+| `DATABASE_URL` | Yes | Backend PostgreSQL URL for the `playground` business database |
+| `AGENT_CHECKPOINT_DATABASE_URL` | Yes for Agents | PostgreSQL URL for the `langgraph` checkpoint database |
 | `AGENT_LLM_API_KEY` | Yes | K8s specialist Agents' independent API key |
 | `AGENT_LLM_BASE_URL` | Yes | K8s specialist Agents' OpenAI-compatible endpoint |
 | `AGENT_LLM_MODEL` | Yes | K8s specialist Agents' model name |
@@ -300,7 +294,6 @@ a2a-playground/
 | `PLAYGROUND_API_KEY` | No | Bearer token required by `/api/*` except `/api/ping` when set |
 | `PLAYGROUND_CORS_ORIGINS` | No | Comma-separated allowed frontend origins |
 | `PLAYGROUND_ALLOW_PRIVATE_AGENTS` | No | Allow private/loopback Agent addresses for trusted local networks |
-| `PLAYGROUND_DB_BUSY_TIMEOUT_MS` | No | SQLite lock wait, default `5000` ms |
 | `HOST_MAX_TASKS` | No | Maximum Auto-mode plan nodes, default `6` |
 | `HOST_MAX_CONCURRENCY` | No | Maximum parallel Agent delegations, default `3` |
 | `HOST_MAX_ATTEMPTS` | No | Attempts per Agent before replacement, default `2` |

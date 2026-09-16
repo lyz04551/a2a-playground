@@ -1,5 +1,9 @@
 # Postgres 单数据库技术栈持久化设计
 
+> **当前持久化基线**：本文取代 2026-07-28 MVP 设计中的 SQLite 和内存
+> checkpoint 方案。实际启动命令与环境变量以根目录 [README](../../../README.md)
+> 和 [本地使用指南](../../../guide.md) 为准。
+
 ## 目标
 
 将后端的 SQLite 持久化和所有 Agent 的 LangGraph 内存 checkpointer 替换为基于 Postgres 的持久化。Docker Compose 将成为标准的本地运行方式。新的部署从空的 Postgres 数据库开始，不迁移现有 SQLite 和旧版 JSON 数据。
