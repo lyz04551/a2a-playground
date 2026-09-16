@@ -37,8 +37,14 @@ test('pending approval actions remain visible without covering diff content', ()
 
 test('long agent messages scroll internally without widening the conversation', () => {
   const css = readFileSync(new URL('../styles/workspace.css', import.meta.url), 'utf8')
+  const cardRule = css.match(/\.workspace-message\s*\{([^}]+)\}/)?.[1] || ''
+  const bodyRule = css.match(/\.workspace-message__body\s*\{([^}]+)\}/)?.[1] || ''
   const messageRule = css.match(/\.workspace-message--agent \.workspace-message__body\s*\{([^}]+)\}/)?.[1] || ''
 
+  assert.match(cardRule, /min-width:\s*0/)
+  assert.match(cardRule, /max-width:\s*100%/)
+  assert.match(bodyRule, /min-width:\s*0/)
+  assert.match(bodyRule, /max-width:\s*100%/)
   assert.match(messageRule, /max-height:\s*min\(/)
   assert.match(messageRule, /overflow-y:\s*auto/)
   assert.match(messageRule, /overflow-x:\s*hidden/)

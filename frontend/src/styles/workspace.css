@@ -11,9 +11,9 @@
 .workspace-state--error { justify-content: space-between; color: var(--color-danger); border-color: var(--color-danger); background: var(--color-danger-subtle); }
 .workspace-state button { padding: var(--space-8) var(--space-12); color: var(--color-danger); border: 1px solid currentColor; }
 .workspace-timeline, .workspace-trace__tasks { display: grid; gap: var(--space-16); margin: 0; padding: 0; list-style: none; }
-.workspace-message { padding: var(--space-16); border: 1px solid var(--color-border); border-radius: var(--radius-12); color: var(--color-text); background: var(--color-surface); }
+.workspace-message { min-width: 0; max-width: 100%; padding: var(--space-16); border: 1px solid var(--color-border); border-radius: var(--radius-12); color: var(--color-text); background: var(--color-surface); }
 .workspace-message--user { border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border)); background: var(--color-primary-subtle); }
-.workspace-message header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); margin-bottom: var(--space-8); }.workspace-message header > span { display: flex; align-items: center; gap: 4px; opacity: .35; transition: opacity var(--motion-fast); }.workspace-message:hover header > span, .workspace-message:focus-within header > span { opacity: 1; }.workspace-message small { color: var(--color-text-muted); }.workspace-message__body { white-space: pre-wrap; line-height: 1.6; }
+.workspace-message header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); margin-bottom: var(--space-8); }.workspace-message header > span { display: flex; align-items: center; gap: 4px; opacity: .35; transition: opacity var(--motion-fast); }.workspace-message:hover header > span, .workspace-message:focus-within header > span { opacity: 1; }.workspace-message small { color: var(--color-text-muted); }.workspace-message__body { min-width: 0; max-width: 100%; white-space: pre-wrap; line-height: 1.6; }
 .workspace-message--agent .workspace-message__body {
   max-height: min(52dvh, 520px);
   padding-right: var(--space-8);
