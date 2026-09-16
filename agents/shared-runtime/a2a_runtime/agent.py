@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import asyncio
+import time
 import uuid
 from collections.abc import AsyncIterable
 from pathlib import Path
@@ -196,6 +197,72 @@ class RuntimeMCPAgent:
                 },
                 "kubernetes": {"state": "ok" if self._tools_loaded else "unknown"},
             },
+        }
+
+    async def probe_connections(self, timeout: float = 15.0) -> dict[str, Any]:
+        async def probe_model() -> dict[str, Any]:
+            started = time.monotonic()
+            try:
+                llm = load_llm_config("AGENT")
+                if self._model is None and not llm.configured:
+                    raise RuntimeError("Agent model is not configured")
+                model = self._model or ChatOpenAI(
+                    model=llm.model,
+                    openai_api_key=llm.api_key,
+                    openai_api_base=llm.base_url,
+                    temperature=0,
+                    streaming=False,
+                    request_timeout=timeout,
+                    max_retries=0,
+                )
+                diagnostic_model = model.bind(
+                    max_tokens=8,
+                    extra_body={
+                        "chat_template_kwargs": {"enable_thinking": False}
+                    },
+                )
+                async with asyncio.timeout(timeout):
+                    response = await diagnostic_model.ainvoke([
+                        HumanMessage(content="Reply with exactly OK.")
+                    ])
+                if not str(getattr(response, "content", "") or "").strip():
+                    raise RuntimeError("Agent model returned an empty response")
+                return {
+                    "state": "ok",
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                    "model": llm.model,
+                }
+            except Exception as exc:
+                return {
+                    "state": "error",
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                    "error": str(exc)[:200],
+                }
+
+        async def probe_mcp() -> dict[str, Any]:
+            started = time.monotonic()
+            try:
+                async with asyncio.timeout(timeout):
+                    tools = await self.mcp_client.list_tools()
+                return {
+                    "state": "ok",
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                    "tool_count": len(tools),
+                }
+            except Exception as exc:
+                return {
+                    "state": "error",
+                    "latency_ms": int((time.monotonic() - started) * 1000),
+                    "error": str(exc)[:200],
+                }
+
+        model_result, mcp_result = await asyncio.gather(
+            probe_model(), probe_mcp()
+        )
+        return {
+            "agent_id": self.config.agent_id,
+            "model": model_result,
+            "mcp": mcp_result,
         }
 
     async def warm_up(self, timeout: float = 0.25) -> bool:

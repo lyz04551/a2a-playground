@@ -516,3 +516,63 @@ async def test_agent_converts_step_limit_message_into_partial_evidence():
     assert "list_k8s_resource 已返回" in completed.content
     assert "nginx" in completed.content
     assert "Sorry" not in completed.content
+
+
+@pytest.mark.anyio
+async def test_agent_diagnostics_probe_model_and_mcp_independently():
+    class ProbeMCP:
+        async def list_tools(self):
+            return [{"name": "list_k8s_pod"}]
+
+    class ProbeModel:
+        async def ainvoke(self, _messages):
+            return AIMessage(content="OK")
+
+        def bind(self, **_kwargs):
+            return self
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(
+        config, "prompt", mcp_client=ProbeMCP(), model=ProbeModel()
+    )
+
+    result = await agent.probe_connections(timeout=1)
+
+    assert result["agent_id"] == "ops"
+    assert result["model"]["state"] == "ok"
+    assert result["mcp"]["state"] == "ok"
+    assert result["mcp"]["tool_count"] == 1
+    assert "response" not in result["model"]
+
+
+@pytest.mark.anyio
+async def test_agent_diagnostics_keeps_mcp_result_when_model_fails():
+    class ProbeMCP:
+        async def list_tools(self):
+            return [{"name": "list_k8s_pod"}]
+
+    class FailingModel:
+        async def ainvoke(self, _messages):
+            raise RuntimeError("local model unavailable")
+
+        def bind(self, **_kwargs):
+            return self
+
+    config = AgentRuntimeConfig(
+        agent_id="security", name="Security", port=8053,
+        public_url="http://security", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(
+        config, "prompt", mcp_client=ProbeMCP(), model=FailingModel()
+    )
+
+    result = await agent.probe_connections(timeout=1)
+
+    assert result["model"] == {
+        "state": "error", "latency_ms": result["model"]["latency_ms"],
+        "error": "local model unavailable",
+    }
+    assert result["mcp"]["state"] == "ok"

@@ -56,5 +56,9 @@ def create_a2a_app(
     async def readiness(_request):
         return JSONResponse(executor.agent.readiness())
 
+    async def diagnostics(_request):
+        return JSONResponse(await executor.agent.probe_connections())
+
     app.add_route("/health/ready", readiness, methods=["GET"])
+    app.add_route("/health/diagnostics", diagnostics, methods=["POST"])
     return app
