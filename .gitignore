@@ -1,4 +1,7 @@
 .env
+.DS_Store
+**/.DS_Store
+logs/*-runtime.log
 .superpowers/
 .worktrees/
 .pytest_cache/
