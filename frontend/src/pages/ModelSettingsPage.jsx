@@ -4,7 +4,6 @@ import { ReloadOutlined, SaveOutlined } from '@ant-design/icons'
 import * as api from '../api/api'
 import { useConsoleSettings } from '../context/ConsoleSettingsContext'
 import { modelConfigForm, modelConfigPayload } from '../state/modelConfig'
-import ConnectionDiagnostics from '../components/ConnectionDiagnostics'
 
 export default function ModelSettingsPage() {
   const { settings } = useConsoleSettings()
@@ -61,6 +60,5 @@ export default function ModelSettingsPage() {
         </Form>
       </>}
     </section>
-    <ConnectionDiagnostics language={settings.language} />
   </div></div>
 }

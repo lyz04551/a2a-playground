@@ -11,6 +11,7 @@ import {
   RobotOutlined,
   SearchOutlined,
   SettingOutlined,
+  ApiOutlined,
   SunOutlined,
 } from '@ant-design/icons'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -25,6 +26,7 @@ const NAV_ITEMS = [
   { key: '/tasks', icon: <BranchesOutlined />, zh: '任务', en: 'Tasks' },
   { key: '/events', icon: <FileTextOutlined />, zh: '事件', en: 'Events' },
   { key: '/model-settings', icon: <SettingOutlined />, zh: '模型设置', en: 'Model settings' },
+  { key: '/connection-tests', icon: <ApiOutlined />, zh: '连接测试', en: 'Connection tests' },
 ]
 
 function ConsoleNav({ collapsed, onNavigate }) {

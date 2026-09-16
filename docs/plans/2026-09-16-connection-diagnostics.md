@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add an on-demand diagnostics card that independently proves Host DeepSeek inference, child-Agent Qwen inference, and MCP tool discovery.
+**Goal:** Add three independent on-demand diagnostics cards for Host DeepSeek inference, child-Agent Qwen inference, and MCP tool discovery.
 
-**Architecture:** Each child Agent exposes a read-only diagnostics endpoint backed by direct model invocation and MCP `list_tools`, without entering its ReAct graph. The backend runs its own Host-model probe, calls every registered Agent diagnostics endpoint concurrently, and exposes one stable aggregate API consumed by the Model Settings page.
+**Architecture:** Each child Agent exposes a targeted read-only diagnostics endpoint backed by direct model invocation or MCP `list_tools`, without entering its ReAct graph. The backend accepts a `host`, `models`, or `mcp` target and executes only that dependency category. The Model Settings page renders three independent cards with separate buttons and state.
 
 **Tech Stack:** FastAPI, Starlette, httpx, LangChain `ChatOpenAI`, React, Ant Design, Node test runner, pytest.
 
@@ -44,13 +44,15 @@
 - Create: `frontend/src/state/connectionDiagnostics.js`
 - Create: `frontend/src/state/connectionDiagnostics.test.js`
 - Create: `frontend/src/components/ConnectionDiagnostics.jsx`
-- Modify: `frontend/src/pages/ModelSettingsPage.jsx`
-- Modify: `frontend/src/styles/model-settings.css`
+- Create: `frontend/src/pages/ConnectionTestsPage.jsx`
+- Create: `frontend/src/styles/connection-tests.css`
+- Modify: `frontend/src/App.jsx`
+- Modify: `frontend/src/components/shell/AppShell.jsx`
 
 1. Write a failing state-mapping test for healthy, partial, failed, unsupported, and testing results.
 2. Add the aggregate diagnostics API client.
-3. Render an explicit “Test all connections” card beneath model settings.
-4. Show independent Host model, Agent model, and MCP status, latency, tool count, and bounded errors.
+3. Add a separate “Connection tests” route after Model Settings in the sidebar, containing Host model, local-model, and MCP cards with their own actions and state.
+4. Show status, latency, tool count where applicable, and bounded errors without a combined “test all” action.
 5. Run frontend tests and production build.
 
 ### Task 4: End-to-end verification

@@ -59,3 +59,27 @@ async def test_connection_diagnostics_keep_agent_failures_independent():
     assert result["agents"][0]["mcp"]["state"] == "error"
     assert result["agents"][1]["state"] == "offline"
     assert result["agents"][1]["error"] == "agent offline"
+
+
+@pytest.mark.anyio
+async def test_model_target_skips_host_and_forwards_only_model_probe():
+    calls = []
+
+    async def forbidden_host_probe(_config_loader):
+        raise AssertionError("child model test must not call Host")
+
+    async def agent_probe(url, target):
+        calls.append((url, target))
+        return {"model": {"state": "ok", "latency_ms": 4}}
+
+    result = await collect_connection_diagnostics(
+        [{"id": "ops", "name": "Ops", "url": "http://agent/ops"}],
+        lambda: None,
+        target="models",
+        host_probe=forbidden_host_probe,
+        agent_probe=agent_probe,
+    )
+
+    assert "host" not in result
+    assert calls == [("http://agent/ops", "model")]
+    assert result["agents"][0]["model"]["state"] == "ok"

@@ -576,3 +576,27 @@ async def test_agent_diagnostics_keeps_mcp_result_when_model_fails():
         "error": "local model unavailable",
     }
     assert result["mcp"]["state"] == "ok"
+
+
+@pytest.mark.anyio
+async def test_agent_mcp_only_diagnostic_does_not_call_model():
+    class ForbiddenModel:
+        def bind(self, **_kwargs):
+            raise AssertionError("MCP-only diagnostics must not touch the model")
+
+    class ProbeMCP:
+        async def list_tools(self):
+            return [{"name": "list_k8s_pod"}]
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="Ops", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(
+        config, "prompt", mcp_client=ProbeMCP(), model=ForbiddenModel()
+    )
+
+    result = await agent.probe_connections(timeout=1, target="mcp")
+
+    assert result["mcp"]["state"] == "ok"
+    assert "model" not in result

@@ -8,3 +8,10 @@ test('Host model settings route is placed after Events in navigation', () => {
   assert.match(app, /path="\/model-settings"/)
   assert.ok(shell.indexOf("key: '/model-settings'") > shell.indexOf("key: '/events'"))
 })
+
+test('connection tests have a separate route after model settings', () => {
+  const app = fs.readFileSync(new URL('../App.jsx', import.meta.url), 'utf8')
+  const shell = fs.readFileSync(new URL('./shell/AppShell.jsx', import.meta.url), 'utf8')
+  assert.match(app, /path="\/connection-tests"/)
+  assert.ok(shell.indexOf("key: '/connection-tests'") > shell.indexOf("key: '/model-settings'"))
+})

@@ -199,7 +199,11 @@ class RuntimeMCPAgent:
             },
         }
 
-    async def probe_connections(self, timeout: float = 15.0) -> dict[str, Any]:
+    async def probe_connections(
+        self, timeout: float = 15.0, target: str = "all"
+    ) -> dict[str, Any]:
+        if target not in {"all", "model", "mcp"}:
+            raise ValueError("target must be all, model, or mcp")
         async def probe_model() -> dict[str, Any]:
             started = time.monotonic()
             try:
@@ -256,14 +260,16 @@ class RuntimeMCPAgent:
                     "error": str(exc)[:200],
                 }
 
-        model_result, mcp_result = await asyncio.gather(
-            probe_model(), probe_mcp()
-        )
-        return {
-            "agent_id": self.config.agent_id,
-            "model": model_result,
-            "mcp": mcp_result,
-        }
+        result = {"agent_id": self.config.agent_id}
+        if target == "model":
+            result["model"] = await probe_model()
+        elif target == "mcp":
+            result["mcp"] = await probe_mcp()
+        else:
+            result["model"], result["mcp"] = await asyncio.gather(
+                probe_model(), probe_mcp()
+            )
+        return result
 
     async def warm_up(self, timeout: float = 0.25) -> bool:
         """Best-effort startup probe; requests retry initialization lazily."""

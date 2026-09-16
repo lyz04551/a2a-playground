@@ -11,6 +11,7 @@ import './styles/agents.css'
 import './styles/events.css'
 import './styles/tasks.css'
 import './styles/model-settings.css'
+import './styles/connection-tests.css'
 import './styles/markdown.css'
 import './index.css'
 

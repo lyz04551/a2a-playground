@@ -56,6 +56,7 @@ async def probe_host_model(
 
 async def probe_agent_connections(
     agent_url: str,
+    target: str = "all",
     *,
     timeout: float = 20.0,
 ) -> dict[str, Any]:
@@ -64,7 +65,9 @@ async def probe_agent_connections(
         allow_private=AppSettings.from_env().allow_private_agents,
     )
     async with httpx.AsyncClient(timeout=timeout) as client:
-        response = await client.post(f"{url}/health/diagnostics")
+        response = await client.post(
+            f"{url}/health/diagnostics", json={"target": target}
+        )
     if response.status_code in {404, 405}:
         return {
             "state": "unsupported",
@@ -81,16 +84,28 @@ async def collect_connection_diagnostics(
     agents: list[dict[str, Any]],
     config_loader,
     *,
+    target: str = "all",
     host_probe: Callable[[Any], Awaitable[dict[str, Any]]] = probe_host_model,
     agent_probe: Callable[[str], Awaitable[dict[str, Any]]] = probe_agent_connections,
 ) -> dict[str, Any]:
+    if target not in {"all", "host", "models", "mcp"}:
+        raise ValueError("target must be host, models, or mcp")
+
     async def collect_agent(agent: dict[str, Any]) -> dict[str, Any]:
         identity = {
             "id": str(agent.get("id") or ""),
             "name": str(agent.get("name") or agent.get("id") or "Agent"),
         }
         try:
-            result = await agent_probe(str(agent.get("url") or ""))
+            probe_target = {"models": "model", "mcp": "mcp"}.get(
+                target, "all"
+            )
+            if target == "all":
+                result = await agent_probe(str(agent.get("url") or ""))
+            else:
+                result = await agent_probe(
+                    str(agent.get("url") or ""), probe_target
+                )
             return {**identity, "state": result.get("state", "ready"), **result}
         except Exception as exc:
             return {
@@ -99,6 +114,13 @@ async def collect_connection_diagnostics(
                 "error": str(exc)[:200],
             }
 
+    if target == "host":
+        return {"host": await host_probe(config_loader)}
+    if target in {"models", "mcp"}:
+        agent_results = await asyncio.gather(
+            *(collect_agent(agent) for agent in agents)
+        )
+        return {"agents": list(agent_results)}
     host_result, agent_results = await asyncio.gather(
         host_probe(config_loader),
         asyncio.gather(*(collect_agent(agent) for agent in agents)),

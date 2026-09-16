@@ -29,6 +29,7 @@ function staticCommands(zh) {
     { id: 'page-tasks', type: 'page', title: zh ? '任务流转' : 'Task flows', subtitle: '/tasks', path: '/tasks', keywords: ['a2a', 'run', '链路', '任务'] },
     { id: 'page-events', type: 'page', title: zh ? '执行事件' : 'Events', subtitle: '/events', path: '/events', keywords: ['日志', 'event'] },
     { id: 'page-model-settings', type: 'page', title: zh ? 'Host 模型设置' : 'Host model settings', subtitle: '/model-settings', path: '/model-settings', keywords: ['model', 'llm', 'host', '模型'] },
+    { id: 'page-connection-tests', type: 'page', title: zh ? '连接测试' : 'Connection tests', subtitle: '/connection-tests', path: '/connection-tests', keywords: ['model', 'llm', 'mcp', 'diagnostics', '测试'] },
     { id: 'action-new', type: 'action', title: zh ? '新建会话' : 'New conversation', subtitle: zh ? '打开自动编排工作台' : 'Open auto orchestration', path: '/workspace?mode=auto&new=1', keywords: ['new', 'chat'] },
   ]
 }
