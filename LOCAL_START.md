@@ -8,6 +8,18 @@ cd /Users/liyangzhong/Documents/GitHub/a2a-playground
 
 ## 手动启动
 
+如果本机 PostgreSQL 已启动，并且 `backend/.env` 配置了 `DATABASE_URL`，
+三个 Agent 的 `.env` 配置了 `AGENT_CHECKPOINT_DATABASE_URL`，可直接运行：
+
+```bash
+./run.sh
+```
+
+脚本会执行数据库迁移，启动三个核心 Agent、后端和前端。访问
+<http://127.0.0.1:5173>；日志保存在 `logs/`，按 Ctrl+C 停止这些服务。
+已有相同端口的 Agent 注册时，脚本会沿用数据库中的记录，避免重复注册。
+首次安装依赖的命令见 [guide.md](guide.md) 第 6 节。
+
 手动启动时，每个长期运行的服务需要占用一个终端。
 
 ### 1. 启动 PostgreSQL
