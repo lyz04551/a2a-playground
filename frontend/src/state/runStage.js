@@ -28,6 +28,10 @@ export function deriveRunStage(events = [], agents = []) {
     return { state: 'planned', textZh: `已创建 ${count} 个任务…`, textEn: `Created ${count} tasks…`, active }
   }
   if (latest.type === 'host.synthesis_started') return { state: 'synthesizing', textZh: 'Host 正在综合各 Agent 结果…', textEn: 'Host is synthesizing Agent results…', active }
+  if (latest.type === 'message.delta' && active.length > 0) {
+    if (active.length > 1) return { state: 'parallel', textZh: `${active.length} 个 Agent 正在并行执行…`, textEn: `${active.length} Agents are running in parallel…`, active }
+    return { state: 'working', textZh: `${active[0].agentName} 正在执行任务…`, textEn: `${active[0].agentName} is working…`, active }
+  }
   if (latest.type === 'message.delta') return { state: 'responding', textZh: 'Host 正在生成最终回复…', textEn: 'Host is generating the final response…', active }
   if (latest.type === 'task.retry_scheduled') {
     const name = agents.find(agent => agent.id === latest.data?.agent_id)?.name || latest.data?.agent_name || latest.data?.agent_id || 'Agent'

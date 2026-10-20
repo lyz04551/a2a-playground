@@ -30,6 +30,7 @@ class RunEventType(str, Enum):
     TASK_COMPLETED = "task.completed"
     TASK_FAILED = "task.failed"
     MESSAGE_DELTA = "message.delta"
+    MESSAGE_RESET = "message.reset"
     MESSAGE_COMPLETED = "message.completed"
     TOOL_CALLED = "tool.called"
     TOOL_COMPLETED = "tool.completed"

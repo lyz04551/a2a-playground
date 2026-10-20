@@ -21,3 +21,14 @@ test('uses terminal run status as the final stage', () => {
   assert.equal(deriveRunStage([event('run.completed', 1)]).state, 'completed')
   assert.equal(deriveRunStage([event('run.failed', 1, { error: 'timeout' })]).textZh, '运行失败：timeout')
 })
+
+test('keeps the Agent stage while its message streams before tool calls finish', () => {
+  const agents = [{ id: 'ops', name: 'K8s Ops Agent' }]
+  const events = [
+    event('host.plan_created', 1, { tasks: [{ id: 'inspect', agent_id: 'ops' }] }),
+    event('task.started', 2, { agent_id: 'ops' }, 'inspect'),
+    event('message.delta', 3, { agent_id: 'ops', delta: '现在获取列表' }, 'inspect'),
+  ]
+  assert.equal(deriveRunStage(events, agents).textZh, 'K8s Ops Agent 正在执行任务…')
+  assert.equal(deriveRunStage([...events, event('task.completed', 4, {}, 'inspect'), event('message.delta', 5)]).textZh, 'Host 正在生成最终回复…')
+})

@@ -282,6 +282,14 @@ class DirectExecutionStrategy(_RunBoundStrategy):
                             parent_task_id=None,
                             data={**common_data(), "content": content},
                         )
+                elif event_type == "text_reset":
+                    accumulated = ""
+                    yield builder.create(
+                        RunEventType.MESSAGE_RESET,
+                        task_id=task_id,
+                        parent_task_id=None,
+                        data=common_data(),
+                    )
                 elif event_type == "approval_required":
                     awaiting_approval = True
                     yield builder.create(
@@ -1084,6 +1092,16 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                                 parent_task_id=None,
                                 data={"content": content},
                             )
+                elif event_type == "text_reset":
+                    logical_task_id = str(upstream.get("task_id") or "")
+                    delegation = by_logical_id.get(logical_task_id)
+                    if delegation is not None:
+                        yield builder.create(
+                            RunEventType.MESSAGE_RESET,
+                            task_id=delegation.task_id,
+                            parent_task_id=root_task_id,
+                            data={"agent_id": delegation.agent_id},
+                        )
                 elif event_type == "error":
                     for event in failure_events(
                         _failure_text(upstream)

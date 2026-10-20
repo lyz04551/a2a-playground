@@ -18,12 +18,13 @@ export function groupToolCalls(tools = []) {
   for (const tool of tools) {
     const name = tool.name || 'Tool call'
     const group = groups.get(name) || {
-      name, items: [], total: 0, completed: 0, working: 0, failed: 0, durationMs: 0,
+      name, items: [], total: 0, completed: 0, working: 0, failed: 0, skipped: 0, durationMs: 0,
     }
     group.items.push(tool)
     group.total += 1
     if (tool.status === 'completed') group.completed += 1
     else if (tool.status === 'failed') group.failed += 1
+    else if (tool.status === 'skipped') group.skipped += 1
     else group.working += 1
     if (Number.isFinite(tool.durationMs)) group.durationMs += tool.durationMs
     groups.set(name, group)
@@ -56,6 +57,7 @@ const STATUS_LABELS = {
   approval_required: { zh: '等待审批', en: 'Approval required' },
   executing: { zh: '正在执行', en: 'Executing' },
   completed: { zh: '已完成', en: 'Completed' },
+  skipped: { zh: '预算拦截', en: 'Budget blocked' },
   failed: { zh: '失败', en: 'Failed' },
   blocked: { zh: '已阻塞', en: 'Blocked' },
   cancelled: { zh: '已取消', en: 'Cancelled' },

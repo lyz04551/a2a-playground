@@ -31,6 +31,24 @@ test('run lifecycle and task events reduce into normalized run and ordered task 
   assert.equal(state.lastSequence, 3)
 })
 
+test('tool continuation preserves Agent progress and separates the final answer', () => {
+  let state = reduceRunEvent(emptyRunState, event('run.started', 1, { mode: 'auto' }))
+  state = reduceRunEvent(state, event('task.started', 2, { agent_id: 'ops' }))
+  state = reduceRunEvent(state, event('message.delta', 3, { content: '让我继续检查' }, { parent_task_id: 'root' }))
+  assert.equal(state.messages.at(-1).content, '让我继续检查')
+  state = reduceRunEvent(state, event('message.reset', 4, {}, { parent_task_id: 'root' }))
+  assert.equal(state.messages.length, 1)
+  assert.equal(state.messages[0].content, '让我继续检查')
+  assert.equal(state.messages[0].progress, true)
+  state = reduceRunEvent(state, event('message.delta', 5, { content: '发现 16 个 Deployment' }, { parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.reset', 6, {}, { parent_task_id: 'root' }))
+  assert.equal(state.messages.length, 1)
+  assert.equal(state.messages[0].content, '让我继续检查\n\n发现 16 个 Deployment')
+  state = reduceRunEvent(state, event('message.completed', 7, { content: '实际检查结论' }, { parent_task_id: 'root' }))
+  assert.equal(state.messages.length, 2)
+  assert.equal(state.messages.at(-1).content, '实际检查结论')
+})
+
 test('message, approval, artifact, and terminal events update their normalized collections', () => {
   let state = reduceRunEvent(emptyRunState, event('run.started', 1))
   state = reduceRunEvent(state, event('message.delta', 2, { content: 'Hel', role: 'agent', message_id: 'msg-1' }))

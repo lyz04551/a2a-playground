@@ -10,6 +10,7 @@ from .models import PendingAction
 
 class RuntimeEventType(str, Enum):
     TEXT = "text"
+    TEXT_RESET = "text_reset"
     TOOL_CALL = "tool_call"
     TOOL_RESULT = "tool_result"
     APPROVAL_REQUIRED = "approval_required"

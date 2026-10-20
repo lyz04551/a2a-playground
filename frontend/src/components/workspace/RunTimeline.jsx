@@ -17,7 +17,7 @@ import MarkdownContent from '../MarkdownContent'
 function StatusIcon({ status }) {
   if (status === 'completed') return <CheckCircleFilled />
   if (status === 'failed') return <CloseCircleFilled />
-  if (status === 'waiting' || status === 'approval_required') return <PauseCircleOutlined />
+  if (status === 'waiting' || status === 'approval_required' || status === 'skipped') return <PauseCircleOutlined />
   return <LoadingOutlined spin={status === 'working' || status === 'delegated'} />
 }
 
@@ -55,23 +55,24 @@ function ToolCallDetail({ tool, zh }) {
 function ToolActivity({ tools, zh }) {
   const groups = groupToolCalls(tools)
   const completed = tools.filter(tool => tool.status === 'completed').length
+  const skipped = tools.filter(tool => tool.status === 'skipped').length
   const failed = tools.filter(tool => tool.status === 'failed').length
-  const active = tools.filter(tool => !['completed', 'failed'].includes(tool.status))
-  const percent = tools.length ? Math.round((completed + failed) / tools.length * 100) : 0
+  const active = tools.filter(tool => !['completed', 'failed', 'skipped'].includes(tool.status))
+  const percent = tools.length ? Math.round((completed + failed + skipped) / tools.length * 100) : 0
   return (
     <li className="run-timeline__node is-tool-summary">
       <span className="run-timeline__rail"><CodeOutlined /></span>
       <details className="tool-activity">
         <summary>
-          <span className="tool-activity__title"><strong>{zh ? '工具活动' : 'Tool activity'}</strong><small>{completed}/{tools.length} {zh ? '已完成' : 'completed'}{failed ? ` · ${failed} ${zh ? '失败' : 'failed'}` : ''}</small></span>
-          <span className="tool-activity__count">{groups.length} {zh ? '类' : 'types'} · {tools.length} {zh ? '次' : 'calls'}</span>
+          <span className="tool-activity__title"><strong>{zh ? '工具活动' : 'Tool activity'}</strong><small>{completed} {zh ? '已执行' : 'executed'}{failed ? ` · ${failed} ${zh ? '失败' : 'failed'}` : ''}{skipped ? ` · ${skipped} ${zh ? '已拦截' : 'blocked'}` : ''}</small></span>
+          <span className="tool-activity__count">{groups.length} {zh ? '类' : 'types'} · {completed} {zh ? '次已执行' : 'executed'}{skipped ? ` · ${skipped} ${zh ? '次预算拦截' : 'budget blocked'}` : ''}</span>
         </summary>
         <div className="tool-activity__progress" aria-label={`${percent}%`}><i style={{ width: `${percent}%` }} /></div>
         {active.length > 0 && <div className="tool-activity__active"><span>{zh ? '正在执行' : 'Active'}</span>{[...new Set(active.map(tool => tool.name))].slice(0, 3).map(name => <code key={name}>{name}</code>)}</div>}
         <div className="tool-groups">
           {groups.map(group => (
             <details className="tool-group" key={group.name}>
-              <summary><span>{group.name}</span><small>× {group.total} · {group.completed} ✓{group.working ? ` · ${group.working} …` : ''}{group.failed ? ` · ${group.failed} !` : ''}</small></summary>
+              <summary><span>{group.name}</span><small>× {group.total} · {group.completed} ✓{group.skipped ? ` · ${group.skipped} ${zh ? '拦截' : 'blocked'}` : ''}{group.working ? ` · ${group.working} …` : ''}{group.failed ? ` · ${group.failed} !` : ''}</small></summary>
               <div className="tool-group__calls">{group.items.map(tool => <ToolCallDetail tool={tool} zh={zh} key={tool.id} />)}</div>
             </details>
           ))}

@@ -28,6 +28,31 @@ _PRIMITIVE_TYPES: dict[str, type] = {
 }
 
 
+def _compact_event_result(result: str) -> str:
+    if len(result) <= 30000:
+        return result
+    try:
+        events = json.loads(result)
+    except (TypeError, ValueError):
+        return result
+    if not isinstance(events, list):
+        return result
+    warnings = [event for event in events if isinstance(event, dict) and event.get("type") == "Warning"]
+    if not warnings:
+        return result[:30000] + "\n[事件结果过长，已截断；请缩小查询范围]"
+    selected = sorted(
+        warnings,
+        key=lambda event: event.get("eventTime") or event.get("deprecatedLastTimestamp") or "",
+        reverse=True,
+    )[:30]
+    return json.dumps({
+        "total_events": len(events),
+        "warning_events": len(warnings),
+        "recent_warnings": selected,
+        "note": "结果过长，仅保留最近 30 条 Warning 事件。",
+    }, ensure_ascii=False)
+
+
 def _schema_type(schema: dict[str, Any]) -> type:
     schema_type = schema.get("type", "string")
     if schema_type == "string":
@@ -147,6 +172,8 @@ class MCPToolAdapter:
                 )
             self._calls_by_context[context_id] = used + 1
             result = await self.client.call_tool(tool_name, arguments)
+            if tool_name == "list_k8s_event":
+                result = _compact_event_result(result)
             call_count = used + 1
             if call_count <= self.soft_call_threshold:
                 return result

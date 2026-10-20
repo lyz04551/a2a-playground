@@ -124,7 +124,7 @@ class K8sMCPClient:
             await stack.aclose()
 
     async def list_tools(self) -> list[dict[str, Any]]:
-        async with self._operation_lock:
+        async with (self._operation_lock if self._session_factory else asyncio.Lock()):
             async with self._operation_session() as session:
                 response = await session.list_tools()
         return [
@@ -137,7 +137,9 @@ class K8sMCPClient:
         ]
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        async with self._operation_lock:
+        # Real HTTP operations each own a separate session; only injected shared
+        # sessions need serialization.
+        async with (self._operation_lock if self._session_factory else asyncio.Lock()):
             try:
                 async with self._operation_session() as session:
                     response = await asyncio.wait_for(

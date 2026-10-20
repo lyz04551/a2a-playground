@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { BranchesOutlined, BugOutlined, LoadingOutlined, StopOutlined } from '@ant-design/icons'
 import { Button, Drawer, Tag } from 'antd'
 import { useNavigate } from 'react-router-dom'
@@ -11,6 +11,12 @@ export default function RunTracePanel({ run = {}, stage, agents = [], language =
   const zh = language.startsWith('zh')
   const navigate = useNavigate()
   const [selectedTaskId, setSelectedTaskId] = useState(null)
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => {
+    if (!loading) return undefined
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [loading])
   const tasks = run.tasks || run.steps || []
   const selectedTask = tasks.find(task => task.id === selectedTaskId)
   const details = useMemo(() => selectedTask ? buildTaskDetails(selectedTask, tasks, agents) : null, [selectedTask, tasks, agents])
@@ -26,11 +32,17 @@ export default function RunTracePanel({ run = {}, stage, agents = [], language =
   const failureDetail = stage?.state === 'failed'
     ? stageText?.replace(/^(运行失败：|Run failed:\s*)/, '')
     : ''
+  const latestEvent = run.rawEvents?.at(-1)
+  const elapsed = latestEvent?.timestamp ? Math.max(0, Math.floor((now - Date.parse(latestEvent.timestamp)) / 1000)) : 0
+  const waitingForAgent = latestEvent?.type === 'tool.completed'
+  const waitingText = waitingForAgent
+    ? (zh ? `工具结果已返回，Agent 正在分析并决定下一步 · 已等待 ${elapsed} 秒` : `Tool results received. Agent is analyzing the next step · ${elapsed}s`)
+    : (zh ? `正在等待下一条运行事件 · 已等待 ${elapsed} 秒` : `Awaiting the next run event · ${elapsed}s`)
   return (
     <aside className="workspace-trace" aria-label="Run trace">
       <header><div><span className="workspace-eyebrow">Execution</span><h2>Run trace</h2></div><div className="workspace-trace__actions"><SystemStatus status={{ state: run.status || 'online' }} />{run.id && <Button type="text" size="small" aria-label={zh ? '打开完整任务流' : 'Open full task flow'} icon={<BranchesOutlined />} onClick={() => navigate(`/tasks?run=${encodeURIComponent(run.id)}`)} />}{canCancel && <Button danger size="small" loading={cancelling} aria-label={zh ? '停止当前运行' : 'Stop current run'} icon={<StopOutlined />} onClick={onCancel}>{zh ? '停止' : 'Stop'}</Button>}<Button type="text" size="small" aria-label="Open run debugger" icon={<BugOutlined />} onClick={onDebug} /></div></header>
       {stage?.textZh && <section className={`run-stage is-${stage.state || 'working'}`}><strong>{stage?.state === 'failed' ? (zh ? '运行失败' : 'Run failed') : stageText}</strong>{failureDetail && <details><summary>{zh ? '查看失败原因' : 'View failure reason'}</summary><p>{failureDetail}</p></details>}{stage.active?.map(item => <small key={item.id}>{item.agentName}{item.objective ? ` · ${item.objective}` : ''}</small>)}</section>}
-      {loading && <p className="workspace-state" role="status"><LoadingOutlined /> Awaiting run events…</p>}
+      {loading && <p className="workspace-state" role="status"><LoadingOutlined /> {waitingText}</p>}
       {error && <p className="workspace-state workspace-state--error" role="alert">{error}</p>}
       {!loading && !error && tasks.length === 0 && <p className="workspace-empty">Run activity will appear here.</p>}
       <RunTimeline run={run} tasks={tasks} rounds={run.rounds || []} approvals={enrichedApprovals} onApproval={onApproval} selectedTaskId={selectedTaskId} onTaskSelect={task => setSelectedTaskId(task.id)} language={language} />

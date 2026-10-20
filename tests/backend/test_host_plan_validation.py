@@ -299,6 +299,46 @@ def test_react_accepts_parallel_read_checks_in_one_round():
     ) is decision
 
 
+def test_react_rejects_prerequisite_inside_parallel_round():
+    decision = HostDecision(
+        action="delegate",
+        reason="Inspect then collect evidence",
+        tasks=[
+            task("discover", "k8s-ops"),
+            task("evidence", "k8s-ops", depends_on=("discover",)),
+        ],
+    )
+
+    with pytest.raises(PlanValidationError, match="same parallel round"):
+        validate_decision(decision, AGENTS, HostRunState(goal="inspect pods"))
+
+
+def test_react_allows_independent_tasks_on_same_agent():
+    decision = HostDecision(
+        action="delegate",
+        reason="Independent targets",
+        tasks=[task("namespace-a", "k8s-ops"), task("namespace-b", "k8s-ops")],
+    )
+
+    assert validate_decision(decision, AGENTS, HostRunState(goal="inspect both")) is decision
+
+
+def test_react_accepts_same_agent_after_successful_prerequisite():
+    prerequisite = task("discover", "k8s-ops")
+    decision = HostDecision(
+        action="delegate",
+        reason="Collect evidence for discovered targets",
+        tasks=[task("evidence", "k8s-ops", depends_on=("discover",))],
+    )
+    state = HostRunState(
+        goal="inspect pods",
+        observations={"discover": observed(prerequisite)},
+        successful={"discover"},
+    )
+
+    assert validate_decision(decision, AGENTS, state) is decision
+
+
 def test_react_rejects_duplicate_semantic_task_from_later_round():
     repeated = task("security-new-id", "k8s-security", workflow_role="precheck")
     state = HostRunState(

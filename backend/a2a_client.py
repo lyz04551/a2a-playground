@@ -408,6 +408,9 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                                         "task_id": task_id,
                                     }
                                     if event_type == "tool_call":
+                                        if accumulated:
+                                            accumulated = ""
+                                            yield {"type": "text_reset", "state": state, "task_id": task_id}
                                         chunk.update({
                                             "id": data.get("id", ""),
                                             "tool": data.get("tool") or t,
@@ -420,6 +423,8 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                                             ),
                                             "result": data.get("result", t),
                                         })
+                                    elif event_type == "text_reset":
+                                        accumulated = ""
                                     elif event_type == "approval_required":
                                         chunk["approval"] = data
                                     else:
@@ -430,18 +435,18 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                             if update.final
                             else ""
                         )
-                        if artifact_text and artifact_text not in accumulated:
+                        if artifact_text and not accumulated:
                             accumulated += artifact_text
                             yield {"type": "text", "text": artifact_text, "state": state, "task_id": task_id}
                         yield {"type": "status", "state": state, "final": update.final, "task_id": task_id}
                     elif isinstance(update, TaskArtifactUpdateEvent):
                         t = _extract_text_from_artifact(update.artifact)
-                        if t and t not in accumulated:
+                        if t and not accumulated:
                             accumulated += t
                             yield {"type": "text", "text": t, "state": state, "task_id": task_id}
                     else:
                         artifact_text = _extract_text_from_task(task)
-                        if artifact_text and artifact_text not in accumulated:
+                        if artifact_text and not accumulated:
                             accumulated += artifact_text
                             yield {"type": "text", "text": artifact_text, "state": state, "task_id": task_id}
                         yield {"type": "status", "state": state, "task_id": task_id}

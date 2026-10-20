@@ -60,7 +60,13 @@ class LangGraphDecisionPort:
         instruction = """Choose exactly one next Host action from the persisted state.
 
 - delegate: create one to three independent tasks for the current round. Tasks in
-  this decision run in parallel. Do not speculate about future rounds. After a
+  this decision run in parallel. Each task must have all target information it
+  needs before this round starts. If one task needs targets, evidence, or output
+  discovered by another task, delegate only the prerequisite now; create the
+  dependent task in a later round with the observed result and its task ID in
+  depends_on. Parallel work is appropriate only when tasks have independent,
+  explicitly scoped inputs, regardless of whether they use the same Agent.
+  Do not speculate about future rounds. After a
   successful security precheck, delegate the write task to the capable Agent;
   the Agent's write tool creates and returns the real approval request.
 - clarify: ask one essential question when the observations show that user intent

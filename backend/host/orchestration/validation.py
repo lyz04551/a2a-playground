@@ -76,7 +76,24 @@ def validate_decision(
     agents: Mapping[str, Mapping[str, Any]],
     state: HostRunState,
 ) -> HostDecision:
+    current_ids = {task.id for task in decision.tasks}
+    if len(current_ids) != len(decision.tasks):
+        raise PlanValidationError("decision contains duplicate task IDs")
     for task in decision.tasks:
+        if current_ids.intersection(task.depends_on):
+            raise PlanValidationError(
+                f"task '{task.id}' depends on another task in the same parallel round; "
+                "delegate the prerequisite first and continue in a later round"
+            )
+        unknown = set(task.depends_on) - set(state.observations)
+        if unknown:
+            raise PlanValidationError(
+                f"task '{task.id}' has unknown prerequisite tasks: {sorted(unknown)}"
+            )
+        if any(dependency not in state.successful for dependency in task.depends_on):
+            raise PlanValidationError(
+                f"task '{task.id}' requires a successful prerequisite observation"
+            )
         _validate_task_agent(task, agents)
         fingerprint = task_fingerprint(task)
         continues_incomplete_task = any(

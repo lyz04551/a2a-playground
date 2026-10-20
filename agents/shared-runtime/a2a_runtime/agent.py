@@ -9,7 +9,8 @@ from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import Any
 
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI
 from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import ToolNode, create_react_agent
@@ -27,6 +28,12 @@ def _handle_tool_error(exc: Exception) -> str:
     if isinstance(exc, ApprovalRequired):
         raise exc
     return f"工具执行失败：{exc}"
+
+
+def _limit_tool_batch(message: AIMessage, limit: int) -> AIMessage:
+    if not isinstance(message, AIMessage) or len(message.tool_calls) <= limit:
+        return message
+    return message.model_copy(update={"tool_calls": message.tool_calls[:limit]})
 
 
 class RuntimeMCPAgent:
@@ -164,11 +171,35 @@ class RuntimeMCPAgent:
             },
         )
         self._model = model
+        # The model may propose a large batch even when the remaining tool
+        # budget is small. Keep parallel execution, but cap what reaches ToolNode.
+        tool_bound_model = model.bind_tools(tools)
+        max_parallel_calls = min(
+            self.max_tool_calls,
+            max(1, int(os.getenv("AGENT_MAX_PARALLEL_TOOL_CALLS", "4"))),
+        )
+
+        def model_for_session(_state, runtime):
+            session_id = (runtime.context or {}).get("session_id")
+            active_model = tool_bound_model if not session_id else tool_bound_model.bind(
+                extra_body={
+                    "chat_template_kwargs": {
+                        "enable_thinking": self.enable_thinking,
+                    },
+                    "metadata": {"session_id": session_id},
+                }
+            )
+            remaining = max(1, self.max_tool_calls - self._tool_adapter._calls_by_context.get(session_id, 0))
+            return active_model | RunnableLambda(
+                lambda message: _limit_tool_batch(message, min(max_parallel_calls, remaining))
+            )
+
         self._graph = create_react_agent(
-            model,
+            model_for_session,
             tools=ToolNode(tools, handle_tool_errors=_handle_tool_error),
             prompt=self.prompt,
             checkpointer=self._checkpointer,
+            context_schema=dict,
         )
         self._tools_loaded = True
         self._dependency_error = ""
@@ -339,11 +370,25 @@ class RuntimeMCPAgent:
             pass
         try:
             async with asyncio.timeout(self.investigation_timeout):
-                async for state in self._graph.astream(
+                async for item in self._graph.astream(
                     {"messages": [("user", query)]},
                     graph_config,
-                    stream_mode="values",
+                    stream_mode=["values", "messages"],
+                    context={"session_id": context_id},
                 ):
+                    mode, state = item if isinstance(item, tuple) and len(item) == 2 else ("values", item)
+                    if mode == "messages":
+                        chunk, metadata = state
+                        if (
+                            seen_tool_results
+                            and metadata.get("langgraph_node") == "agent"
+                            and isinstance(chunk, AIMessageChunk)
+                            and isinstance(chunk.content, str)
+                            and chunk.content
+                            and not chunk.tool_call_chunks
+                        ):
+                            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=chunk.content)
+                        continue
                     messages = state.get("messages", [])
                     if not messages:
                         continue
@@ -375,6 +420,7 @@ class RuntimeMCPAgent:
                                 data={
                                     "tool_call_id": call_id,
                                     "result": str(message.content),
+                                    "skipped": str(message.content).startswith("工具调用预算已达到"),
                                 },
                             )
         except ApprovalRequired as exc:
@@ -428,6 +474,29 @@ class RuntimeMCPAgent:
         content = ""
         if messages and isinstance(messages[-1], AIMessage):
             content = str(messages[-1].content or "")
+        if (
+            self._tool_adapter is not None
+            and self._tool_adapter._calls_by_context.get(context_id, 0) >= self.max_tool_calls
+            and len(content.strip()) < 200
+        ):
+            yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Discard incomplete draft")
+            evidence = self._current_run_evidence(current_tool_results)
+            try:
+                content = await self._force_summary(query, evidence)
+            except Exception:
+                content = await self._deterministic_partial_summary(
+                    current_tool_results, "工具调用预算已用尽", current_tool_names
+                )
+            yield RuntimeEvent.completed(
+                content=content,
+                artifact_name="specialist_result",
+                data={
+                    "status": "partial", "summary": content,
+                    "continuation": {"allowed": True, "reason": "tool call budget reached"},
+                    "limitations": ["工具调用预算已用尽，未覆盖的检查不作结论。"],
+                },
+            )
+            return
         if "Sorry, need more steps to process this request." in content:
             content = await self._deterministic_partial_summary(
                 current_tool_results,

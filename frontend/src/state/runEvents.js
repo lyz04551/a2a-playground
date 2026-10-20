@@ -283,7 +283,7 @@ function reduceNormalizedEvent(state, event) {
       id,
       ...(data.tool || data.tool_name ? { name: data.tool || data.tool_name } : {}),
       ...(data.arguments || data.args ? { arguments: data.arguments || data.args } : {}),
-      status: event.type === 'tool.called' ? 'working' : 'completed',
+      status: event.type === 'tool.called' ? 'working' : data.skipped ? 'skipped' : 'completed',
       ...(startedAt ? { startedAt } : {}),
       ...(event.type === 'tool.completed' && timestamp ? { completedAt: timestamp } : {}),
       ...(Number.isFinite(startedMs) && Number.isFinite(completedMs) ? { durationMs: Math.max(0, completedMs - startedMs) } : {}),
@@ -291,6 +291,21 @@ function reduceNormalizedEvent(state, event) {
       ...(data.error === undefined ? {} : { error: data.error, status: 'failed' }),
     }
     return updateTask(state, event, { tools: upsertById(task?.tools || [], tool) })
+  }
+  if (event.type === 'message.reset') {
+    const task = event.task_id ? state.tasksById[event.task_id] : null
+    const next = task ? updateTask(state, event, { streamingOutput: '' }) : state
+    const progressId = `progress:${event.task_id}`
+    const progress = next.messages.find(message => message.id === progressId)
+    const drafts = next.messages.filter(message => message.taskId === event.task_id && !message.completed && !message.progress && message.content.trim())
+    const additions = drafts.map(message => message.content.trim()).join('\n\n')
+    const messages = next.messages.filter(message => message.taskId !== event.task_id || message.completed || message.progress)
+    if (!additions) return { ...next, messages }
+    if (progress) return { ...next, messages: messages.map(message => message.id === progressId
+      ? { ...message, content: `${message.content}\n\n${additions}` }
+      : message) }
+    const first = drafts[0]
+    return { ...next, messages: [...messages, { ...first, id: progressId, content: additions, status: '检查进度 · 待核实', progress: true }] }
   }
   if (event.type === 'message.delta' || event.type === 'message.completed') {
     const id = data.message_id || data.id || `message:${event.task_id || event.event_id}`
@@ -323,6 +338,7 @@ function reduceNormalizedEvent(state, event) {
       ...(data.agent_name || current?.agentName ? { agentName: data.agent_name || current.agentName } : {}),
       source: isHostMessage ? 'host' : (current?.source || 'agent'),
       completed: event.type === 'message.completed',
+      ...(isHostMessage ? {} : { status: event.type === 'message.completed' ? '检查结果' : '检查进度 · 待核实' }),
     }) }
   }
   if (event.type === 'approval.required') {
