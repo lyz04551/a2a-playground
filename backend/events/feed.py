@@ -44,6 +44,8 @@ def _state(event_type: str, current: str | None) -> str:
         return "failed"
     if event_type.endswith(".cancelled"):
         return "canceled"
+    if event_type in {"run.partial", "run.evidence_insufficient"}:
+        return event_type.removeprefix("run.")
     if event_type in {"run.completed", "task.completed", "message.completed", "tool.completed"}:
         return "completed"
     if event_type.startswith("approval."):
@@ -62,6 +64,8 @@ def _content(event_type: str, row: dict[str, Any], payload: dict[str, Any]) -> s
     defaults = {
         "run.started": "运行已开始",
         "run.completed": "本次运行已完成",
+        "run.partial": "本次运行部分完成",
+        "run.evidence_insufficient": "本次运行因证据不足而终止",
         "run.cancelled": "本次运行已取消",
         "host.planning": "Host 正在制定执行计划",
         "host.synthesis_started": "Host 正在综合各 Agent 结果",

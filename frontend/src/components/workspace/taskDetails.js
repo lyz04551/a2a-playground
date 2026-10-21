@@ -57,6 +57,7 @@ const STATUS_LABELS = {
   approval_required: { zh: '等待审批', en: 'Approval required' },
   executing: { zh: '正在执行', en: 'Executing' },
   completed: { zh: '已完成', en: 'Completed' },
+  partial: { zh: '部分完成', en: 'Partially completed' },
   skipped: { zh: '预算拦截', en: 'Budget blocked' },
   failed: { zh: '失败', en: 'Failed' },
   blocked: { zh: '已阻塞', en: 'Blocked' },

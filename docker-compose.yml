@@ -149,7 +149,7 @@ services:
       HOST_LLM_MODEL: ${HOST_LLM_MODEL:-deepseek-chat}
       HOST_MODEL_CONFIG_KEY: ${HOST_MODEL_CONFIG_KEY:-}
       BOOTSTRAP_AGENTS: >-
-        [{"id":"k8s-ops","url":"http://k8s-ops:8052","risk_level":"write_approval"},{"id":"k8s-security","url":"http://k8s-security:8053","risk_level":"read_only"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051","risk_level":"write_approval"}]
+        [{"id":"k8s-ops","url":"http://k8s-ops:8052"},{"id":"k8s-security","url":"http://k8s-security:8053"},{"id":"k8s-orchestrator","url":"http://k8s-orchestrator:8051"}]
       PLAYGROUND_ALLOW_PRIVATE_AGENTS: "true"
       PLAYGROUND_CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
       HOST_MAX_TASKS: ${HOST_MAX_TASKS:-12}

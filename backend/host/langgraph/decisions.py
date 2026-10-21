@@ -78,7 +78,10 @@ class LangGraphDecisionPort:
 
 Base the decision on structured observations, not keywords. Use only available
 Agent IDs and declared capabilities. Never repeat semantic work or a rejected
-write. A Kubernetes mutation requires a successful Security precheck observation;
+write. For a finite multi-target audit, set coverage_required=true on its
+PlannedTask; the specialist must enumerate and account for the target set.
+Never call such a task sufficient without a complete coverage manifest.
+A Kubernetes mutation requires a successful Security precheck observation;
 mutation and verification must never be delegated in the same round. Wait for a
 successful mutation observation, then delegate Ops verification in the next round.
 If verification proves the resource unhealthy or the write did not take effect,
@@ -216,24 +219,19 @@ Maximum six tasks and two attempts each.""",
                 ),
             )
         if result.output is not None and result.output.status == "partial":
-            if (
-                result.output.summary.strip()
-                and task.risk == "read"
-                and task.workflow_role != "verification"
-            ):
-                return Evaluation(
-                    outcome="sufficient",
-                    reason=(
-                        "partial diagnostic evidence is usable; the Host must "
-                        "summarize its limitations instead of repeating the audit"
-                    ),
-                )
             return Evaluation(
                 outcome="insufficient",
                 reason=(
-                    "partial specialist result does not conclusively satisfy "
-                    "the task completion criteria"
+                    "partial specialist result does not satisfy all completion "
+                    "criteria; retain its evidence and explicitly report missing coverage"
                 ),
+            )
+        if task.coverage_required and (result.output is None or result.output.coverage is None):
+            return Evaluation(outcome="insufficient", reason="coverage manifest was not provided")
+        if result.output is not None and result.output.coverage is not None and not result.output.coverage.complete:
+            return Evaluation(
+                outcome="insufficient",
+                reason="declared target coverage is incomplete",
             )
         return await self._invoke_structured(
             Evaluation,

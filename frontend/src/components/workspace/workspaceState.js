@@ -5,6 +5,8 @@ const statusByState = {
   planning: { label: 'Run in progress', icon: 'running', tone: 'orchestration' },
   approval_required: { label: 'Approval required', icon: 'approval', tone: 'approval' },
   failed: { label: 'Run failed', icon: 'failure', tone: 'danger' },
+  partial: { label: '部分完成', icon: 'approval', tone: 'approval' },
+  evidence_insufficient: { label: '证据不足而终止', icon: 'failure', tone: 'danger' },
   completed: { label: 'Run completed', icon: 'success', tone: 'primary' },
   online: { label: 'System online', icon: 'success', tone: 'primary' },
 }

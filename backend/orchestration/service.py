@@ -23,7 +23,16 @@ from backend.host.orchestration.models import (
 )
 
 
-_TERMINAL_RUN_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
+_TERMINAL_RUN_STATUSES = {"completed", "partial", "evidence_insufficient", "failed", "cancelled", "interrupted"}
+
+
+def _has_unresolved_insufficient_evaluation(events) -> bool:
+    latest_by_agent = {}
+    for event in events:
+        if event.type == RunEventType.TASK_EVALUATED:
+            agent_id = event.data.get("agent_id") or event.task_id
+            latest_by_agent[agent_id] = event.data.get("outcome")
+    return "insufficient" in latest_by_agent.values()
 _CONVERSATION_CONTEXT_MESSAGES = 12
 _CONVERSATION_CONTEXT_CHARS = 12000
 
@@ -228,12 +237,14 @@ class RunService:
                     command.mode,
                     partial=True,
                 )
-            self.repository.update_run_status(run_id, "failed")
+            evaluations = [event.data.get("outcome") for event in self.repository.list_run_events(run_id) if event.type == RunEventType.TASK_EVALUATED]
+            evidence_insufficient = failure.type == RunEventType.TASK_BLOCKED and "insufficient" in evaluations and "failed" not in evaluations
+            self.repository.update_run_status(run_id, "evidence_insufficient" if evidence_insufficient else "failed")
             self.repository.update_task(
                 root_task_id, {"status": "failed"}
             )
             terminal = self._event(
-                RunEventType.RUN_FAILED,
+                RunEventType.RUN_EVIDENCE_INSUFFICIENT if evidence_insufficient else RunEventType.RUN_FAILED,
                 run_id=run_id,
                 conversation_id=conversation_id,
                 sequence=next_sequence,
@@ -254,14 +265,16 @@ class RunService:
             )
             return
 
-        self.repository.update_run_status(run_id, "completed")
+        run_events = self.repository.list_run_events(run_id)
+        partial = _has_unresolved_insufficient_evaluation(run_events)
+        self.repository.update_run_status(run_id, "partial" if partial else "completed")
         self.repository.update_task(root_task_id, {"status": "completed"})
         terminal = self._event(
-            RunEventType.RUN_COMPLETED,
+            RunEventType.RUN_PARTIAL if partial else RunEventType.RUN_COMPLETED,
             run_id=run_id,
             conversation_id=conversation_id,
             sequence=next_sequence,
-            data={},
+            data={"reason": "some checks remain incomplete"} if partial else {},
             task_id=root_task_id,
         )
         yield self._persist_event(terminal)
@@ -270,10 +283,16 @@ class RunService:
         run = self.repository.get_run(run_id)
         if run is None:
             return None
+        coverage = next((
+            event.data["coverage"]
+            for event in reversed(self.repository.list_run_events(run_id))
+            if event.type == RunEventType.TASK_EVALUATED and event.data.get("coverage")
+        ), None)
         return {
             **run,
             "tasks": self.repository.list_tasks(run_id),
             "approvals": self.repository.list_approvals(run_id),
+            **({"coverage": coverage} if coverage else {}),
         }
 
     def list(self, *, limit: int | None = None, offset: int = 0) -> list[dict[str, Any]]:
@@ -524,6 +543,7 @@ class RunService:
             )
             root_output = ""
             failed = False
+            evidence_stopped = False
             awaiting_approval = False
             async for candidate in strategy.execute(RunCommand(
                 mode="auto",
@@ -543,6 +563,7 @@ class RunService:
                     and candidate.parent_task_id is None
                 ):
                     failed = True
+                    evidence_stopped = True
                 elif candidate.type == RunEventType.APPROVAL_REQUIRED:
                     awaiting_approval = True
 
@@ -551,19 +572,30 @@ class RunService:
                 self._add_assistant_message(
                     root_event, root_output, "auto"
                 )
+            outcomes = [event.data.get("outcome") for event in self.repository.list_run_events(run_id) if event.type == RunEventType.TASK_EVALUATED]
             final_status = (
                 "approval_required"
                 if awaiting_approval
+                else "evidence_insufficient"
+                if evidence_stopped and "insufficient" in outcomes and "failed" not in outcomes
                 else "failed"
                 if failed
+                else "partial"
+                if _has_unresolved_insufficient_evaluation(
+                    self.repository.list_run_events(run_id)
+                )
                 else "completed"
             )
             self.repository.update_run_status(run_id, final_status)
-            if final_status in {"completed", "failed"}:
+            if final_status in {"completed", "partial", "evidence_insufficient", "failed"}:
                 persist(RunEvent.create(
                     event_type=(
                         RunEventType.RUN_COMPLETED
                         if final_status == "completed"
+                        else RunEventType.RUN_PARTIAL
+                        if final_status == "partial"
+                        else RunEventType.RUN_EVIDENCE_INSUFFICIENT
+                        if final_status == "evidence_insufficient"
                         else RunEventType.RUN_FAILED
                     ),
                     run_id=run_id,

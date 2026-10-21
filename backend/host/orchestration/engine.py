@@ -24,6 +24,31 @@ from backend.host.orchestration.validation import (
 Delegate = Callable[..., Awaitable[DelegationResult]]
 
 
+def _terminal_response(request: str, state: HostRunState, proposed: str) -> str:
+    latest_by_agent: dict[str, ObservedTask] = {}
+    for observed in state.observations.values():
+        latest_by_agent[observed.actual_agent_id] = observed
+    unresolved = [
+        observed for observed in latest_by_agent.values()
+        if observed.evaluation.outcome == "insufficient"
+    ]
+    if not unresolved:
+        return proposed
+    zh = any("\u4e00" <= char <= "\u9fff" for char in request)
+    title = "本次任务部分完成。以下检查尚未通过结构化证据校验，不能确认全量完成：" if zh else "This run is partially complete. These checks lack verified evidence:"
+    lines = [title]
+    for observed in unresolved:
+        lines.append(f"- {observed.task.objective}: {observed.evaluation.reason}")
+        coverage = observed.result.output.coverage if observed.result.output else None
+        if coverage is not None:
+            missing = sorted(set(coverage.expected_targets) - set(coverage.inspected_targets))
+            if missing:
+                label = "未验证对象" if zh else "Unverified targets"
+                lines.append(f"  {label}: {', '.join(missing)}")
+    lines.append("已获取的检查结果和工具证据见上方 Agent 报告。" if zh else "See the Agent reports above for the inspection results and tool evidence.")
+    return "\n".join(lines)
+
+
 class HostOrchestrationEngine:
     def __init__(
         self,
@@ -300,7 +325,7 @@ class HostOrchestrationEngine:
             if decision.action != "delegate":
                 yield {
                     "type": "text",
-                    "text": decision.response,
+                    "text": _terminal_response(request, state, decision.response),
                     "host_action": decision.action,
                 }
                 yield {"type": "done", "session_id": run_id}
@@ -334,7 +359,12 @@ class HostOrchestrationEngine:
             progress: asyncio.Queue[dict] = asyncio.Queue()
             executions_task = asyncio.ensure_future(asyncio.gather(*(
                 self._run_task(
-                    run_id, task, prompts[task.id], progress.put
+                    run_id, task, prompts[task.id], progress.put,
+                    prior_coverage=[
+                        observed.result.output.coverage
+                        for observed in state.observations.values()
+                        if observed.result.output and observed.result.output.coverage
+                    ],
                 )
                 for task in decision.tasks
             )))
@@ -374,6 +404,7 @@ class HostOrchestrationEngine:
                     "agent_id": agent_id,
                     "outcome": evaluation.outcome,
                     "reason": evaluation.reason,
+                    "coverage": result.output.coverage.model_dump() if result.output and result.output.coverage else None,
                 }
                 if result.state == "completed":
                     if evaluation.outcome == "sufficient":
@@ -435,6 +466,11 @@ class HostOrchestrationEngine:
                 ),
                 "outcome": observed.evaluation.outcome,
                 "reason": observed.evaluation.reason,
+                "coverage": (
+                    observed.result.output.coverage.model_dump()
+                    if observed.result.output and observed.result.output.coverage
+                    else None
+                ),
             }
             for task_id, observed in state.observations.items()
         }
@@ -463,6 +499,15 @@ class HostOrchestrationEngine:
             + "\n- ".join(task.completion_criteria)
             + mutation_instruction
             + language_instruction
+            + "\n\nFor a finite multi-target audit, enumerate targets before inspection. "
+            "If prior observations include a coverage manifest, inspect only targets still missing "
+            "from its inspected_targets and preserve the established target list. "
+            "Append a fenced coverage JSON object: scope is a string; expected_targets "
+            "and inspected_targets are arrays of unique target identifiers; "
+            "enumeration_complete is a boolean; evidence_call_ids is an array of actual "
+            "tool call IDs from this execution. Do not substitute counts or tool names "
+            "for target identifiers or call IDs. If enumeration is unverified, set "
+            "enumeration_complete to false and list only verified targets."
         )
 
     async def _run_task(
@@ -471,6 +516,7 @@ class HostOrchestrationEngine:
         task: PlannedTask,
         prompt: str,
         on_progress,
+        prior_coverage=None,
     ) -> tuple[DelegationResult, Evaluation, str, list[dict]]:
         events: list[dict] = []
         agent_id = task.agent_id
@@ -483,6 +529,11 @@ class HostOrchestrationEngine:
             result = await self._execute_safely(
                 run_id, agent_id, prompt, task.id, on_progress
             )
+            if result.output and result.output.coverage:
+                merged = result.output.coverage
+                for previous in prior_coverage or []:
+                    merged = merged.merge(previous)
+                result.output.coverage = merged
             evaluation = await self._decisions.evaluate(task, result)
             if evaluation.outcome in {"sufficient", "blocked"}:
                 return result, evaluation, agent_id, events

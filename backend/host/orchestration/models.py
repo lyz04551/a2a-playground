@@ -12,6 +12,7 @@ class PlannedTask(BaseModel):
     input: str = ""
     depends_on: list[str] = Field(default_factory=list)
     completion_criteria: list[str] = Field(min_length=1)
+    coverage_required: bool = False
     risk: Literal["read", "write"] = "read"
     required_skill: str | None = None
     required_tags: list[str] = Field(default_factory=list)
@@ -92,6 +93,39 @@ class Continuation(BaseModel):
     reason: str = ""
 
 
+class CoverageManifest(BaseModel):
+    """Agent-declared scope; absent manifests mean coverage is unknown."""
+
+    scope: str = Field(min_length=1)
+    expected_targets: list[str] = Field(default_factory=list)
+    inspected_targets: list[str] = Field(default_factory=list)
+    enumeration_complete: bool = False
+    evidence_call_ids: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def check_targets(self):
+        if len(self.expected_targets) != len(set(self.expected_targets)):
+            raise ValueError("expected targets must be unique")
+        if len(self.inspected_targets) != len(set(self.inspected_targets)):
+            raise ValueError("inspected targets must be unique")
+        if not set(self.inspected_targets) <= set(self.expected_targets):
+            raise ValueError("inspected targets must be declared in expected targets")
+        return self
+
+    @property
+    def complete(self) -> bool:
+        return self.enumeration_complete and set(self.inspected_targets) == set(self.expected_targets)
+
+    def merge(self, earlier: "CoverageManifest") -> "CoverageManifest":
+        if self.scope != earlier.scope or set(self.expected_targets) != set(earlier.expected_targets):
+            return self
+        return self.model_copy(update={
+            "inspected_targets": list(dict.fromkeys([*earlier.inspected_targets, *self.inspected_targets])),
+            "enumeration_complete": self.enumeration_complete or earlier.enumeration_complete,
+            "evidence_call_ids": list(dict.fromkeys([*earlier.evidence_call_ids, *self.evidence_call_ids])),
+        })
+
+
 class SpecialistOutput(BaseModel):
     status: str = "completed"
     summary: str = ""
@@ -101,6 +135,7 @@ class SpecialistOutput(BaseModel):
     recommendations: list[str] = Field(default_factory=list)
     continuation: Continuation = Field(default_factory=Continuation)
     limitations: list[str] = Field(default_factory=list)
+    coverage: CoverageManifest | None = None
 
 
 class DelegationResult(BaseModel):

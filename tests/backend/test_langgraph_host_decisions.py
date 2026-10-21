@@ -7,6 +7,7 @@ import pytest
 from langchain_core.messages import AIMessage
 
 from backend.host.langgraph.decisions import LangGraphDecisionPort
+from backend.host.orchestration.engine import _terminal_response
 from backend.host.orchestration.models import (
     DelegationResult,
     Evaluation,
@@ -69,6 +70,27 @@ AGENTS = [
         "limitations": ["cannot mutate"],
     }
 ]
+
+
+def test_host_final_response_cannot_claim_full_coverage_after_insufficient_evaluation():
+    task = PlannedTask(
+        id="audit", agent_id="ops", objective="检查全部对象",
+        completion_criteria=["逐一验证"], coverage_required=True,
+    )
+    state = HostRunState(goal="检查全部对象", observations={
+        task.id: ObservedTask(
+            task=task,
+            result=DelegationResult(state="completed", text="声称全部检查完毕"),
+            evaluation=Evaluation(outcome="insufficient", reason="coverage manifest was not provided"),
+            actual_agent_id="ops",
+        ),
+    })
+
+    final = _terminal_response("检查全部对象", state, "全部对象已检查，任务完成")
+
+    assert final.startswith("本次任务部分完成")
+    assert "coverage manifest was not provided" in final
+    assert "全部对象已检查，任务完成" not in final
 
 
 @pytest.mark.anyio
@@ -168,7 +190,7 @@ async def test_partial_specialist_result_is_deterministically_insufficient():
 
 
 @pytest.mark.anyio
-async def test_partial_diagnostic_with_summary_is_usable_without_model_call():
+async def test_partial_diagnostic_with_summary_remains_insufficient():
     model = FakeModel()
     result = DelegationResult(
         state="completed",
@@ -195,8 +217,8 @@ async def test_partial_diagnostic_with_summary_is_usable_without_model_call():
         result,
     )
 
-    assert evaluation.outcome == "sufficient"
-    assert "limitations" in evaluation.reason
+    assert evaluation.outcome == "insufficient"
+    assert "missing coverage" in evaluation.reason
     assert model.calls == []
 
 

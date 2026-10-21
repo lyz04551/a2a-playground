@@ -11,7 +11,7 @@ export const EVENT_STATES = {
   'input-required': { color: '#7c3aed', label: '等待审批' }, canceled: { color: '#64748b', label: '已取消' },
 }
 const EVENT_LABELS = {
-  'run.started': '运行开始', 'run.completed': '运行完成', 'run.failed': '运行失败', 'run.cancelled': '运行取消',
+  'run.started': '运行开始', 'run.completed': '运行完成', 'run.partial': '部分完成', 'run.evidence_insufficient': '证据不足而终止', 'run.failed': '运行失败', 'run.cancelled': '运行取消',
   'host.planning': 'Host 规划', 'host.plan_created': '计划已创建', 'host.plan_revised': '计划已调整', 'host.synthesis_started': 'Host 综合',
   'task.context_prepared': '准备任务上下文', 'task.delegated': '分派任务', 'task.started': '任务开始', 'task.retry_scheduled': '任务重试',
   'task.evaluated': '结果评价', 'task.completed': '任务完成', 'task.failed': '任务失败', 'task.blocked': '任务阻塞',

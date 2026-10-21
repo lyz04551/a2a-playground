@@ -987,6 +987,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                             ),
                             "outcome": upstream.get("outcome", ""),
                             "reason": upstream.get("reason", ""),
+                            "coverage": upstream.get("coverage"),
                         },
                     )
                 elif event_type in {"task_completed", "task_failed", "task_blocked"}:

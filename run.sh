@@ -42,16 +42,20 @@ backend/.venv/bin/python -m backend.persistence.migrate
 export PLAYGROUND_ALLOW_PRIVATE_AGENTS=true
 export BOOTSTRAP_AGENTS="$(backend/.venv/bin/python - <<'PY'
 import json
-from urllib.parse import urlparse
-from backend.database import repository
+from pathlib import Path
 
-existing_ports = {urlparse(agent['url']).port for agent in repository.list_agents()}
-definitions = [
-    {'id': 'k8s-ops', 'url': 'http://127.0.0.1:8052', 'risk_level': 'read_only'},
-    {'id': 'k8s-orchestrator', 'url': 'http://127.0.0.1:8051', 'risk_level': 'write_approval'},
-    {'id': 'k8s-security', 'url': 'http://127.0.0.1:8053', 'risk_level': 'read_only'},
-]
-print(json.dumps([agent for agent in definitions if urlparse(agent['url']).port not in existing_ports]))
+import yaml
+
+definitions = []
+for path in sorted(Path('agents').glob('*/agent.yaml')):
+    config = yaml.safe_load(path.read_text(encoding='utf-8'))
+    if not isinstance(config, dict):
+        continue
+    definitions.append({
+        'id': config['agent_id'],
+        'url': f"http://127.0.0.1:{config['port']}",
+    })
+print(json.dumps(definitions))
 PY
 )"
 

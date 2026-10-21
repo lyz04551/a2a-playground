@@ -4,7 +4,7 @@ import { catchUpAndStreamRun, streamRun } from '../api/runStream'
 import { emptyRunState, reduceRunEvent, restoreRunEventState } from '../state/runEvents'
 import { buildRunReconnectCommand, restoreWorkspaceState, selectLatestConversationRun } from '../components/workspace/workspaceState'
 
-const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled'])
+const TERMINAL_RUN_STATUSES = new Set(['completed', 'partial', 'evidence_insufficient', 'failed', 'cancelled'])
 
 function reducer(state, action) {
   if (action.type === 'reset') return { ...emptyRunState, messages: action.messages || [] }

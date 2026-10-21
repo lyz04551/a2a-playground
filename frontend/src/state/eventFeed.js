@@ -28,6 +28,8 @@ function deriveStatus(events) {
   if (!latest) return 'submitted'
   if (latest.state) return latest.state
   if (latest.event_type === 'run.completed') return 'completed'
+  if (latest.event_type === 'run.partial') return 'partial'
+  if (latest.event_type === 'run.evidence_insufficient') return 'evidence_insufficient'
   if (latest.event_type === 'run.failed') return 'failed'
   if (latest.event_type === 'run.cancelled') return 'canceled'
   return 'working'
@@ -146,7 +148,7 @@ export function filterEvents(events, { type = 'all', state = 'all', query = '' }
   })
 }
 
-const SUMMARY_TYPES = new Set(['host.plan_created', 'task.delegated', 'task.retry_scheduled', 'task.completed', 'task.failed', 'task.blocked', 'host.synthesis_started', 'message.completed', 'run.completed', 'run.failed', 'run.cancelled'])
+const SUMMARY_TYPES = new Set(['host.plan_created', 'task.delegated', 'task.retry_scheduled', 'task.completed', 'task.failed', 'task.blocked', 'host.synthesis_started', 'message.completed', 'run.completed', 'run.partial', 'run.evidence_insufficient', 'run.failed', 'run.cancelled'])
 const ERROR_TYPES = new Set(['task.retry_scheduled', 'task.failed', 'task.blocked', 'run.failed', 'run.cancelled'])
 const TOOL_TYPES = new Set(['tool.called', 'tool.completed'])
 
@@ -179,6 +181,8 @@ export function summarizeEvent(event) {
   if (event.event_type === 'artifact.created') return `已生成产物：${event.payload?.name || event.payload?.id || 'Artifact'}`
   if (event.event_type === 'run.started') return '本次运行已开始'
   if (event.event_type === 'run.completed') return '本次运行已完成'
+  if (event.event_type === 'run.partial') return '本次运行部分完成'
+  if (event.event_type === 'run.evidence_insufficient') return '本次运行因证据不足而终止'
   if (event.event_type === 'run.failed') return `本次运行失败：${event.content || event.payload?.error || '原因未知'}`
   if (event.event_type === 'run.cancelled') return '本次运行已取消'
   return event.content || '暂无事件详情'

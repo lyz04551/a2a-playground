@@ -11,6 +11,8 @@ from pydantic import BaseModel, Field, field_validator
 class RunEventType(str, Enum):
     RUN_STARTED = "run.started"
     RUN_COMPLETED = "run.completed"
+    RUN_PARTIAL = "run.partial"
+    RUN_EVIDENCE_INSUFFICIENT = "run.evidence_insufficient"
     RUN_FAILED = "run.failed"
     RUN_CANCELLED = "run.cancelled"
     HOST_PLANNING = "host.planning"

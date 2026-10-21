@@ -98,7 +98,7 @@ function reduceNormalizedEvent(state, event) {
   if (event.type === 'run.started') {
     return { ...state, run: { id: event.run_id, conversationId: event.conversation_id, status: 'running', ...data } }
   }
-  if (event.type === 'run.completed' || event.type === 'run.failed' || event.type === 'run.cancelled') {
+  if (event.type === 'run.completed' || event.type === 'run.partial' || event.type === 'run.evidence_insufficient' || event.type === 'run.failed' || event.type === 'run.cancelled') {
     const terminalStatus = event.type.slice(4)
     const roundsByNumber = Object.fromEntries(Object.entries(state.roundsByNumber).map(([round, value]) => [
       round,
@@ -121,6 +121,7 @@ function reduceNormalizedEvent(state, event) {
     return { ...state, run: { ...state.run, id: event.run_id || state.run?.id, status: 'interrupted', ...data } }
   }
   if (event.type === 'host.planning') return { ...state, run: { ...state.run, id: event.run_id, status: 'planning', ...data } }
+  if (event.type === 'task.evaluated' && data.coverage) return { ...state, run: { ...state.run, coverage: data.coverage } }
   if (event.type === 'host.round_started') {
     const round = data.round
     if (round === undefined || round === null) return state
@@ -265,6 +266,7 @@ function reduceNormalizedEvent(state, event) {
     return updateTask(state, event, {
       status: terminalStatus,
       completedAt,
+      ...(data.delegation_result?.output?.evidence ? { evidence: data.delegation_result.output.evidence } : {}),
       ...(task?.tools?.length ? { tools } : {}),
       ...(Number.isFinite(startedMs) && Number.isFinite(completedMs) ? { durationMs: Math.max(0, completedMs - startedMs) } : {}),
       ...(event.type === 'task.completed' ? { result: data.result } : { error: data.error }),

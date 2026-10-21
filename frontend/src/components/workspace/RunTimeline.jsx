@@ -39,6 +39,7 @@ function ToolCallDetail({ tool, zh }) {
         <span><StatusIcon status={tool.status} /> {tool.name || (zh ? '工具调用' : 'Tool call')}</span>
         <small><StatusIcon status={tool.status} /> {statusLabel(tool.status || 'working', zh)} · {formatDuration(tool.durationMs)}</small>
       </summary>
+      <p className="tool-call-detail__meta">{zh ? '调用 ID' : 'Call ID'}: <code>{tool.id}</code>{tool.startedAt ? ` · ${new Date(tool.startedAt).toLocaleString()}` : ''}</p>
       {tool.error && <code>{details.errorText}</code>}
       <section>
         <header><span>{zh ? '调用参数' : 'Arguments'}</span>{details.argumentsText && <button type="button" onClick={() => copyText(details.argumentsText)}>{zh ? '复制' : 'Copy'}</button>}</header>

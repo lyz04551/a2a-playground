@@ -29,5 +29,11 @@ def build_task_prompt(
         f"Constraints:\n{constraint}\n\n"
         f"Predecessor findings:\n{findings}\n\n"
         "Return findings, supporting evidence, uncertainty, and recommended "
-        "next steps."
+        "next steps. For a finite multi-target audit, enumerate targets before "
+        "inspection and append a fenced coverage JSON object. scope is a "
+        "string; expected_targets and inspected_targets are arrays of unique "
+        "target identifiers, not counts; enumeration_complete is a boolean; "
+        "evidence_call_ids is an array of actual tool call IDs, not tool names. "
+        "If enumeration is unverified, set enumeration_complete to false and "
+        "list only verified targets."
     )

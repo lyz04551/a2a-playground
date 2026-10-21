@@ -130,7 +130,7 @@ def create_router(service, model_config_service=None) -> APIRouter:
                         yield encode_sse(event)
                     run = service.get(reconnect_run_id)
                     if run is None or run["status"] in {
-                        "completed", "failed", "cancelled", "interrupted", "approval_required"
+                        "completed", "partial", "evidence_insufficient", "failed", "cancelled", "interrupted", "approval_required"
                     }:
                         return
                     next_generation = await service.wait_for_events(reconnect_run_id, generation)

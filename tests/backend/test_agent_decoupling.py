@@ -56,3 +56,37 @@ async def test_registry_accepts_non_kubernetes_a2a_agent_card():
     assert agent["name"] == "Writing Agent"
     assert agent["url"] == "http://external-agent.test:9000"
     assert agent["risk_level"] == "read_only"
+
+
+@pytest.mark.anyio
+async def test_bootstrap_takes_permissions_from_agent_profile_and_updates_local_aliases():
+    stored = [{"id": "legacy", "url": "http://localhost:9000", "risk_level": "write_approval", "read_only": False}]
+
+    class Repository:
+        def add_agent(self, agent):
+            stored[:] = [item for item in stored if item["id"] != agent["id"]] + [agent]
+            return agent
+
+        def list_agents(self):
+            return list(stored)
+
+    async def fetch_card(_address):
+        return SimpleNamespace(
+            name="Inspection Agent", description="Read-only inspection", provider=None,
+            capabilities=None, default_input_modes=["text/plain"],
+            default_output_modes=["text/plain"], skills=[], version="1.0",
+            protocol_version="0.3", preferred_transport="JSONRPC",
+            documentation_url="",
+        )
+
+    async def fetch_profile(_address):
+        return {"agent_id": "inspector", "read_only": True,
+                "risk_level": "read_only", "limitations": ["No writes"]}
+
+    agent = await AgentService(Repository(), fetch_card, fetch_profile).register(
+        "http://127.0.0.1:9000", stable_id="inspector", risk_level="write_approval"
+    )
+
+    assert agent["read_only"] is True
+    assert all(item["risk_level"] == "read_only" for item in stored)
+    assert next(item for item in stored if item["id"] == "legacy")["superseded_by"] == "inspector"

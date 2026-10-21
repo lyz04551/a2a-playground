@@ -4,7 +4,9 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from typing import Any
+from urllib.parse import urlparse
 
+import httpx
 from fastapi import APIRouter
 
 from backend.models import Agent, AgentRegister, ApiResponse
@@ -12,12 +14,21 @@ from backend.models import Agent, AgentRegister, ApiResponse
 
 CardFetcher = Callable[[str], Awaitable[Any]]
 HealthChecker = Callable[[str], Awaitable[dict[str, Any]]]
+ProfileFetcher = Callable[[str], Awaitable[dict[str, Any]]]
+
+
+async def fetch_agent_profile(address: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        response = await client.get(f"{address.rstrip('/')}/health/profile")
+        response.raise_for_status()
+        return response.json()
 
 
 class AgentService:
-    def __init__(self, repository, fetch_card: CardFetcher):
+    def __init__(self, repository, fetch_card: CardFetcher, profile_fetcher: ProfileFetcher | None = None):
         self.repository = repository
         self.fetch_card = fetch_card
+        self.fetch_profile = profile_fetcher or fetch_agent_profile
 
     async def register(
         self,
@@ -30,6 +41,16 @@ class AgentService:
         agent_url = address.strip()
         if not agent_url.startswith("http"):
             agent_url = f"http://{agent_url}"
+        profile = await self.fetch_profile(agent_url) if stable_id else None
+        if profile is not None:
+            if profile.get("agent_id") != stable_id:
+                raise ValueError("Agent profile ID does not match bootstrap ID")
+            if not isinstance(profile.get("read_only"), bool):
+                raise ValueError("Agent profile must declare read_only")
+            declared_risk = profile.get("risk_level")
+            expected_risk = "read_only" if profile["read_only"] else "write_approval"
+            if declared_risk != expected_risk:
+                raise ValueError("Agent profile risk_level conflicts with read_only")
         agent = Agent(
             id=stable_id or uuid.uuid4().hex[:12],
             name=card.name or "Unknown Agent",
@@ -47,11 +68,34 @@ class AgentService:
             protocolVersion=card.protocol_version or "",
             preferredTransport=card.preferred_transport or "",
             documentationUrl=card.documentation_url or "",
-            read_only=risk_level != "write_approval",
-            risk_level=risk_level or "read_only",
+            read_only=profile["read_only"] if profile else risk_level != "write_approval",
+            risk_level=profile["risk_level"] if profile else risk_level or "read_only",
         ).model_dump()
+        if profile is not None:
+            agent["limitations"] = profile.get("limitations", [])
         agent["health"] = {"online": True}
-        return self.repository.add_agent(agent)
+        stored = self.repository.add_agent(agent)
+        if stable_id:
+            canonical = urlparse(agent_url)
+            for existing in self.repository.list_agents():
+                if existing["id"] == stable_id:
+                    continue
+                address = urlparse(existing.get("url", ""))
+                same_local_endpoint = (
+                    canonical.hostname in {"localhost", "127.0.0.1"}
+                    and address.hostname in {"localhost", "127.0.0.1"}
+                    and canonical.port == address.port
+                )
+                if same_local_endpoint:
+                    self.repository.add_agent({
+                        **existing,
+                        "read_only": agent["read_only"],
+                        "risk_level": agent["risk_level"],
+                        "skills": agent["skills"],
+                        "limitations": agent.get("limitations", []),
+                        "superseded_by": stable_id,
+                    })
+        return stored
 
 
 def create_router(
@@ -63,7 +107,10 @@ def create_router(
 
     @router.post("/list")
     async def list_agents():
-        return ApiResponse(result=repository.list_agents())
+        return ApiResponse(result=[
+            agent for agent in repository.list_agents()
+            if not agent.get("superseded_by")
+        ])
 
     @router.post("/fetch-card")
     async def fetch_card(request: AgentRegister):
@@ -99,7 +146,10 @@ def create_router(
 
     @router.post("/health-check")
     async def health_check():
-        agents = repository.list_agents()
+        agents = [
+            agent for agent in repository.list_agents()
+            if not agent.get("superseded_by")
+        ]
         if not agents:
             return ApiResponse(result=[])
         results = await asyncio.gather(

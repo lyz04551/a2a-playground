@@ -13,7 +13,10 @@ class AgentRegistry:
         return self.repository.get_agent(agent_id)
 
     def list(self) -> list[dict[str, Any]]:
-        return self.repository.list_agents()
+        return [
+            agent for agent in self.repository.list_agents()
+            if not agent.get("superseded_by")
+        ]
 
     def capability_profile(self, agent_id: str) -> dict[str, Any] | None:
         agent = self.get(agent_id)

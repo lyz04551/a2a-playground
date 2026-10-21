@@ -19,6 +19,8 @@ test('describes planning, parallel execution, retry and synthesis stages', () =>
 
 test('uses terminal run status as the final stage', () => {
   assert.equal(deriveRunStage([event('run.completed', 1)]).state, 'completed')
+  assert.equal(deriveRunStage([event('run.partial', 1)]).textZh, '部分完成：仍有检查缺少充分证据')
+  assert.equal(deriveRunStage([event('run.evidence_insufficient', 1)]).state, 'evidence_insufficient')
   assert.equal(deriveRunStage([event('run.failed', 1, { error: 'timeout' })]).textZh, '运行失败：timeout')
 })
 

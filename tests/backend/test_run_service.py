@@ -9,6 +9,21 @@ from backend.orchestration.events import RunEvent
 from tests.postgres_helpers import create_test_repository
 from backend.registry.service import AgentRegistry
 from backend.host.orchestration.models import Evaluation
+from backend.orchestration.service import _has_unresolved_insufficient_evaluation
+
+
+def test_partial_evaluation_is_cleared_by_later_sufficient_result():
+    def evaluated(sequence, agent, outcome):
+        return RunEvent.create(
+            event_type=RunEventType.TASK_EVALUATED,
+            run_id="run", conversation_id="conversation", sequence=sequence,
+            task_id=f"task-{sequence}", data={"agent_id": agent, "outcome": outcome},
+        )
+
+    assert _has_unresolved_insufficient_evaluation([evaluated(1, "ops", "insufficient")])
+    assert not _has_unresolved_insufficient_evaluation([
+        evaluated(1, "ops", "insufficient"), evaluated(2, "ops", "sufficient"),
+    ])
 
 
 class FakeGateway:

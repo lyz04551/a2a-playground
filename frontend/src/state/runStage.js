@@ -20,6 +20,8 @@ export function deriveRunStage(events = [], agents = []) {
   }))
   if (!latest) return { state: 'idle', textZh: '', textEn: '', active }
   if (latest.type === 'run.completed') return { state: 'completed', textZh: '运行已完成', textEn: 'Run completed', active: [] }
+  if (latest.type === 'run.partial') return { state: 'partial', textZh: '部分完成：仍有检查缺少充分证据', textEn: 'Partially completed: some checks lack sufficient evidence', active: [] }
+  if (latest.type === 'run.evidence_insufficient') return { state: 'evidence_insufficient', textZh: '证据不足而终止', textEn: 'Stopped: insufficient evidence', active: [] }
   if (latest.type === 'run.failed') return { state: 'failed', textZh: `运行失败：${latest.data?.error || '原因未知'}`, textEn: `Run failed: ${latest.data?.error || 'unknown error'}`, active: [] }
   if (latest.type === 'run.cancelled') return { state: 'cancelled', textZh: '运行已取消', textEn: 'Run cancelled', active: [] }
   if (latest.type === 'host.planning') return { state: 'planning', textZh: 'Host 正在分析请求并制定计划…', textEn: 'Host is analyzing the request and creating a plan…', active }

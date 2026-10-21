@@ -56,6 +56,14 @@ def create_a2a_app(
     async def readiness(_request):
         return JSONResponse(executor.agent.readiness())
 
+    async def profile(_request):
+        return JSONResponse({
+            "agent_id": config.agent_id,
+            "read_only": config.read_only,
+            "risk_level": config.risk_level,
+            "limitations": config.limitations,
+        })
+
     async def diagnostics(request):
         try:
             payload = await request.json()
@@ -70,5 +78,6 @@ def create_a2a_app(
             return JSONResponse({"error": str(exc)}, status_code=400)
 
     app.add_route("/health/ready", readiness, methods=["GET"])
+    app.add_route("/health/profile", profile, methods=["GET"])
     app.add_route("/health/diagnostics", diagnostics, methods=["POST"])
     return app

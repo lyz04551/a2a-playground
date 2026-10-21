@@ -1,17 +1,79 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import asyncio
 import time
 import uuid
+from datetime import datetime, timezone
 from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import Any
 
+
+_COVERAGE_BLOCK = re.compile(r"```coverage\s*(\{.*?\})\s*```", re.DOTALL)
+_SENSITIVE_FIELD = re.compile(r"password|passwd|secret|token|authorization|cookie|api[_-]?key|private[_-]?key|credential", re.I)
+
+
+def _evidence_excerpt(value: str, *, limit: int = 800) -> str:
+    try:
+        parsed = json.loads(value)
+    except (TypeError, ValueError):
+        return "[文本结果见工具轨迹]" if value else "[工具返回空输出]"
+
+    def sanitize(item):
+        if isinstance(item, dict):
+            return {key: "[REDACTED]" if _SENSITIVE_FIELD.search(str(key)) else sanitize(part) for key, part in item.items()}
+        if isinstance(item, list):
+            return [sanitize(part) for part in item[:10]]
+        return item
+
+    excerpt = json.dumps(sanitize(parsed), ensure_ascii=False)
+    return excerpt[:limit] + ("…" if len(excerpt) > limit else "")
+
+
+def _tool_evidence(calls: dict[str, dict], results: dict[str, str]) -> list[dict]:
+    return [
+        {
+            "call_id": call_id,
+            "tool": calls.get(call_id, {}).get("tool", ""),
+            "arguments_excerpt": _evidence_excerpt(json.dumps(calls.get(call_id, {}).get("arguments", {}), ensure_ascii=False)),
+            "called_at": calls.get(call_id, {}).get("called_at", ""),
+            "result_state": "empty" if not result else "returned",
+            "result_excerpt": _evidence_excerpt(result),
+        }
+        for call_id, result in results.items()
+    ]
+
+
+def _extract_coverage(content: str, observed_call_ids: set[str]) -> tuple[str, dict | None]:
+    """Accept a generic manifest only when its cited calls occurred this turn."""
+    match = _COVERAGE_BLOCK.search(content)
+    if not match:
+        return content, None
+    visible = (content[:match.start()] + content[match.end():]).strip()
+    try:
+        manifest = json.loads(match.group(1))
+        expected = manifest["expected_targets"]
+        inspected = manifest["inspected_targets"]
+        citations = manifest["evidence_call_ids"]
+        valid = (
+            isinstance(manifest.get("scope"), str)
+            and isinstance(expected, list) and all(isinstance(item, str) for item in expected)
+            and isinstance(inspected, list) and all(isinstance(item, str) for item in inspected)
+            and isinstance(citations, list) and bool(citations)
+            and set(citations) <= observed_call_ids
+            and set(inspected) <= set(expected)
+            and isinstance(manifest.get("enumeration_complete"), bool)
+        )
+        return (visible, manifest) if valid else (visible, None)
+    except (KeyError, TypeError, ValueError):
+        return visible, None
+
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
-from langchain_openai import ChatOpenAI
+from langchain_openai import ChatOpenAI  #调用 OpenAI 兼容模型
 from langgraph.errors import GraphRecursionError
 from langgraph.prebuilt import ToolNode, create_react_agent
 
@@ -355,6 +417,7 @@ class RuntimeMCPAgent:
         seen_tool_calls: set[str] = set()
         seen_tool_results: set[str] = set()
         current_tool_names: dict[str, str] = {}
+        current_tool_calls: dict[str, dict] = {}
         current_tool_results: dict[str, str] = {}
         try:
             previous = await self._graph.aget_state(graph_config)
@@ -399,6 +462,11 @@ class RuntimeMCPAgent:
                                     continue
                                 seen_tool_calls.add(call["id"])
                                 current_tool_names[call["id"]] = call["name"]
+                                current_tool_calls[call["id"]] = {
+                                    "tool": call["name"],
+                                    "arguments": call.get("args", {}),
+                                    "called_at": datetime.now(timezone.utc).isoformat(),
+                                }
                                 yield RuntimeEvent(
                                     type=RuntimeEventType.TOOL_CALL,
                                     content=call["name"],
@@ -448,6 +516,7 @@ class RuntimeMCPAgent:
                     f"强制总结模型不可用：{exc}",
                     current_tool_names,
                 )
+            content, _ = _extract_coverage(content, set(current_tool_results))
             yield RuntimeEvent.completed(
                 content=content,
                 artifact_name="specialist_result",
@@ -456,7 +525,7 @@ class RuntimeMCPAgent:
                     "summary": content,
                     "findings": [],
                     "resources": [],
-                    "evidence": [],
+                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
                     "recommendations": [],
                     "continuation": {
                         "allowed": True,
@@ -477,7 +546,6 @@ class RuntimeMCPAgent:
         if (
             self._tool_adapter is not None
             and self._tool_adapter._calls_by_context.get(context_id, 0) >= self.max_tool_calls
-            and len(content.strip()) < 200
         ):
             yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Discard incomplete draft")
             evidence = self._current_run_evidence(current_tool_results)
@@ -487,13 +555,16 @@ class RuntimeMCPAgent:
                 content = await self._deterministic_partial_summary(
                     current_tool_results, "工具调用预算已用尽", current_tool_names
                 )
+            content, coverage = _extract_coverage(content, set(current_tool_results))
             yield RuntimeEvent.completed(
                 content=content,
                 artifact_name="specialist_result",
                 data={
                     "status": "partial", "summary": content,
+                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
                     "continuation": {"allowed": True, "reason": "tool call budget reached"},
                     "limitations": ["工具调用预算已用尽，未覆盖的检查不作结论。"],
+                    **({"coverage": coverage} if coverage else {}),
                 },
             )
             return
@@ -511,7 +582,7 @@ class RuntimeMCPAgent:
                     "summary": content,
                     "findings": [],
                     "resources": [],
-                    "evidence": [],
+                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
                     "recommendations": [],
                     "continuation": {
                         "allowed": True,
@@ -539,7 +610,7 @@ class RuntimeMCPAgent:
                     "summary": summary,
                     "findings": [],
                     "resources": [],
-                    "evidence": [],
+                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
                     "recommendations": [],
                     "continuation": {
                         "allowed": False,
@@ -551,6 +622,11 @@ class RuntimeMCPAgent:
                 },
             )
             return
+        original_content = content
+        content, coverage = _extract_coverage(content, set(current_tool_results))
+        if content != original_content:
+            yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Replace structured coverage block")
+            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=content)
         yield RuntimeEvent.completed(
             content=content or "处理完成，但未生成文本响应。",
             artifact_name="specialist_result",
@@ -559,10 +635,11 @@ class RuntimeMCPAgent:
                 "summary": content,
                 "findings": [],
                 "resources": [],
-                "evidence": [],
+                "evidence": _tool_evidence(current_tool_calls, current_tool_results),
                 "recommendations": [],
                 "continuation": {"allowed": None, "reason": ""},
                 "limitations": [],
+                **({"coverage": coverage} if coverage else {}),
             },
         )
 
@@ -572,7 +649,11 @@ class RuntimeMCPAgent:
         prompt = (
             "调查阶段的时间预算已经用完。禁止调用任何工具。请仅根据下面已经取得的"
             "证据回答用户，优先说明已确认的问题、证据和建议，并明确指出哪些检查尚未"
-            "完成。不要声称执行了证据中没有出现的检查。\n\n"
+            "完成。不要声称执行了证据中没有出现的检查。若任务是有限对象的全量审查，"
+            "在报告末尾附加 ```coverage JSON 块：scope 为字符串，expected_targets 和 "
+            "inspected_targets 必须是对象标识符数组，enumeration_complete 为布尔值，"
+            "evidence_call_ids 只能填写下列真实调用 ID。无法确认的对象不得计入已检查；"
+            "无法确认完整枚举时将 enumeration_complete 设为 false。\n\n"
             f"用户问题：{query}\n\n已取得证据：\n{evidence}"
         )
         async with asyncio.timeout(self.summary_reserve_seconds):
@@ -669,10 +750,9 @@ class RuntimeMCPAgent:
     def _current_run_evidence(results: dict[str, str]) -> str:
         chunks: list[str] = []
         remaining = 12_000
+        per_call = min(2_000, max(250, remaining // max(1, len(results)) - 100))
         for call_id, content in results.items():
-            if not content:
-                continue
-            excerpt = content[: min(2_000, remaining)]
+            excerpt = content[: min(per_call, remaining)] if content else "[工具返回空输出]"
             chunks.append(
                 f"- 工具调用 {call_id or 'unknown'} 的结果：{excerpt}"
             )
