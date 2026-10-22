@@ -30,6 +30,20 @@ def _response_language(request: str) -> str:
     return "zh-CN" if any("\u4e00" <= char <= "\u9fff" for char in request) else "en"
 
 
+def _planning_agents(agents: list[dict]) -> list[dict]:
+    """Keep the Host prompt limited to tools it may actually request."""
+    return [
+        {
+            **agent,
+            "tool_catalog": [
+                tool for tool in agent.get("tool_catalog", [])
+                if tool.get("access") in {"allow", "approval_required"}
+            ],
+        }
+        for agent in agents
+    ]
+
+
 class LangGraphDecisionPort:
     def __init__(self, model=None, *, model_factory=None):
         self._model = model
@@ -54,7 +68,7 @@ class LangGraphDecisionPort:
         payload = {
             "request": request,
             "response_language": _response_language(request),
-            "available_agents": agents,
+            "available_agents": _planning_agents(agents),
             "state": compact_state,
         }
         instruction = """Choose exactly one next Host action from the persisted state.
@@ -77,10 +91,19 @@ class LangGraphDecisionPort:
 - stop: terminate when continuing is unsafe or impossible.
 
 Base the decision on structured observations, not keywords. Use only available
-Agent IDs and declared capabilities. Never repeat semantic work or a rejected
+Agent IDs and declared capabilities. For tasks needing MCP calls, put exact
+names from the selected Agent's tool_catalog in required_tools. Tools with
+access=deny are unavailable. Every write task must name an approval_required
+tool. If tool_catalog_state is unavailable, do not claim a tool exists.
+Never repeat semantic work or a rejected
 write. For a finite multi-target audit, set coverage_required=true on its
 PlannedTask; the specialist must enumerate and account for the target set.
 Never call such a task sufficient without a complete coverage manifest.
+For a continuation, carry forward the prior coverage target list and name only
+the remaining targets in the new task input. Do not request another target
+enumeration when the prior manifest says enumeration_complete=true for the
+same scope; request a refresh only if freshness is relevant or prior evidence
+is incomplete.
 A Kubernetes mutation requires a successful Security precheck observation;
 mutation and verification must never be delegated in the same round. Wait for a
 successful mutation observation, then delegate Ops verification in the next round.
@@ -159,7 +182,7 @@ Do not reveal hidden chain-of-thought."""
     async def create_plan(
         self, request: str, agents: list[dict]
     ) -> HostPlan:
-        payload = {"request": request, "available_agents": agents}
+        payload = {"request": request, "available_agents": _planning_agents(agents)}
         try:
             plan = await self._invoke_structured(
                 HostPlan,
@@ -182,6 +205,10 @@ write work to a read-only Agent. The Host performs the final synthesis, so do
 not create a task whose sole purpose is combining or summarizing other task
 results. Every delegated task must declare the most specific required_skill
 from the selected Agent card, relevant required_tags, and a workflow_role.
+For tasks needing MCP calls, list exact names from the selected Agent's
+tool_catalog in required_tools; denied tools are unavailable. Every write
+task must name an approval_required tool. If the catalog is unavailable,
+do not claim a specific tool exists.
 For a Kubernetes deployment mutation, create a Security Agent precheck task
 using its declared security skill, then a mutation task depending on it with
 risk set to write, then an Ops verification task depending on the mutation.

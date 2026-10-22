@@ -174,8 +174,8 @@ export function summarizeEvent(event) {
   if (event.event_type === 'task.blocked') return `任务阻塞：${event.content || event.payload?.reason || '依赖未满足'}`
   if (event.event_type === 'task.retry_scheduled') return `准备第 ${event.payload?.attempt || '?'} 次尝试：${event.payload?.reason || ''}`
   if (event.event_type === 'task.evaluated') return `结果评价：${event.payload?.outcome || ''}${event.payload?.reason ? `，${event.payload.reason}` : ''}`
-  if (event.event_type === 'message.completed') return event.content || 'Host 已生成最终回复'
-  if (event.event_type === 'message.delta') return 'Host 正在生成最终回复'
+  if (event.event_type === 'message.completed') return event.content || (event.agent_id ? `${event.agent_name || event.agent_id} 已生成回复` : 'Host 已生成最终回复')
+  if (event.event_type === 'message.delta') return event.agent_id ? `${event.agent_name || event.agent_id} 正在生成回复` : 'Host 正在生成最终回复'
   if (event.event_type === 'approval.required') return '任务等待用户审批'
   if (event.event_type === 'approval.decided') return `审批已处理：${event.payload?.decision || event.payload?.status || ''}`
   if (event.event_type === 'artifact.created') return `已生成产物：${event.payload?.name || event.payload?.id || 'Artifact'}`

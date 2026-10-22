@@ -12,7 +12,8 @@ from pathlib import Path
 from typing import Any
 
 
-_COVERAGE_BLOCK = re.compile(r"```coverage\s*(\{.*?\})\s*```", re.DOTALL)
+_JSON_FENCE = re.compile(r"```(?P<label>coverage|json)?[ \t]*\n(?P<body>.*?)\n```", re.DOTALL | re.IGNORECASE)
+_COVERAGE_KEYS = frozenset({"scope", "expected_targets", "inspected_targets", "enumeration_complete", "evidence_call_ids"})
 _SENSITIVE_FIELD = re.compile(r"password|passwd|secret|token|authorization|cookie|api[_-]?key|private[_-]?key|credential", re.I)
 
 
@@ -49,12 +50,28 @@ def _tool_evidence(calls: dict[str, dict], results: dict[str, str]) -> list[dict
 
 def _extract_coverage(content: str, observed_call_ids: set[str]) -> tuple[str, dict | None]:
     """Accept a generic manifest only when its cited calls occurred this turn."""
-    match = _COVERAGE_BLOCK.search(content)
-    if not match:
+    candidate = None
+    for match in _JSON_FENCE.finditer(content):
+        try:
+            parsed = json.loads(match.group("body"))
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict) and _COVERAGE_KEYS <= parsed.keys():
+            candidate = (match.start(), match.end(), parsed)
+    if candidate is None:
+        for match in re.finditer(r"(?m)^\{", content):
+            try:
+                parsed, end = json.JSONDecoder().raw_decode(content[match.start():])
+            except ValueError:
+                continue
+            end += match.start()
+            if isinstance(parsed, dict) and _COVERAGE_KEYS <= parsed.keys() and not content[end:].strip():
+                candidate = (match.start(), end, parsed)
+    if candidate is None:
         return content, None
-    visible = (content[:match.start()] + content[match.end():]).strip()
+    start, end, manifest = candidate
+    visible = (content[:start] + content[end:]).strip()
     try:
-        manifest = json.loads(match.group(1))
         expected = manifest["expected_targets"]
         inspected = manifest["inspected_targets"]
         citations = manifest["evidence_call_ids"]
@@ -71,6 +88,19 @@ def _extract_coverage(content: str, observed_call_ids: set[str]) -> tuple[str, d
     except (KeyError, TypeError, ValueError):
         return visible, None
 
+
+def _stream_visible_content(content: str) -> str:
+    """Keep an unfinished structured block out of the user-facing stream."""
+    fence = re.search(r"(?m)^```(?:coverage|json)?[^\n]*", content, re.IGNORECASE)
+    if fence is not None and "\n```" not in content[fence.end():]:
+        content = content[:fence.start()]
+    else:
+        content, _ = _extract_coverage(content, set())
+    bare_object = re.search(r"(?m)^\{", content)
+    if bare_object is not None:
+        content = content[:bare_object.start()]
+    return content[:-8] if len(content) > 8 else ""
+
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI  #调用 OpenAI 兼容模型
@@ -84,6 +114,7 @@ from .models import ApprovalRequired, PendingAction, PolicyAction
 from .streaming import RuntimeEvent, RuntimeEventType
 from .tool_adapter import MCPToolAdapter
 from .tool_policy import ToolPolicy
+from .reasoning_model import ReasoningChatOpenAI
 
 
 def _handle_tool_error(exc: Exception) -> str:
@@ -219,7 +250,7 @@ class RuntimeMCPAgent:
         )
         tools = self._tool_adapter.build_tools(definitions)
         llm = load_llm_config("AGENT")
-        model = self._model or ChatOpenAI(
+        model = self._model or ReasoningChatOpenAI(
             model=llm.model,
             openai_api_key=llm.api_key,
             openai_api_base=llm.base_url,
@@ -341,10 +372,22 @@ class RuntimeMCPAgent:
             try:
                 async with asyncio.timeout(timeout):
                     tools = await self.mcp_client.list_tools()
+                policy = ToolPolicy(self.config.tool_policy)
+                catalog = sorted((
+                    {
+                        "name": str(tool.get("name") or ""),
+                        "description": str(tool.get("description") or ""),
+                        "access": policy.classify(str(tool.get("name") or "")).action.value,
+                    }
+                    for tool in tools
+                    if tool.get("name")
+                ), key=lambda item: item["name"])
                 return {
                     "state": "ok",
                     "latency_ms": int((time.monotonic() - started) * 1000),
-                    "tool_count": len(tools),
+                    "tool_count": len(catalog),
+                    "callable_count": sum(item["access"] != "deny" for item in catalog),
+                    "tools": catalog,
                 }
             except Exception as exc:
                 return {
@@ -419,6 +462,10 @@ class RuntimeMCPAgent:
         current_tool_names: dict[str, str] = {}
         current_tool_calls: dict[str, dict] = {}
         current_tool_results: dict[str, str] = {}
+        streamed_content = ""
+        emitted_content = ""
+        thinking_pending = ""
+        thinking_last_emit = time.monotonic()
         try:
             previous = await self._graph.aget_state(graph_config)
             for message in previous.values.get("messages", []):
@@ -443,15 +490,35 @@ class RuntimeMCPAgent:
                     if mode == "messages":
                         chunk, metadata = state
                         if (
-                            seen_tool_results
+                            self.enable_thinking
                             and metadata.get("langgraph_node") == "agent"
+                            and isinstance(chunk, AIMessageChunk)
+                        ):
+                            reasoning = chunk.additional_kwargs.get("reasoning_content")
+                            if isinstance(reasoning, str) and reasoning:
+                                thinking_pending += reasoning
+                                if len(thinking_pending) >= 80 or time.monotonic() - thinking_last_emit >= 0.3:
+                                    yield RuntimeEvent(type=RuntimeEventType.THINKING, content=thinking_pending)
+                                    thinking_pending = ""
+                                    thinking_last_emit = time.monotonic()
+                        if (
+                            metadata.get("langgraph_node") == "agent"
                             and isinstance(chunk, AIMessageChunk)
                             and isinstance(chunk.content, str)
                             and chunk.content
                             and not chunk.tool_call_chunks
                         ):
-                            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=chunk.content)
+                            streamed_content += chunk.content
+                            visible = _stream_visible_content(streamed_content)
+                            if visible.startswith(emitted_content):
+                                delta = visible[len(emitted_content):]
+                                if delta:
+                                    yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+                                    emitted_content = visible
                         continue
+                    if thinking_pending:
+                        yield RuntimeEvent(type=RuntimeEventType.THINKING, content=thinking_pending)
+                        thinking_pending = ""
                     messages = state.get("messages", [])
                     if not messages:
                         continue
@@ -622,10 +689,9 @@ class RuntimeMCPAgent:
                 },
             )
             return
-        original_content = content
         content, coverage = _extract_coverage(content, set(current_tool_results))
-        if content != original_content:
-            yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Replace structured coverage block")
+        if emitted_content != content:
+            yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize specialist response")
             yield RuntimeEvent(type=RuntimeEventType.TEXT, content=content)
         yield RuntimeEvent.completed(
             content=content or "处理完成，但未生成文本响应。",

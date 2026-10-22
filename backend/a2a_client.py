@@ -425,6 +425,8 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                                         })
                                     elif event_type == "text_reset":
                                         accumulated = ""
+                                    elif event_type == "thinking":
+                                        pass
                                     elif event_type == "approval_required":
                                         chunk["approval"] = data
                                     else:

@@ -49,6 +49,16 @@ test('tool continuation preserves Agent progress and separates the final answer'
   assert.equal(state.messages.at(-1).content, '实际检查结论')
 })
 
+test('keeps streamed model analysis separate from the Agent report', () => {
+  let state = reduceRunEvent(emptyRunState, event('run.started', 1, { mode: 'auto' }))
+  state = reduceRunEvent(state, event('agent.thinking_delta', 2, { content: '正在分析' }, { task_id: 'security', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('agent.thinking_delta', 3, { content: '资源状态' }, { task_id: 'security', parent_task_id: 'root' }))
+  assert.equal(state.thinkingByTask.security, '正在分析资源状态')
+  assert.equal(state.messages.length, 0)
+  state = reduceRunEvent(state, event('tool.called', 4, { tool: 'inspect', tool_call_id: 'call-1' }, { task_id: 'security', parent_task_id: 'root' }))
+  assert.equal(state.thinkingByTask.security, '')
+})
+
 test('message, approval, artifact, and terminal events update their normalized collections', () => {
   let state = reduceRunEvent(emptyRunState, event('run.started', 1))
   state = reduceRunEvent(state, event('message.delta', 2, { content: 'Hel', role: 'agent', message_id: 'msg-1' }))

@@ -107,6 +107,22 @@ async def test_direct_transport_failure_exposes_only_safe_message():
     assert "secret-value" not in str(failed.data)
 
 
+@pytest.mark.anyio
+async def test_direct_reasoning_stream_is_separate_from_final_answer():
+    events = await _collect(
+        _direct_strategy(FakeGateway([
+            {"type": "thinking", "text": "正在分析资源"},
+            {"type": "text", "text": "检查完成"},
+            {"type": "done", "text": "检查完成", "state": "completed"},
+        ])),
+        RunCommand(mode="direct", target_agent_id="ops", message="inspect"),
+    )
+    thinking = [event for event in events if event.type == RunEventType.AGENT_THINKING_DELTA]
+    assert [event.data["content"] for event in thinking] == ["正在分析资源"]
+    report = [event.data.get("content") for event in events if event.type == RunEventType.MESSAGE_COMPLETED]
+    assert report == ["检查完成"]
+
+
 def test_direct_command_requires_a_target_with_stable_validation_message():
     with pytest.raises(ValidationError, match="target_agent_id is required"):
         RunCommand(mode="direct", message="Inspect the cluster")

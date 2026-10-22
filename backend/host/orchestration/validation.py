@@ -26,6 +26,7 @@ def task_fingerprint(task: PlannedTask) -> str:
         "workflow_role": task.workflow_role,
         "required_skill": (task.required_skill or "").strip().lower(),
         "required_tags": sorted(tag.lower() for tag in task.required_tags),
+        "required_tools": sorted(task.required_tools),
     }
     payload = json.dumps(
         normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":")
@@ -68,6 +69,36 @@ def _validate_task_agent(
             raise PlanValidationError(
                 f"task '{task.id}' requires tags not declared by agent: "
                 f"{sorted(missing_tags)}"
+            )
+    if task.required_tools:
+        if agent.get("tool_catalog_state") != "ok":
+            raise PlanValidationError(
+                f"task '{task.id}' requires tools but the agent tool catalog is unavailable"
+            )
+        callable_tools = {
+            item.get("name")
+            for item in agent.get("tool_catalog", [])
+            if isinstance(item, Mapping)
+            and item.get("access") in {"allow", "approval_required"}
+        }
+        missing_tools = set(task.required_tools) - callable_tools
+        if missing_tools:
+            raise PlanValidationError(
+                f"task '{task.id}' requires unavailable or denied tools: {sorted(missing_tools)}"
+            )
+    if task.risk == "write" and "tool_catalog_state" in agent:
+        if agent["tool_catalog_state"] != "ok":
+            raise PlanValidationError(
+                f"write task '{task.id}' requires a verified tool catalog"
+            )
+        approval_tools = {
+            item.get("name")
+            for item in agent.get("tool_catalog", [])
+            if isinstance(item, Mapping) and item.get("access") == "approval_required"
+        }
+        if not set(task.required_tools) & approval_tools:
+            raise PlanValidationError(
+                f"write task '{task.id}' must name an approval-required tool from the agent catalog"
             )
 
 

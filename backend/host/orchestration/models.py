@@ -16,6 +16,7 @@ class PlannedTask(BaseModel):
     risk: Literal["read", "write"] = "read"
     required_skill: str | None = None
     required_tags: list[str] = Field(default_factory=list)
+    required_tools: list[str] = Field(default_factory=list)
     workflow_role: Literal[
         "standard", "precheck", "mutation", "verification"
     ] = "standard"

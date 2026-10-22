@@ -456,11 +456,13 @@ class HostOrchestrationEngine:
         task: PlannedTask,
         state: HostRunState,
     ) -> str:
+        evidence_budget = 12_000
         observations = {
             task_id: {
                 "agent_id": observed.actual_agent_id,
+                "objective": observed.task.objective,
                 "summary": (
-                    observed.result.output.summary
+                    observed.result.output.summary[:2000]
                     if observed.result.output is not None
                     else observed.result.text[:2000]
                 ),
@@ -471,9 +473,51 @@ class HostOrchestrationEngine:
                     if observed.result.output and observed.result.output.coverage
                     else None
                 ),
+                "findings": (
+                    observed.result.output.findings[:20]
+                    if observed.result.output
+                    and (
+                        observed.actual_agent_id == task.agent_id
+                        or task_id in task.depends_on
+                    )
+                    else []
+                ),
+                "limitations": (
+                    observed.result.output.limitations[:20]
+                    if observed.result.output else []
+                ),
+                "tool_evidence": [
+                    {
+                        "call_id": item.get("call_id"),
+                        "tool": item.get("tool"),
+                        "arguments_excerpt": item.get("arguments_excerpt"),
+                        "called_at": item.get("called_at"),
+                        "result_state": item.get("result_state"),
+                        "result_excerpt": item.get("result_excerpt"),
+                    }
+                    for item in (
+                        observed.result.output.evidence
+                        if observed.result.output
+                        and (
+                            observed.actual_agent_id == task.agent_id
+                            or task_id in task.depends_on
+                        )
+                        else []
+                    )
+                    if isinstance(item, dict)
+                ],
             }
             for task_id, observed in state.observations.items()
         }
+        for observation in observations.values():
+            shared = []
+            for item in observation["tool_evidence"]:
+                encoded = json.dumps(item, ensure_ascii=False)
+                if len(encoded) > evidence_budget:
+                    break
+                shared.append(item)
+                evidence_budget -= len(encoded)
+            observation["tool_evidence"] = shared
         mutation_instruction = ""
         if task.workflow_role == "mutation":
             mutation_instruction = (
@@ -499,9 +543,12 @@ class HostOrchestrationEngine:
             + "\n- ".join(task.completion_criteria)
             + mutation_instruction
             + language_instruction
-            + "\n\nFor a finite multi-target audit, enumerate targets before inspection. "
-            "If prior observations include a coverage manifest, inspect only targets still missing "
-            "from its inspected_targets and preserve the established target list. "
+            + "\n\nFor a finite multi-target audit, establish the target list before inspection. "
+            "Prior tool evidence is a same-run excerpt, not a fresh tool result. "
+            "Reuse a verified target enumeration and its expected_targets when the scope matches; "
+            "do not repeat the same discovery call solely to rediscover that list. "
+            "Inspect only targets still missing from inspected_targets. Recheck dynamic resource "
+            "status when freshness matters or when earlier evidence is incomplete. "
             "Append a fenced coverage JSON object: scope is a string; expected_targets "
             "and inspected_targets are arrays of unique target identifiers; "
             "enumeration_complete is a boolean; evidence_call_ids is an array of actual "

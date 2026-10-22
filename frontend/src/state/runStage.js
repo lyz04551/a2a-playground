@@ -10,7 +10,7 @@ export function deriveRunStage(events = [], agents = []) {
     if (!item.task_id) continue
     const task = tasks.get(item.task_id) || { id: item.task_id }
     if (item.data?.agent_id) task.agentId = item.data.agent_id
-    if (item.type === 'task.started' || item.type === 'task.retry_scheduled') task.active = true
+    if (item.type === 'task.delegated' || item.type === 'task.started' || item.type === 'task.retry_scheduled') task.active = true
     if (TERMINAL_TASKS.has(item.type)) task.active = false
     tasks.set(item.task_id, task)
   }
@@ -30,11 +30,30 @@ export function deriveRunStage(events = [], agents = []) {
     return { state: 'planned', textZh: `已创建 ${count} 个任务…`, textEn: `Created ${count} tasks…`, active }
   }
   if (latest.type === 'host.synthesis_started') return { state: 'synthesizing', textZh: 'Host 正在综合各 Agent 结果…', textEn: 'Host is synthesizing Agent results…', active }
-  if (latest.type === 'message.delta' && active.length > 0) {
-    if (active.length > 1) return { state: 'parallel', textZh: `${active.length} 个 Agent 正在并行执行…`, textEn: `${active.length} Agents are running in parallel…`, active }
-    return { state: 'working', textZh: `${active[0].agentName} 正在执行任务…`, textEn: `${active[0].agentName} is working…`, active }
+  if (latest.type === 'message.delta' && latest.data?.agent_id) {
+    const agentId = latest.data.agent_id
+    const agentName = agents.find(agent => agent.id === agentId)?.name || agentId
+    return { state: 'working', textZh: `${agentName} 正在生成回复…`, textEn: `${agentName} is generating a response…`, active }
   }
   if (latest.type === 'message.delta') return { state: 'responding', textZh: 'Host 正在生成最终回复…', textEn: 'Host is generating the final response…', active }
+  if (latest.type === 'agent.thinking_delta') {
+    const agentId = latest.data?.agent_id || tasks.get(latest.task_id)?.agentId
+    const agentName = agents.find(agent => agent.id === agentId)?.name || agentId || 'Agent'
+    return { state: 'analyzing', textZh: `${agentName} 正在分析…`, textEn: `${agentName} is analyzing…`, active }
+  }
+  if (latest.type === 'tool.called' || latest.type === 'tool.completed') {
+    const agentId = latest.data?.agent_id || tasks.get(latest.task_id)?.agentId
+    const agentName = agents.find(agent => agent.id === agentId)?.name || agentId || 'Agent'
+    const tool = latest.data?.tool || latest.data?.tool_name || ''
+    if (latest.type === 'tool.called') return {
+      state: 'working', textZh: `${agentName} 正在调用 ${tool || '工具'}…`,
+      textEn: `${agentName} is calling ${tool || 'a tool'}…`, active,
+    }
+    return {
+      state: 'analyzing', textZh: `${agentName} 正在分析工具结果并决定下一步…`,
+      textEn: `${agentName} is analyzing the tool result and deciding the next step…`, active,
+    }
+  }
   if (latest.type === 'task.retry_scheduled') {
     const name = agents.find(agent => agent.id === latest.data?.agent_id)?.name || latest.data?.agent_name || latest.data?.agent_id || 'Agent'
     return { state: 'retrying', textZh: `${name} 正在进行第 ${latest.data?.attempt || '?'} 次尝试…`, textEn: `${name} is starting attempt ${latest.data?.attempt || '?'}…`, active }

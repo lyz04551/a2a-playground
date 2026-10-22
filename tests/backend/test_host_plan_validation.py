@@ -18,6 +18,7 @@ from backend.host.orchestration.validation import (
     validate_decision,
     validate_plan,
 )
+from backend.host.langgraph.decisions import _planning_agents
 
 
 AGENTS = {
@@ -73,6 +74,58 @@ def test_validate_plan_accepts_dependency_graph():
     )
 
     assert validate_plan(plan, AGENTS) is plan
+
+
+def test_validate_plan_checks_declared_tools_against_live_agent_catalog():
+    agents = {**AGENTS, "k8s-ops": {
+        **AGENTS["k8s-ops"], "tool_catalog_state": "ok",
+        "tool_catalog": [
+            {"name": "inspect_item", "access": "allow"},
+            {"name": "change_item", "access": "deny"},
+        ],
+    }}
+    valid = task("inspect").model_copy(update={"required_tools": ["inspect_item"]})
+    assert validate_plan(HostPlan(summary="inspect", tasks=[valid]), agents).tasks[0] == valid
+    for tool_name in ("missing_item", "change_item"):
+        invalid = task("inspect").model_copy(update={"required_tools": [tool_name]})
+        with pytest.raises(PlanValidationError, match="tool"):
+            validate_plan(HostPlan(summary="inspect", tasks=[invalid]), agents)
+
+
+def test_write_plan_requires_verified_approval_tool_when_catalog_is_managed():
+    write = task("change", "k8s-orchestrator", risk="write")
+    plan = HostPlan(summary="change", tasks=[write])
+    managed = {**AGENTS, "k8s-orchestrator": {
+        **AGENTS["k8s-orchestrator"],
+        "tool_catalog_state": "unavailable",
+        "tool_catalog": [],
+    }}
+    with pytest.raises(PlanValidationError, match="verified tool catalog"):
+        validate_plan(plan, managed)
+
+    managed["k8s-orchestrator"] = {
+        **managed["k8s-orchestrator"],
+        "tool_catalog_state": "ok",
+        "tool_catalog": [{"name": "apply_resource", "access": "approval_required"}],
+    }
+    with pytest.raises(PlanValidationError, match="approval-required tool"):
+        validate_plan(plan, managed)
+
+    named_write = write.model_copy(update={"required_tools": ["apply_resource"]})
+    assert validate_plan(HostPlan(summary="change", tasks=[named_write]), managed).tasks[0] == named_write
+
+
+def test_host_prompt_excludes_denied_tools_without_changing_registry_profile():
+    agent = {
+        "id": "ops",
+        "tool_catalog": [
+            {"name": "read_pods", "access": "allow"},
+            {"name": "delete_pods", "access": "deny"},
+        ],
+    }
+    prompt_agent = _planning_agents([agent])[0]
+    assert prompt_agent["tool_catalog"] == [{"name": "read_pods", "access": "allow"}]
+    assert len(agent["tool_catalog"]) == 2
 
 
 @pytest.mark.parametrize(

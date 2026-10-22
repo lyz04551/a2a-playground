@@ -32,6 +32,7 @@ class RunEventType(str, Enum):
     TASK_COMPLETED = "task.completed"
     TASK_FAILED = "task.failed"
     MESSAGE_DELTA = "message.delta"
+    AGENT_THINKING_DELTA = "agent.thinking_delta"
     MESSAGE_RESET = "message.reset"
     MESSAGE_COMPLETED = "message.completed"
     TOOL_CALLED = "tool.called"

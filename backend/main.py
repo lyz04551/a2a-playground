@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import os
@@ -46,7 +47,7 @@ async def bootstrap_builtin_agents():
     except json.JSONDecodeError:
         logger.error("BOOTSTRAP_AGENTS is not valid JSON")
         return
-    for definition in definitions:
+    async def register(definition):
         try:
             await agent_service.register(
                 definition["url"],
@@ -59,6 +60,7 @@ async def bootstrap_builtin_agents():
                 definition.get("id"),
                 exc,
             )
+    await asyncio.gather(*(register(definition) for definition in definitions))
 
 # ============================================================
 # Messages

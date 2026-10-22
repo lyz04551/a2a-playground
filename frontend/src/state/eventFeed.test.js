@@ -45,6 +45,8 @@ test('versioned run events produce readable Chinese summaries', () => {
   assert.equal(summarizeEvent({ event_type: 'host.plan_created', payload: { summary: '并行检查两个方面' } }), '计划已创建：并行检查两个方面')
   assert.equal(summarizeEvent({ event_type: 'task.started', agent_name: 'K8s Ops Agent' }), 'K8s Ops Agent 开始执行任务')
   assert.equal(summarizeEvent({ event_type: 'run.completed' }), '本次运行已完成')
+  assert.equal(summarizeEvent({ event_type: 'message.delta', agent_id: 'ops', agent_name: 'K8s Ops Agent' }), 'K8s Ops Agent 正在生成回复')
+  assert.equal(summarizeEvent({ event_type: 'message.delta' }), 'Host 正在生成最终回复')
 })
 
 test('event views keep summary, errors, tools, or all events', () => {

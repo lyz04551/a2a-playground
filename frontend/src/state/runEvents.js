@@ -9,6 +9,7 @@ export const emptyRunState = {
   approvals: [],
   artifacts: [],
   hostSummary: '',
+  thinkingByTask: {},
   roundsByNumber: {},
   roundOrder: [],
   seenEventIds: [],
@@ -263,7 +264,7 @@ function reduceNormalizedEvent(state, event) {
         ...(event.type === 'task.failed' && data.error !== undefined ? { error: data.error } : {}),
       }
     })
-    return updateTask(state, event, {
+    const next = updateTask(state, event, {
       status: terminalStatus,
       completedAt,
       ...(data.delegation_result?.output?.evidence ? { evidence: data.delegation_result.output.evidence } : {}),
@@ -271,6 +272,7 @@ function reduceNormalizedEvent(state, event) {
       ...(Number.isFinite(startedMs) && Number.isFinite(completedMs) ? { durationMs: Math.max(0, completedMs - startedMs) } : {}),
       ...(event.type === 'task.completed' ? { result: data.result } : { error: data.error }),
     })
+    return { ...next, thinkingByTask: { ...next.thinkingByTask, [event.task_id]: '' } }
   }
   if (event.type === 'tool.called' || event.type === 'tool.completed') {
     const task = state.tasksById[event.task_id]
@@ -292,7 +294,18 @@ function reduceNormalizedEvent(state, event) {
       ...(data.result === undefined ? {} : { result: data.result }),
       ...(data.error === undefined ? {} : { error: data.error, status: 'failed' }),
     }
-    return updateTask(state, event, { tools: upsertById(task?.tools || [], tool) })
+    const next = updateTask(state, event, { tools: upsertById(task?.tools || [], tool) })
+    return event.type === 'tool.called'
+      ? { ...next, thinkingByTask: { ...next.thinkingByTask, [event.task_id]: '' } }
+      : next
+  }
+  if (event.type === 'agent.thinking_delta') {
+    const taskId = event.task_id || 'root'
+    const prior = state.thinkingByTask?.[taskId] || ''
+    return { ...state, thinkingByTask: {
+      ...state.thinkingByTask,
+      [taskId]: `${prior}${data.content || ''}`.slice(-1600),
+    } }
   }
   if (event.type === 'message.reset') {
     const task = event.task_id ? state.tasksById[event.task_id] : null
@@ -330,7 +343,9 @@ function reduceNormalizedEvent(state, event) {
       next = { ...state, hostSummary: content }
     }
     const isHostMessage = event.parent_task_id === null && state.run?.mode !== 'direct'
-    return { ...next, messages: upsertById(next.messages, {
+    return { ...next,
+      ...(event.type === 'message.delta' && event.task_id ? { thinkingByTask: { ...next.thinkingByTask, [event.task_id]: '' } } : {}),
+      messages: upsertById(next.messages, {
       ...current,
       id,
       role: data.role || current?.role || 'agent',
@@ -341,7 +356,8 @@ function reduceNormalizedEvent(state, event) {
       source: isHostMessage ? 'host' : (current?.source || 'agent'),
       completed: event.type === 'message.completed',
       ...(isHostMessage ? {} : { status: event.type === 'message.completed' ? '检查结果' : '检查进度 · 待核实' }),
-    }) }
+      }),
+    }
   }
   if (event.type === 'approval.required') {
     const approval = data.approval || data

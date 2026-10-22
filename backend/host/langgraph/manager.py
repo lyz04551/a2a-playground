@@ -136,7 +136,7 @@ class LangGraphHostManager:
         )
         async for event in stream:
             event_type = str(event.get("type") or "")
-            if event_type in {"tool_call", "tool_result", "status", "text_reset"}:
+            if event_type in {"tool_call", "tool_result", "status", "text_reset", "thinking"}:
                 await on_event(event)
             if event_type == "text_reset":
                 accumulated = ""

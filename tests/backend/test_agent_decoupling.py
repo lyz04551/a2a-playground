@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from backend.api.agents import AgentService
+from backend.api.diagnostics import refresh_tool_catalogs
 from backend import main
 
 
@@ -83,10 +84,38 @@ async def test_bootstrap_takes_permissions_from_agent_profile_and_updates_local_
         return {"agent_id": "inspector", "read_only": True,
                 "risk_level": "read_only", "limitations": ["No writes"]}
 
-    agent = await AgentService(Repository(), fetch_card, fetch_profile).register(
+    async def fetch_tools(_address):
+        return {"state": "ok", "tools": [{"name": "inspect_item", "access": "allow"}]}
+
+    agent = await AgentService(Repository(), fetch_card, fetch_profile, fetch_tools).register(
         "http://127.0.0.1:9000", stable_id="inspector", risk_level="write_approval"
     )
 
     assert agent["read_only"] is True
+    assert agent["tool_catalog_state"] == "ok"
+    assert agent["tool_catalog"] == [{"name": "inspect_item", "access": "allow"}]
     assert all(item["risk_level"] == "read_only" for item in stored)
     assert next(item for item in stored if item["id"] == "legacy")["superseded_by"] == "inspector"
+
+
+def test_mcp_diagnostics_refreshes_catalog_and_invalidates_failed_probe():
+    class Repository:
+        def __init__(self):
+            self.agent = {"id": "ops", "tool_catalog_state": "ok", "tool_catalog": [{"name": "old", "access": "allow"}]}
+
+        def add_agent(self, agent):
+            self.agent = agent
+
+    repository = Repository()
+    refresh_tool_catalogs(repository, [repository.agent], {"agents": [{
+        "id": "ops", "mcp": {"state": "ok", "tools": [
+            {"name": "read_pods", "access": "allow"},
+            {"name": "delete_pod", "access": "deny"},
+        ]},
+    }]})
+    assert repository.agent["tool_catalog_state"] == "ok"
+    assert [tool["name"] for tool in repository.agent["tool_catalog"]] == ["read_pods", "delete_pod"]
+
+    refresh_tool_catalogs(repository, [repository.agent], {"agents": [{"id": "ops", "state": "offline"}]})
+    assert repository.agent["tool_catalog_state"] == "unavailable"
+    assert repository.agent["tool_catalog"] == []

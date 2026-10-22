@@ -15,6 +15,7 @@ from backend.models import Agent, AgentRegister, ApiResponse
 CardFetcher = Callable[[str], Awaitable[Any]]
 HealthChecker = Callable[[str], Awaitable[dict[str, Any]]]
 ProfileFetcher = Callable[[str], Awaitable[dict[str, Any]]]
+ToolCatalogFetcher = Callable[[str], Awaitable[dict[str, Any]]]
 
 
 async def fetch_agent_profile(address: str) -> dict[str, Any]:
@@ -24,11 +25,20 @@ async def fetch_agent_profile(address: str) -> dict[str, Any]:
         return response.json()
 
 
+async def fetch_agent_tool_catalog(address: str) -> dict[str, Any]:
+    async with httpx.AsyncClient(timeout=8.0) as client:
+        response = await client.post(f"{address.rstrip('/')}/health/diagnostics", json={"target": "mcp"})
+        response.raise_for_status()
+        payload = response.json()
+    return payload.get("mcp", {}) if isinstance(payload, dict) else {}
+
+
 class AgentService:
-    def __init__(self, repository, fetch_card: CardFetcher, profile_fetcher: ProfileFetcher | None = None):
+    def __init__(self, repository, fetch_card: CardFetcher, profile_fetcher: ProfileFetcher | None = None, tool_catalog_fetcher: ToolCatalogFetcher | None = None):
         self.repository = repository
         self.fetch_card = fetch_card
         self.fetch_profile = profile_fetcher or fetch_agent_profile
+        self.fetch_tool_catalog = tool_catalog_fetcher or fetch_agent_tool_catalog
 
     async def register(
         self,
@@ -73,6 +83,22 @@ class AgentService:
         ).model_dump()
         if profile is not None:
             agent["limitations"] = profile.get("limitations", [])
+            try:
+                catalog_result = await self.fetch_tool_catalog(agent_url)
+                tools = catalog_result.get("tools")
+                if catalog_result.get("state") != "ok" or not isinstance(tools, list):
+                    raise ValueError("MCP tool catalog is unavailable")
+                agent["tool_catalog"] = [
+                    {"name": tool["name"], "access": tool["access"]}
+                    for tool in tools
+                    if isinstance(tool, dict)
+                    and isinstance(tool.get("name"), str)
+                    and tool.get("access") in {"allow", "approval_required", "deny"}
+                ]
+                agent["tool_catalog_state"] = "ok"
+            except (httpx.HTTPError, TypeError, ValueError, KeyError):
+                agent["tool_catalog"] = []
+                agent["tool_catalog_state"] = "unavailable"
         agent["health"] = {"online": True}
         stored = self.repository.add_agent(agent)
         if stable_id:
@@ -93,6 +119,8 @@ class AgentService:
                         "risk_level": agent["risk_level"],
                         "skills": agent["skills"],
                         "limitations": agent.get("limitations", []),
+                        "tool_catalog": agent.get("tool_catalog", []),
+                        "tool_catalog_state": agent.get("tool_catalog_state", "unavailable"),
                         "superseded_by": stable_id,
                     })
         return stored

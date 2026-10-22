@@ -4,8 +4,10 @@ import { Button, Drawer, Tag } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import SystemStatus from './SystemStatus'
 import RunTimeline from './RunTimeline'
-import { buildTaskDetails } from './taskDetails'
+import { buildTaskDetails, statusLabel } from './taskDetails'
 import ApprovalCard from '../ApprovalCard'
+import MarkdownContent from '../MarkdownContent'
+import { formatAgentOutput } from './agentOutput'
 
 export default function RunTracePanel({ run = {}, stage, agents = [], language = 'en-US', loading = false, error, canCancel = false, cancelling = false, onCancel, onApproval, onArtifactOpen, onDebug }) {
   const zh = language.startsWith('zh')
@@ -56,7 +58,12 @@ export default function RunTracePanel({ run = {}, stage, agents = [], language =
       {unlinkedApprovals.map(approval => <ApprovalCard key={approval.id} approval={approval} previousApproval={approval.previousApproval} language={language} onDecide={onApproval} />)}
       {artifacts.length > 0 && <section className="workspace-artifacts"><span className="workspace-eyebrow">Artifacts</span>{artifacts.map(artifact => <button type="button" key={artifact.id} onClick={() => onArtifactOpen?.(artifact)}>{artifact.name || artifact.id}</button>)}</section>}
       <Drawer title={zh ? 'Agent 任务详情' : 'Agent task details'} open={Boolean(details)} onClose={() => setSelectedTaskId(null)} width={520}>
-        {details && <div className="task-details"><h3>{details.objective}</h3> <Tag>{details.status || 'queued'}</Tag><dl><dt>Agent</dt><dd>{details.agentName}<small>{details.effectiveAgentId}</small></dd><dt>{zh ? '输入' : 'Input'}</dt><dd>{details.input || '—'}</dd><dt>{zh ? '依赖' : 'Dependencies'}</dt><dd>{details.dependencies.length ? details.dependencies.join(' → ') : (zh ? '无' : 'None')}</dd><dt>{zh ? '尝试次数' : 'Attempt'}</dt><dd>{details.attempt}{details.maxAttempts ? ` / ${details.maxAttempts}` : ''}</dd><dt>{zh ? '完成标准' : 'Completion criteria'}</dt><dd>{details.completionCriteria.length ? <ul>{details.completionCriteria.map(item => <li key={item}>{item}</li>)}</ul> : '—'}</dd></dl><section><strong>{zh ? '返回结果' : 'Result'}</strong><pre>{details.resultText}</pre></section>{!!details.evidence?.length && <section className="task-evidence"><strong>{zh ? '工具证据' : 'Tool evidence'} · {details.evidence.length}</strong>{details.evidence.map(item => <details key={item.call_id}><summary>{item.tool} · {item.call_id}</summary><small>{item.called_at}</small><pre>{item.arguments_excerpt}</pre><pre>{item.result_excerpt}</pre></details>)}</section>}</div>}
+        {details && <div className="task-details">
+          <div className="task-details__heading"><h3>{details.objective}</h3><Tag>{statusLabel(details.status || 'queued', zh)}</Tag><small>{details.agentName}</small></div>
+          <section className="task-details__report"><strong>{zh ? '返回结果' : 'Result'}</strong><MarkdownContent>{formatAgentOutput(details.resultText)}</MarkdownContent></section>
+          <details className="task-details__meta"><summary>{zh ? '任务配置与完成标准' : 'Task setup and completion criteria'}</summary><dl><dt>Agent</dt><dd>{details.agentName}<small>{details.effectiveAgentId}</small></dd><dt>{zh ? '输入' : 'Input'}</dt><dd>{details.input || '—'}</dd><dt>{zh ? '依赖' : 'Dependencies'}</dt><dd>{details.dependencies.length ? details.dependencies.join(' → ') : (zh ? '无' : 'None')}</dd><dt>{zh ? '尝试次数' : 'Attempt'}</dt><dd>{details.attempt}{details.maxAttempts ? ` / ${details.maxAttempts}` : ''}</dd><dt>{zh ? '完成标准' : 'Completion criteria'}</dt><dd>{details.completionCriteria.length ? <ul>{details.completionCriteria.map(item => <li key={item}>{item}</li>)}</ul> : '—'}</dd></dl></details>
+          {!!details.evidence?.length && <section className="task-evidence"><strong>{zh ? '工具证据' : 'Tool evidence'} · {details.evidence.length}</strong>{details.evidence.map(item => <details key={item.call_id}><summary>{item.tool} · {item.call_id}</summary><small>{item.called_at}</small><pre>{item.arguments_excerpt}</pre><pre>{item.result_excerpt}</pre></details>)}</section>}
+        </div>}
       </Drawer>
     </aside>
   )

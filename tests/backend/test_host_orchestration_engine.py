@@ -11,6 +11,7 @@ from backend.host.orchestration.models import (
     HostDecision,
     HostPlan,
     HostRunState,
+    ObservedTask,
     PlannedTask,
 )
 
@@ -177,6 +178,57 @@ def test_mutation_prompt_requires_immediate_write_tool_after_precheck():
 
     assert "immediately call the exact write tool" in prompt
     assert "Do not repeat cluster health, capacity, or security prechecks" in prompt
+
+
+def test_react_continuation_receives_prior_tool_evidence_and_coverage():
+    previous = planned("audit-first", "ops")
+    state = HostRunState(goal="audit all resources", observations={
+        previous.id: ObservedTask(
+            task=previous,
+            actual_agent_id="ops",
+            evaluation=Evaluation(outcome="insufficient", reason="one target remains"),
+            result=DelegationResult(state="completed", output={
+                "summary": "partially inspected",
+                "findings": [{"resource": "first", "status": "checked"}],
+                "limitations": ["second remains unchecked"],
+                "coverage": {
+                    "scope": "all resources",
+                    "expected_targets": ["first", "second"],
+                    "inspected_targets": ["first"],
+                    "enumeration_complete": True,
+                    "evidence_call_ids": ["call-1"],
+                },
+                "evidence": [{
+                    "call_id": "call-1", "tool": "list_resources",
+                    "arguments_excerpt": "{}", "called_at": "2026-10-22T02:00:00Z",
+                    "result_state": "returned", "result_excerpt": '["first", "second"]',
+                }],
+            }),
+        ),
+    })
+    unrelated = planned("unrelated", "security")
+    state.observations[unrelated.id] = ObservedTask(
+        task=unrelated,
+        actual_agent_id="security",
+        evaluation=Evaluation(outcome="sufficient", reason="reviewed"),
+        result=DelegationResult(state="completed", output={
+            "summary": "security reviewed",
+            "evidence": [{"call_id": "other-call", "tool": "unrelated_tool", "result_excerpt": "unrelated detail"}],
+        }),
+    )
+
+    prompt = HostOrchestrationEngine._react_task_prompt(
+        "audit all resources", planned("audit-remainder", "ops"), state
+    )
+
+    assert '"tool": "list_resources"' in prompt
+    assert '"expected_targets": ["first", "second"]' in prompt
+    assert '"result_excerpt": "[\\\"first\\\", \\\"second\\\"]"' in prompt
+    assert '"resource": "first"' in prompt
+    assert '"second remains unchecked"' in prompt
+    assert '"summary": "security reviewed"' in prompt
+    assert "unrelated_tool" not in prompt
+    assert "do not repeat the same discovery call" in prompt
 
 
 @pytest.mark.anyio

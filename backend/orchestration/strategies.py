@@ -282,6 +282,15 @@ class DirectExecutionStrategy(_RunBoundStrategy):
                             parent_task_id=None,
                             data={**common_data(), "content": content},
                         )
+                elif event_type == "thinking":
+                    content = str(upstream.get("text") or "")
+                    if content:
+                        yield builder.create(
+                            RunEventType.AGENT_THINKING_DELTA,
+                            task_id=task_id,
+                            parent_task_id=None,
+                            data={**common_data(), "content": content},
+                        )
                 elif event_type == "text_reset":
                     accumulated = ""
                     yield builder.create(
@@ -1093,6 +1102,16 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                                 parent_task_id=None,
                                 data={"content": content},
                             )
+                elif event_type == "thinking":
+                    content = str(upstream.get("text") or "")
+                    delegation = by_logical_id.get(str(upstream.get("task_id") or ""))
+                    if content and delegation is not None:
+                        yield builder.create(
+                            RunEventType.AGENT_THINKING_DELTA,
+                            task_id=delegation.task_id,
+                            parent_task_id=root_task_id,
+                            data={"agent_id": delegation.agent_id, "content": content},
+                        )
                 elif event_type == "text_reset":
                     logical_task_id = str(upstream.get("task_id") or "")
                     delegation = by_logical_id.get(logical_task_id)

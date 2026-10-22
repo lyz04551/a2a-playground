@@ -367,7 +367,7 @@ def test_current_run_summary_evidence_is_deduplicated_and_bounded():
     assert evidence.count("工具调用 call-1") == 1
     assert "a" * 2_001 not in evidence
     assert len(evidence) < 12_500
-    assert "call-7" not in evidence
+    assert "工具调用 call-7" in evidence
 
 
 def test_agent_bounds_model_output_and_disables_thinking_by_default(
@@ -600,3 +600,31 @@ async def test_agent_mcp_only_diagnostic_does_not_call_model():
 
     assert result["mcp"]["state"] == "ok"
     assert "model" not in result
+
+
+@pytest.mark.anyio
+async def test_mcp_diagnostic_reports_actual_tools_and_policy_access():
+    class ProbeMCP:
+        async def list_tools(self):
+            return [
+                {"name": "inspect_item", "description": "Read one item"},
+                {"name": "change_item", "description": "Update one item"},
+                {"name": "unknown_item", "description": "Unavailable to this agent"},
+            ]
+
+    config = AgentRuntimeConfig(
+        agent_id="inspector", name="Inspector", port=8052,
+        public_url="http://inspector", mcp_url="http://mcp/sse",
+        tool_policy={"allow": ["inspect_*"], "approval_required": ["change_*"], "deny": []},
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=ProbeMCP())
+
+    result = await agent.probe_connections(timeout=1, target="mcp")
+
+    assert result["mcp"]["tool_count"] == 3
+    assert [(item["name"], item["access"]) for item in result["mcp"]["tools"]] == [
+        ("change_item", "approval_required"),
+        ("inspect_item", "allow"),
+        ("unknown_item", "deny"),
+    ]
+    assert result["mcp"]["callable_count"] == 2
