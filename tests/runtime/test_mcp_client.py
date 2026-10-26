@@ -519,6 +519,35 @@ async def test_agent_converts_step_limit_message_into_partial_evidence():
 
 
 @pytest.mark.anyio
+async def test_agent_rejects_empty_structured_result_as_completed_report():
+    class EmptyResultGraph:
+        async def astream(self, *_args, **_kwargs):
+            yield {"messages": []}
+
+        async def aget_state(self, _config):
+            class State:
+                values = {"messages": [AIMessage(content=(
+                    '{"status":"completed","summary":"","findings":[],"evidence":[]}'
+                ))]}
+            return State()
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+    agent._tools_loaded = True
+    agent._graph = EmptyResultGraph()
+
+    events = [event async for event in agent.stream("查看所有 Pod", "ctx")]
+    completed = events[-1]
+
+    assert completed.data["status"] == "partial"
+    assert "现有证据不足" in completed.content
+    assert '"summary"' not in completed.content
+
+
+@pytest.mark.anyio
 async def test_agent_diagnostics_probe_model_and_mcp_independently():
     class ProbeMCP:
         async def list_tools(self):

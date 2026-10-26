@@ -101,6 +101,19 @@ def _stream_visible_content(content: str) -> str:
         content = content[:bare_object.start()]
     return content[:-8] if len(content) > 8 else ""
 
+
+def _empty_structured_result(content: str) -> bool:
+    try:
+        result = json.loads(content)
+    except (TypeError, ValueError):
+        return False
+    return (
+        isinstance(result, dict)
+        and isinstance(result.get("status"), str)
+        and isinstance(result.get("summary"), str)
+        and not result["summary"].strip()
+    )
+
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI  #调用 OpenAI 兼容模型
@@ -689,6 +702,27 @@ class RuntimeMCPAgent:
                 },
             )
             return
+        if _empty_structured_result(content):
+            summary = await self._deterministic_partial_summary(
+                current_tool_results,
+                "Agent 返回的结构化结果没有结论",
+                current_tool_names,
+                headline="本次检查未能形成完整结论",
+            )
+            yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Discard empty structured result")
+            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=summary)
+            yield RuntimeEvent.completed(
+                content=summary,
+                artifact_name="specialist_result",
+                data={
+                    "status": "partial",
+                    "summary": summary,
+                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                    "continuation": {"allowed": True, "reason": "empty structured result"},
+                    "limitations": ["Agent 未生成有效结论，未完成的检查不作结论。"],
+                },
+            )
+            return
         content, coverage = _extract_coverage(content, set(current_tool_results))
         if emitted_content != content:
             yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize specialist response")
@@ -742,6 +776,8 @@ class RuntimeMCPAgent:
         results: dict[str, str],
         reason: str,
         tool_names: dict[str, str] | None = None,
+        *,
+        headline: str = "本次检查已达到执行预算",
     ) -> str:
         tool_names = tool_names or {}
         findings: list[str] = []
@@ -805,7 +841,7 @@ class RuntimeMCPAgent:
         if not evidence_notes:
             evidence_notes.append("没有可用的已完成工具结果。")
         return (
-            f"{self.config.name} 本次检查已达到执行预算，以下结论基于已完成的只读检查。\n\n"
+            f"{self.config.name} {headline}，以下结论基于已完成的只读检查。\n\n"
             "初步结论：\n- " + "\n- ".join(findings) + "\n\n"
             "已核实证据：\n- " + "\n- ".join(evidence_notes) + "\n\n"
             "建议：根据上述已取得证据继续完成尚未覆盖的检查。\n\n"

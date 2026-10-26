@@ -8,7 +8,11 @@ async function request(endpoint, body = {}) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   })
-  const data = await res.json()
+  const raw = await res.text()
+  let data
+  try { data = JSON.parse(raw) } catch {
+    throw new Error(`HTTP ${res.status}: ${raw.slice(0, 200) || res.statusText || 'Invalid server response'}`)
+  }
   if (!data.success) throw new Error(data.error || 'Request failed')
   return data.result
 }

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+import logging
 
 from backend.diagnostics import collect_connection_diagnostics
 from backend.models import ApiResponse
+
+logger = logging.getLogger(__name__)
 
 
 def refresh_tool_catalogs(repository, agents: list[dict], result: dict) -> None:
@@ -47,5 +50,8 @@ def create_router(repository, model_config_service) -> APIRouter:
             return ApiResponse(result=result)
         except ValueError as exc:
             return ApiResponse(success=False, error=str(exc))
+        except Exception:
+            logger.exception("Connection diagnostics failed")
+            return ApiResponse(success=False, error="Connection diagnostics failed; check server logs")
 
     return router

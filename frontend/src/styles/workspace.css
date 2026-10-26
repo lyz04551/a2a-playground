@@ -56,7 +56,7 @@
 @media (max-width: 1100px) { .agent-workspace { grid-template-columns: minmax(0, 1fr); }.agent-workspace__desktop { display: none; }.agent-workspace__drawer-button { display: inline-flex; }.agent-workspace .ant-drawer-body { padding: 0; }.agent-workspace .ant-drawer .workspace-conversations { border: 0; }.agent-workspace .ant-drawer .workspace-trace { padding: var(--space-16); } }
 .run-timeline__task { width: 100%; padding: 5px 7px; text-align: left; color: inherit; border: 1px solid transparent; border-radius: 8px; background: transparent; cursor: pointer; }.run-timeline__task:hover, .run-timeline__task.is-selected { border-color: var(--color-border); background: var(--color-surface-subtle); }.run-timeline__task:focus-visible { outline: none; box-shadow: var(--focus-ring); }.run-timeline__task > span { display: block; margin-top: 3px; color: var(--color-text-muted); font-size: 10px; line-height: 1.4; }
 .task-details h3 { display: inline; margin-right: 8px; }.task-details dl { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; margin: 24px 0; }.task-details dt { color: var(--color-text-muted); }.task-details dd { margin: 0; overflow-wrap: anywhere; }.task-details dd small { display: block; margin-top: 3px; color: var(--color-text-muted); }.task-details ul { margin: 0; padding-left: 18px; }.task-details pre { max-height: 45vh; overflow: auto; padding: 12px; border-radius: 8px; background: var(--color-page); white-space: pre-wrap; overflow-wrap: anywhere; }
-.workspace-stage > span, .run-stage { display: grid; gap: 4px; }.workspace-stage small, .run-stage small { color: var(--color-text-muted); font-size: 11px; }.run-stage { margin: -10px 0 14px 41px; padding: 10px 12px; border-left: 3px solid var(--color-orchestration); border-radius: 0 8px 8px 0; background: var(--color-surface-subtle); font-size: 12px; }.run-stage.is-failed { border-left-color: var(--color-danger); }.run-stage.is-completed { border-left-color: var(--color-success); }
+.run-stage { display: grid; gap: 4px; margin: -10px 0 14px 41px; padding: 10px 12px; border-left: 3px solid var(--color-orchestration); border-radius: 0 8px 8px 0; background: var(--color-surface-subtle); font-size: 12px; }.run-stage small { color: var(--color-text-muted); font-size: 11px; }.run-stage.is-failed { border-left-color: var(--color-danger); }.run-stage.is-completed { border-left-color: var(--color-success); }
 .run-timeline__tool details > summary { cursor: pointer; color: var(--color-primary); font-size: 10px; }.run-timeline__tool details section { margin-top: 8px; }.run-timeline__tool details header { display: flex; align-items: center; justify-content: space-between; color: var(--color-text-muted); font-size: 10px; font-weight: 700; }.run-timeline__tool details button { padding: 1px 6px; color: var(--color-primary); border: 1px solid var(--color-border); border-radius: 5px; background: transparent; cursor: pointer; font-size: 9px; }.run-timeline__tool details button:hover { background: var(--color-surface-subtle); }
 .run-stage.is-failed details { margin-top: 5px; }.run-stage.is-failed details > summary { color: var(--color-danger); font-size: 10px; }.run-stage.is-failed details p { max-height: 110px; margin: 6px 0 0; overflow: auto; color: var(--color-text-muted); font-size: 9px; line-height: 1.55; }
 .run-timeline__node.is-agent { margin-top: 5px; }.run-timeline__node.is-agent .run-timeline__rail { color: var(--color-orchestration); border-color: color-mix(in srgb, var(--color-orchestration) 32%, var(--color-border)); background: color-mix(in srgb, var(--color-orchestration) 8%, var(--color-surface)); }.run-timeline__node.is-agent .run-timeline__task { padding: 10px 11px; border-color: var(--color-border); background: var(--color-surface); box-shadow: 0 5px 16px color-mix(in srgb, #000 5%, transparent); }.run-timeline__node.is-agent.status-working .run-timeline__task { border-color: color-mix(in srgb, var(--color-orchestration) 42%, var(--color-border)); }
@@ -221,18 +221,32 @@
 .workspace-message .markdown-content ul,
 .workspace-message .markdown-content ol { margin: .7em 0; }
 .workspace-message .markdown-content pre { border-radius: 10px; background: var(--color-surface-subtle); }
-.workspace-stage:has(.workspace-stage__activity, .workspace-stage__thinking) { align-items: flex-start; justify-content: flex-start; min-height: 0; text-align: left; }
-.workspace-stage:has(.workspace-stage__activity, .workspace-stage__thinking) > .anticon { margin-top: 2px; }
-.workspace-stage:has(.workspace-stage__activity, .workspace-stage__thinking) > span { flex: 1; min-width: 0; }
-.workspace-stage__activity { display: grid; gap: 0; margin: 13px 0 0; padding: 0; border-top: 1px solid var(--color-border); list-style: none; }
-.workspace-stage__activity li { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid color-mix(in srgb, var(--color-border) 60%, transparent); font-size: 11px; }
-.workspace-stage__activity li:last-child { border-bottom: 0; }
-.workspace-stage__activity li span { color: var(--color-text-muted); white-space: nowrap; }
-.workspace-stage__activity li code { min-width: 0; overflow: hidden; color: var(--color-text); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.workspace-stage__activity li em { color: var(--color-primary); font-style: normal; white-space: nowrap; }
-.workspace-stage__thinking { margin-top: 13px; padding: 11px 12px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); text-align: left; }
-.workspace-stage__thinking b { display: block; margin-bottom: 6px; color: var(--color-primary); font-size: 10px; }
-.workspace-stage__thinking p { max-height: 160px; overflow-y: auto; margin: 0; color: var(--color-text-muted); font-size: 11px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-live { min-width: 0; padding: 17px 19px; overflow: hidden; border: 1px solid color-mix(in srgb, var(--color-primary) 24%, var(--color-border)); border-radius: 15px; color: var(--color-text); background: var(--color-surface); box-shadow: 0 8px 26px rgba(18, 35, 54, .055); }
+.workspace-live__header { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.workspace-live__pulse { display: grid; flex: none; place-items: center; width: 31px; height: 31px; border-radius: 10px; background: var(--color-primary-subtle); }
+.workspace-live__pulse span { width: 9px; height: 9px; border-radius: 50%; background: var(--color-primary); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 14%, transparent); animation: workspace-live-pulse 1.8s ease-in-out infinite; }
+.workspace-live__heading { display: grid; gap: 2px; flex: 1; min-width: 0; }
+.workspace-live__eyebrow { color: var(--color-primary); font-size: 10px; font-weight: 750; letter-spacing: .08em; }
+.workspace-live__heading strong { color: var(--color-text); font-size: 13px; font-weight: 700; line-height: 1.4; }
+.workspace-live__state { flex: none; padding: 4px 8px; border: 1px solid color-mix(in srgb, var(--color-primary) 20%, var(--color-border)); border-radius: 999px; color: var(--color-primary); background: var(--color-primary-subtle); font-size: 10px; font-weight: 700; }
+.workspace-live__agents { display: flex; flex-wrap: wrap; gap: 6px; margin: 13px 0 0 43px; }
+.workspace-live__agents span { max-width: 100%; padding: 5px 8px; overflow: hidden; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-text-muted); background: var(--color-surface-subtle); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.workspace-live__details { display: grid; gap: 13px; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border); }
+.workspace-live__section-title { display: flex; align-items: center; gap: 7px; margin-bottom: 8px; color: var(--color-text); font-size: 11px; font-weight: 700; }
+.workspace-live__section-title small { margin-left: auto; color: var(--color-text-muted); font-size: 10px; font-weight: 500; }
+.workspace-live__section-mark { width: 6px; height: 6px; border-radius: 50%; background: var(--color-primary); }
+.workspace-live__thinking p { max-height: 140px; margin: 0; padding: 10px 12px; overflow: auto; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-muted); background: var(--color-surface-subtle); font-size: 11px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-live__tools ol { display: grid; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.workspace-live__tools li { display: flex; align-items: center; gap: 9px; min-width: 0; padding: 7px 9px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-subtle); font-size: 11px; }
+.workspace-live__tool-number { flex: none; color: var(--color-text-muted); font: 10px var(--font-mono); }
+.workspace-live__tools code { min-width: 0; overflow: hidden; color: var(--color-text); font: 11px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.workspace-live__tools em { flex: none; margin-left: auto; color: var(--color-primary); font-size: 10px; font-style: normal; white-space: nowrap; }
+.workspace-live__tools li.is-working { border-color: color-mix(in srgb, var(--color-primary) 34%, var(--color-border)); background: var(--color-primary-subtle); }
+.workspace-live__tools li.is-working em::before { display: inline-block; width: 5px; height: 5px; margin-right: 5px; border-radius: 50%; background: currentColor; content: ''; animation: workspace-live-pulse 1.8s ease-in-out infinite; }
+.workspace-live__waiting { margin: 13px 0 0 43px; color: var(--color-text-muted); font-size: 11px; line-height: 1.5; }
+@keyframes workspace-live-pulse { 50% { opacity: .45; transform: scale(.8); } }
+@media (max-width: 560px) { .workspace-live { padding: 14px; }.workspace-live__state { display: none; }.workspace-live__agents, .workspace-live__waiting { margin-left: 0; }.workspace-live__section-title small { display: none; } }
+@media (prefers-reduced-motion: reduce) { .workspace-live__pulse span, .workspace-live__tools li.is-working em::before { animation: none; } }
 
 .workspace-conversations { padding: 18px 14px; }
 .workspace-conversations nav { gap: 6px; }

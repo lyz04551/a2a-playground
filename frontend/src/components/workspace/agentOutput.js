@@ -1,6 +1,7 @@
-function extractSummary(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return ''
-  return typeof value.summary === 'string' ? value.summary.trim() : ''
+function formatStructuredResult(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  if (typeof value.status !== 'string' || typeof value.summary !== 'string') return null
+  return value.summary.trim() || '本轮 Agent 未生成可展示的检查结论。'
 }
 
 const COVERAGE_FIELDS = ['scope', 'expected_targets', 'inspected_targets', 'enumeration_complete', 'evidence_call_ids']
@@ -30,8 +31,8 @@ export function hideCoverageManifest(value) {
 export function formatAgentOutput(value) {
   if (value == null || value === '') return ''
 
-  const objectSummary = extractSummary(value)
-  if (objectSummary) return objectSummary
+  const objectSummary = formatStructuredResult(value)
+  if (objectSummary !== null) return objectSummary
 
   if (typeof value !== 'string') return JSON.stringify(value, null, 2)
 
@@ -39,8 +40,9 @@ export function formatAgentOutput(value) {
   if (!text.startsWith('{')) return hideCoverageManifest(value)
 
   try {
-    return extractSummary(JSON.parse(text)) || hideCoverageManifest(value)
+    return formatStructuredResult(JSON.parse(text)) ?? hideCoverageManifest(value)
   } catch {
+    if (/^\{\s*"/.test(text)) return '正在整理检查结果…'
     return hideCoverageManifest(value)
   }
 }

@@ -343,9 +343,12 @@ function reduceNormalizedEvent(state, event) {
       next = { ...state, hostSummary: content }
     }
     const isHostMessage = event.parent_task_id === null && state.run?.mode !== 'direct'
+    const messages = event.type === 'message.completed' && event.task_id
+      ? next.messages.filter(message => message.taskId !== event.task_id || message.completed || message.id === id)
+      : next.messages
     return { ...next,
       ...(event.type === 'message.delta' && event.task_id ? { thinkingByTask: { ...next.thinkingByTask, [event.task_id]: '' } } : {}),
-      messages: upsertById(next.messages, {
+      messages: upsertById(messages, {
       ...current,
       id,
       role: data.role || current?.role || 'agent',

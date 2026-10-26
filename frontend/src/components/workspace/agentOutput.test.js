@@ -16,6 +16,13 @@ test('shows the summary from an Agent result object', () => {
   assert.equal(formatAgentOutput({ status: 'completed', summary: 'Pod 运行正常。' }), 'Pod 运行正常。')
 })
 
+test('does not expose an empty structured Agent result as raw JSON', () => {
+  const emptyResult = { status: 'completed', summary: '', findings: [], evidence: [], resources: [] }
+  assert.equal(formatAgentOutput(JSON.stringify(emptyResult)), '本轮 Agent 未生成可展示的检查结论。')
+  assert.equal(formatAgentOutput(emptyResult), '本轮 Agent 未生成可展示的检查结论。')
+  assert.equal(formatAgentOutput('{"status": "completed", "summary":'), '正在整理检查结果…')
+})
+
 test('keeps ordinary text and malformed JSON readable', () => {
   assert.equal(formatAgentOutput('部署已经完成。'), '部署已经完成。')
   assert.equal(formatAgentOutput('{not-json}'), '{not-json}')

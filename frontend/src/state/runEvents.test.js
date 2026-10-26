@@ -45,8 +45,19 @@ test('tool continuation preserves Agent progress and separates the final answer'
   assert.equal(state.messages.length, 1)
   assert.equal(state.messages[0].content, '让我继续检查\n\n发现 16 个 Deployment')
   state = reduceRunEvent(state, event('message.completed', 7, { content: '实际检查结论' }, { parent_task_id: 'root' }))
-  assert.equal(state.messages.length, 2)
+  assert.equal(state.messages.length, 1)
   assert.equal(state.messages.at(-1).content, '实际检查结论')
+})
+
+test('a reset draft is replaced by the completed Agent report', () => {
+  let state = reduceRunEvent(emptyRunState, event('run.started', 1, { mode: 'auto' }))
+  state = reduceRunEvent(state, event('message.delta', 2, { content: '集群 Pod 统计报告：29 个 Po' }, { task_id: 'ops', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.reset', 3, {}, { task_id: 'ops', parent_task_id: 'root' }))
+  assert.equal(state.messages.length, 1)
+  assert.equal(state.messages[0].status, '检查进度 · 待核实')
+  state = reduceRunEvent(state, event('message.delta', 4, { content: '集群 Pod 统计报告：29 个 Pod' }, { task_id: 'ops', parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.completed', 5, { content: '集群 Pod 统计报告：29 个 Pod' }, { task_id: 'ops', parent_task_id: 'root' }))
+  assert.deepEqual(state.messages.map(message => message.content), ['集群 Pod 统计报告：29 个 Pod'])
 })
 
 test('keeps streamed model analysis separate from the Agent report', () => {
