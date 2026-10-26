@@ -122,7 +122,9 @@ function reduceNormalizedEvent(state, event) {
     return { ...state, run: { ...state.run, id: event.run_id || state.run?.id, status: 'interrupted', ...data } }
   }
   if (event.type === 'host.planning') return { ...state, run: { ...state.run, id: event.run_id, status: 'planning', ...data } }
-  if (event.type === 'task.evaluated' && data.coverage) return { ...state, run: { ...state.run, coverage: data.coverage } }
+  if (event.type === 'task.evaluated' && data.coverage) {
+    state = { ...state, run: { ...state.run, coverage: data.coverage } }
+  }
   if (event.type === 'host.round_started') {
     const round = data.round
     if (round === undefined || round === null) return state
@@ -152,6 +154,8 @@ function reduceNormalizedEvent(state, event) {
         completionCriteria: task.completion_criteria || [],
         risk: task.risk,
         maxAttempts: task.max_attempts,
+        coverageRequired: task.coverage_required === true,
+        inspectionContract: task.inspection_contract,
         dependsOn: task.depends_on || [],
         round,
         status: tasksById[task.id]?.status || 'queued',
@@ -203,6 +207,8 @@ function reduceNormalizedEvent(state, event) {
         completionCriteria: task.completion_criteria || [],
         risk: task.risk,
         maxAttempts: task.max_attempts,
+        coverageRequired: task.coverage_required === true,
+        inspectionContract: task.inspection_contract,
         dependsOn: task.depends_on || [],
         status: tasksById[task.id]?.status || 'queued',
       }
@@ -241,6 +247,7 @@ function reduceNormalizedEvent(state, event) {
   if (event.type === 'task.evaluated') return updateTask(state, event, {
     evaluation: data.outcome,
     evaluationReason: data.reason,
+    ...(data.coverage ? { coverage: data.coverage } : {}),
   })
   if (event.type === 'task.blocked') return updateTask(state, event, {
     status: 'blocked',
@@ -268,6 +275,7 @@ function reduceNormalizedEvent(state, event) {
       status: terminalStatus,
       completedAt,
       ...(data.delegation_result?.output?.evidence ? { evidence: data.delegation_result.output.evidence } : {}),
+      ...(data.delegation_result?.output?.assessment ? { assessment: data.delegation_result.output.assessment } : {}),
       ...(task?.tools?.length ? { tools } : {}),
       ...(Number.isFinite(startedMs) && Number.isFinite(completedMs) ? { durationMs: Math.max(0, completedMs - startedMs) } : {}),
       ...(event.type === 'task.completed' ? { result: data.result } : { error: data.error }),
@@ -302,9 +310,18 @@ function reduceNormalizedEvent(state, event) {
   if (event.type === 'agent.thinking_delta') {
     const taskId = event.task_id || 'root'
     const prior = state.thinkingByTask?.[taskId] || ''
-    return { ...state, thinkingByTask: {
+    const content = `${prior}${data.content || ''}`.slice(-1600)
+    const task = state.tasksById[taskId]
+    const transcript = `${task?.thinkingTranscript || ''}${data.content || ''}`.slice(-12000)
+    const next = taskId === 'root' ? state : updateTask(state, event, {
+      thinkingExcerpt: content,
+      thinkingTranscript: transcript,
+      thinkingTruncated: Boolean(task?.thinkingTruncated || (task?.thinkingTranscript?.length || 0) + String(data.content || '').length > 12000),
+      thinkingAt: normalizeTimestamp(event.timestamp),
+    })
+    return { ...next, thinkingByTask: {
       ...state.thinkingByTask,
-      [taskId]: `${prior}${data.content || ''}`.slice(-1600),
+      [taskId]: content,
     } }
   }
   if (event.type === 'message.reset') {

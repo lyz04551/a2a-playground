@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from backend.host.orchestration.contracts import contract_guidance
 from backend.host.orchestration.models import DelegationResult, PlannedTask
 
 
@@ -26,14 +27,13 @@ def build_task_prompt(
         f"Objective:\n{task.objective}\n\n"
         f"Relevant user request:\n{task.input or request}\n\n"
         f"Completion criteria:\n{criteria}\n\n"
+        f"Inspection contract: {task.inspection_contract or 'none'}\n"
+        f"{contract_guidance(task.inspection_contract)}\n\n"
         f"Constraints:\n{constraint}\n\n"
         f"Predecessor findings:\n{findings}\n\n"
         "Return findings, supporting evidence, uncertainty, and recommended "
         "next steps. For a finite multi-target audit, enumerate targets before "
-        "inspection and append a fenced coverage JSON object. scope is a "
-        "string; expected_targets and inspected_targets are arrays of unique "
-        "target identifiers, not counts; enumeration_complete is a boolean; "
-        "evidence_call_ids is an array of actual tool call IDs, not tool names. "
-        "If enumeration is unverified, set enumeration_complete to false and "
-        "list only verified targets."
+        "inspection and inspect the relevant objects. The runtime constructs "
+        "coverage and links actual tool calls; do not write a coverage JSON block "
+        "or invent call IDs. Distinguish observed facts, hypotheses, and unknowns."
     )

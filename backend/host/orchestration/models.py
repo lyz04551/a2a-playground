@@ -13,6 +13,7 @@ class PlannedTask(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     completion_criteria: list[str] = Field(min_length=1)
     coverage_required: bool = False
+    inspection_contract: Literal["pod_pending", "workload_security"] | None = None
     risk: Literal["read", "write"] = "read"
     required_skill: str | None = None
     required_tags: list[str] = Field(default_factory=list)
@@ -115,12 +116,13 @@ class CoverageManifest(BaseModel):
 
     @property
     def complete(self) -> bool:
-        return self.enumeration_complete and set(self.inspected_targets) == set(self.expected_targets)
+        return bool(self.evidence_call_ids) and self.enumeration_complete and set(self.inspected_targets) == set(self.expected_targets)
 
     def merge(self, earlier: "CoverageManifest") -> "CoverageManifest":
-        if self.scope != earlier.scope or set(self.expected_targets) != set(earlier.expected_targets):
+        if self.scope != earlier.scope or not (set(self.expected_targets) & set(earlier.expected_targets)):
             return self
         return self.model_copy(update={
+            "expected_targets": list(dict.fromkeys([*earlier.expected_targets, *self.expected_targets])),
             "inspected_targets": list(dict.fromkeys([*earlier.inspected_targets, *self.inspected_targets])),
             "enumeration_complete": self.enumeration_complete or earlier.enumeration_complete,
             "evidence_call_ids": list(dict.fromkeys([*earlier.evidence_call_ids, *self.evidence_call_ids])),
@@ -133,10 +135,17 @@ class SpecialistOutput(BaseModel):
     findings: list[dict] = Field(default_factory=list)
     resources: list[dict] = Field(default_factory=list)
     evidence: list[dict] = Field(default_factory=list)
+    assessment: "EvidenceAssessment" = Field(default_factory=lambda: EvidenceAssessment())
     recommendations: list[str] = Field(default_factory=list)
     continuation: Continuation = Field(default_factory=Continuation)
     limitations: list[str] = Field(default_factory=list)
     coverage: CoverageManifest | None = None
+
+
+class EvidenceAssessment(BaseModel):
+    facts: list[dict] = Field(default_factory=list)
+    inferences: list[dict] = Field(default_factory=list)
+    unknowns: list[dict] = Field(default_factory=list)
 
 
 class DelegationResult(BaseModel):

@@ -5,6 +5,7 @@ import inspect
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from backend.host.orchestration.contracts import contract_guidance
 from backend.host.orchestration.context import build_task_prompt
 from backend.host.orchestration.models import (
     DecisionPort,
@@ -363,8 +364,15 @@ class HostOrchestrationEngine:
                     prior_coverage=[
                         observed.result.output.coverage
                         for observed in state.observations.values()
-                        if observed.result.output and observed.result.output.coverage
+                        if observed.actual_agent_id == task.agent_id
+                        and observed.result.output and observed.result.output.coverage
                     ],
+                    prior_evidence=[
+                        item
+                        for observed in state.observations.values()
+                        if observed.actual_agent_id == task.agent_id and observed.result.output
+                        for item in observed.result.output.evidence
+                    ] if task.inspection_contract else None,
                 )
                 for task in decision.tasks
             )))
@@ -494,6 +502,7 @@ class HostOrchestrationEngine:
                         "called_at": item.get("called_at"),
                         "result_state": item.get("result_state"),
                         "result_excerpt": item.get("result_excerpt"),
+                        "resource_ids": item.get("resource_ids", []),
                     }
                     for item in (
                         observed.result.output.evidence
@@ -537,6 +546,8 @@ class HostOrchestrationEngine:
             f"User goal:\n{request}\n\n"
             f"Your assigned task:\n{task.objective}\n\n"
             f"Task input:\n{task.input}\n\n"
+            f"Inspection contract: {task.inspection_contract or 'none'}\n"
+            f"{contract_guidance(task.inspection_contract)}\n\n"
             "Prior structured observations:\n"
             f"{json.dumps(observations, ensure_ascii=False)}\n\n"
             "Completion criteria:\n- "
@@ -549,12 +560,9 @@ class HostOrchestrationEngine:
             "do not repeat the same discovery call solely to rediscover that list. "
             "Inspect only targets still missing from inspected_targets. Recheck dynamic resource "
             "status when freshness matters or when earlier evidence is incomplete. "
-            "Append a fenced coverage JSON object: scope is a string; expected_targets "
-            "and inspected_targets are arrays of unique target identifiers; "
-            "enumeration_complete is a boolean; evidence_call_ids is an array of actual "
-            "tool call IDs from this execution. Do not substitute counts or tool names "
-            "for target identifiers or call IDs. If enumeration is unverified, set "
-            "enumeration_complete to false and list only verified targets."
+            "The runtime constructs coverage and binds tool call IDs. Do not "
+            "write a coverage JSON block or invent identifiers. Separate observed "
+            "facts from hypotheses and unknowns; do not state a cause without evidence."
         )
 
     async def _run_task(
@@ -564,6 +572,7 @@ class HostOrchestrationEngine:
         prompt: str,
         on_progress,
         prior_coverage=None,
+        prior_evidence=None,
     ) -> tuple[DelegationResult, Evaluation, str, list[dict]]:
         events: list[dict] = []
         agent_id = task.agent_id
@@ -581,6 +590,12 @@ class HostOrchestrationEngine:
                 for previous in prior_coverage or []:
                     merged = merged.merge(previous)
                 result.output.coverage = merged
+            if result.output and prior_evidence:
+                seen = {item.get("call_id") for item in result.output.evidence}
+                result.output.evidence = [
+                    *[item for item in prior_evidence if item.get("call_id") not in seen],
+                    *result.output.evidence,
+                ]
             evaluation = await self._decisions.evaluate(task, result)
             if evaluation.outcome in {"sufficient", "blocked"}:
                 return result, evaluation, agent_id, events

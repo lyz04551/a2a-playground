@@ -11,6 +11,8 @@ from collections.abc import AsyncIterable
 from pathlib import Path
 from typing import Any
 
+from .evidence import build_assessment, build_evidence_ledger
+
 
 _JSON_FENCE = re.compile(r"```(?P<label>coverage|json)?[ \t]*\n(?P<body>.*?)\n```", re.DOTALL | re.IGNORECASE)
 _COVERAGE_KEYS = frozenset({"scope", "expected_targets", "inspected_targets", "enumeration_complete", "evidence_call_ids"})
@@ -21,7 +23,14 @@ def _evidence_excerpt(value: str, *, limit: int = 800) -> str:
     try:
         parsed = json.loads(value)
     except (TypeError, ValueError):
-        return "[文本结果见工具轨迹]" if value else "[工具返回空输出]"
+        if not value:
+            return "[工具返回空输出]"
+        lines = []
+        for line in value.splitlines():
+            key, separator, _ = line.partition(":")
+            lines.append(f"{key}: [REDACTED]" if separator and _SENSITIVE_FIELD.search(key) else line)
+        excerpt = "\n".join(lines)
+        return excerpt[:limit] + ("…" if len(excerpt) > limit else "")
 
     def sanitize(item):
         if isinstance(item, dict):
@@ -35,17 +44,32 @@ def _evidence_excerpt(value: str, *, limit: int = 800) -> str:
 
 
 def _tool_evidence(calls: dict[str, dict], results: dict[str, str]) -> list[dict]:
+    ledger, _ = build_evidence_ledger(calls, results)
     return [
         {
-            "call_id": call_id,
-            "tool": calls.get(call_id, {}).get("tool", ""),
-            "arguments_excerpt": _evidence_excerpt(json.dumps(calls.get(call_id, {}).get("arguments", {}), ensure_ascii=False)),
-            "called_at": calls.get(call_id, {}).get("called_at", ""),
-            "result_state": "empty" if not result else "returned",
-            "result_excerpt": _evidence_excerpt(result),
+            "call_id": item["call_id"],
+            "tool": item["tool"],
+            "resource_ids": item["resource_ids"],
+            "arguments_excerpt": _evidence_excerpt(json.dumps(item["arguments"], ensure_ascii=False)),
+            "called_at": item["called_at"],
+            "result_state": item["result_state"],
+            "result_excerpt": _evidence_excerpt(item["result"]),
         }
-        for call_id, result in results.items()
+        for item in ledger
     ]
+
+
+def _runtime_result(content: str, calls: dict[str, dict], results: dict[str, str]) -> tuple[str, list[dict], dict | None]:
+    """Discard model-authored coverage; only the MCP ledger may certify it."""
+    visible, _ = _extract_coverage(content, set())
+    evidence = _tool_evidence(calls, results)
+    _, coverage = build_evidence_ledger(calls, results)
+    return visible, evidence, coverage if evidence else None
+
+
+def _assessment_data(calls: dict[str, dict], results: dict[str, str]) -> dict:
+    ledger, coverage = build_evidence_ledger(calls, results)
+    return build_assessment(ledger, coverage)
 
 
 def _extract_coverage(content: str, observed_call_ids: set[str]) -> tuple[str, dict | None]:
@@ -91,6 +115,31 @@ def _extract_coverage(content: str, observed_call_ids: set[str]) -> tuple[str, d
 
 def _stream_visible_content(content: str) -> str:
     """Keep an unfinished structured block out of the user-facing stream."""
+    if content.lstrip().startswith("{"):
+        summary = re.search(r'"summary"\s*:\s*"', content)
+        if summary is None:
+            return ""
+        raw = content[summary.end():]
+        visible = []
+        position = 0
+        while position < len(raw):
+            if raw[position] == '"':
+                break
+            if raw[position] == "\\":
+                width = 6 if raw[position:position + 2] == "\\u" else 2
+                token = raw[position:position + width]
+                if len(token) < width:
+                    break
+                try:
+                    visible.append(json.loads('"' + token + '"'))
+                except (TypeError, ValueError):
+                    break
+                position += width
+                continue
+            visible.append(raw[position])
+            position += 1
+        summary_text = "".join(visible)
+        return summary_text[:-8] if len(summary_text) > 8 else ""
     fence = re.search(r"(?m)^```(?:coverage|json)?[^\n]*", content, re.IGNORECASE)
     if fence is not None and "\n```" not in content[fence.end():]:
         content = content[:fence.start()]
@@ -100,6 +149,23 @@ def _stream_visible_content(content: str) -> str:
     if bare_object is not None:
         content = content[:bare_object.start()]
     return content[:-8] if len(content) > 8 else ""
+
+
+def _final_stream_delta(content: str, emitted_content: str) -> tuple[bool, str]:
+    """Append the final tail when the visible draft is a prefix of the result."""
+    if content.startswith(emitted_content):
+        return False, content[len(emitted_content):]
+    return True, content
+
+
+def _display_content(content: str) -> str:
+    try:
+        parsed = json.loads(content)
+    except (TypeError, ValueError):
+        return content
+    if isinstance(parsed, dict) and isinstance(parsed.get("status"), str) and isinstance(parsed.get("summary"), str):
+        return parsed["summary"]
+    return content
 
 
 def _empty_structured_result(content: str) -> bool:
@@ -540,6 +606,11 @@ class RuntimeMCPAgent:
                             for call in message.tool_calls:
                                 if call["id"] in seen_tool_calls:
                                     continue
+                                if streamed_content:
+                                    if emitted_content:
+                                        yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Tool call superseded draft")
+                                    streamed_content = ""
+                                    emitted_content = ""
                                 seen_tool_calls.add(call["id"])
                                 current_tool_names[call["id"]] = call["name"]
                                 current_tool_calls[call["id"]] = {
@@ -582,21 +653,44 @@ class RuntimeMCPAgent:
                 else "investigation step budget reached"
             )
             evidence = self._current_run_evidence(current_tool_results)
+            if emitted_content:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Switch to partial summary")
+            summary_emitted = ""
             try:
-                content = await self._force_summary(query, evidence)
+                content = ""
+                async for chunk in self._force_summary_chunks(query, evidence):
+                    content += chunk
+                    visible = _stream_visible_content(content)
+                    if visible.startswith(summary_emitted):
+                        delta = visible[len(summary_emitted):]
+                        if delta:
+                            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+                            summary_emitted = visible
+                content = content.strip()
             except TimeoutError:
+                if summary_emitted:
+                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Summary timed out")
+                summary_emitted = ""
                 content = await self._deterministic_partial_summary(
                     current_tool_results,
                     "强制总结模型也达到时间限制",
                     current_tool_names,
                 )
             except Exception as exc:
+                if summary_emitted:
+                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Summary failed")
+                summary_emitted = ""
                 content = await self._deterministic_partial_summary(
                     current_tool_results,
                     f"强制总结模型不可用：{exc}",
                     current_tool_names,
                 )
-            content, _ = _extract_coverage(content, set(current_tool_results))
+            content, evidence_items, coverage = _runtime_result(content, current_tool_calls, current_tool_results)
+            reset, delta = _final_stream_delta(_display_content(content), summary_emitted)
+            if reset:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize partial summary")
+            if delta:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
             yield RuntimeEvent.completed(
                 content=content,
                 artifact_name="specialist_result",
@@ -605,7 +699,8 @@ class RuntimeMCPAgent:
                     "summary": content,
                     "findings": [],
                     "resources": [],
-                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                    "evidence": evidence_items,
+                    "assessment": _assessment_data(current_tool_calls, current_tool_results),
                     "recommendations": [],
                     "continuation": {
                         "allowed": True,
@@ -614,6 +709,7 @@ class RuntimeMCPAgent:
                     "limitations": [
                         "调查阶段达到时间预算，以上结论仅基于已完成的检查。"
                     ],
+                    **({"coverage": coverage} if coverage else {}),
                 },
             )
             return
@@ -629,19 +725,38 @@ class RuntimeMCPAgent:
         ):
             yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Discard incomplete draft")
             evidence = self._current_run_evidence(current_tool_results)
+            summary_emitted = ""
             try:
-                content = await self._force_summary(query, evidence)
+                content = ""
+                async for chunk in self._force_summary_chunks(query, evidence):
+                    content += chunk
+                    visible = _stream_visible_content(content)
+                    if visible.startswith(summary_emitted):
+                        delta = visible[len(summary_emitted):]
+                        if delta:
+                            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+                            summary_emitted = visible
+                content = content.strip()
             except Exception:
+                if summary_emitted:
+                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Summary failed")
+                summary_emitted = ""
                 content = await self._deterministic_partial_summary(
                     current_tool_results, "工具调用预算已用尽", current_tool_names
                 )
-            content, coverage = _extract_coverage(content, set(current_tool_results))
+            content, evidence_items, coverage = _runtime_result(content, current_tool_calls, current_tool_results)
+            reset, delta = _final_stream_delta(_display_content(content), summary_emitted)
+            if reset:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize partial summary")
+            if delta:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
             yield RuntimeEvent.completed(
                 content=content,
                 artifact_name="specialist_result",
                 data={
                     "status": "partial", "summary": content,
-                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                    "evidence": evidence_items,
+                    "assessment": _assessment_data(current_tool_calls, current_tool_results),
                     "continuation": {"allowed": True, "reason": "tool call budget reached"},
                     "limitations": ["工具调用预算已用尽，未覆盖的检查不作结论。"],
                     **({"coverage": coverage} if coverage else {}),
@@ -663,6 +778,8 @@ class RuntimeMCPAgent:
                     "findings": [],
                     "resources": [],
                     "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                    "assessment": _assessment_data(current_tool_calls, current_tool_results),
+                    **({"coverage": build_evidence_ledger(current_tool_calls, current_tool_results)[1]} if current_tool_results else {}),
                     "recommendations": [],
                     "continuation": {
                         "allowed": True,
@@ -691,6 +808,8 @@ class RuntimeMCPAgent:
                     "findings": [],
                     "resources": [],
                     "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                    "assessment": _assessment_data(current_tool_calls, current_tool_results),
+                    **({"coverage": build_evidence_ledger(current_tool_calls, current_tool_results)[1]} if current_tool_results else {}),
                     "recommendations": [],
                     "continuation": {
                         "allowed": False,
@@ -718,15 +837,20 @@ class RuntimeMCPAgent:
                     "status": "partial",
                     "summary": summary,
                     "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                    "assessment": _assessment_data(current_tool_calls, current_tool_results),
+                    **({"coverage": build_evidence_ledger(current_tool_calls, current_tool_results)[1]} if current_tool_results else {}),
                     "continuation": {"allowed": True, "reason": "empty structured result"},
                     "limitations": ["Agent 未生成有效结论，未完成的检查不作结论。"],
                 },
             )
             return
-        content, coverage = _extract_coverage(content, set(current_tool_results))
-        if emitted_content != content:
+        content, evidence_items, coverage = _runtime_result(content, current_tool_calls, current_tool_results)
+        display_content = _display_content(content)
+        reset, delta = _final_stream_delta(display_content, emitted_content)
+        if reset:
             yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize specialist response")
-            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=content)
+        if delta:
+            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
         yield RuntimeEvent.completed(
             content=content or "处理完成，但未生成文本响应。",
             artifact_name="specialist_result",
@@ -735,7 +859,8 @@ class RuntimeMCPAgent:
                 "summary": content,
                 "findings": [],
                 "resources": [],
-                "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                "evidence": evidence_items,
+                "assessment": _assessment_data(current_tool_calls, current_tool_results),
                 "recommendations": [],
                 "continuation": {"allowed": None, "reason": ""},
                 "limitations": [],
@@ -744,16 +869,22 @@ class RuntimeMCPAgent:
         )
 
     async def _force_summary(self, query: str, evidence: str) -> str:
+        chunks = []
+        async for chunk in self._force_summary_chunks(query, evidence):
+            chunks.append(chunk)
+        content = "".join(chunks).strip()
+        if not content:
+            raise RuntimeError("Agent model returned an empty forced summary")
+        return content
+
+    async def _force_summary_chunks(self, query: str, evidence: str) -> AsyncIterable[str]:
         if self._model is None:
             raise RuntimeError("Agent model is unavailable for forced summary")
         prompt = (
             "调查阶段的时间预算已经用完。禁止调用任何工具。请仅根据下面已经取得的"
             "证据回答用户，优先说明已确认的问题、证据和建议，并明确指出哪些检查尚未"
-            "完成。不要声称执行了证据中没有出现的检查。若任务是有限对象的全量审查，"
-            "在报告末尾附加 ```coverage JSON 块：scope 为字符串，expected_targets 和 "
-            "inspected_targets 必须是对象标识符数组，enumeration_complete 为布尔值，"
-            "evidence_call_ids 只能填写下列真实调用 ID。无法确认的对象不得计入已检查；"
-            "无法确认完整枚举时将 enumeration_complete 设为 false。\n\n"
+            "完成。不要声称执行了证据中没有出现的检查。区分已观察事实、推断和未知项。"
+            "证据关联由运行时自动完成，不要生成 coverage JSON 或调用 ID。\n\n"
             f"用户问题：{query}\n\n已取得证据：\n{evidence}"
         )
         async with asyncio.timeout(self.summary_reserve_seconds):
@@ -763,13 +894,14 @@ class RuntimeMCPAgent:
                     "chat_template_kwargs": {"enable_thinking": False}
                 },
             )
-            response = await summary_model.ainvoke(
-                [HumanMessage(content=prompt)]
-            )
-        content = str(getattr(response, "content", "") or "").strip()
-        if not content:
-            raise RuntimeError("Agent model returned an empty forced summary")
-        return content
+            received = False
+            async for response in summary_model.astream([HumanMessage(content=prompt)]):
+                content = getattr(response, "content", "")
+                if isinstance(content, str) and content:
+                    received = True
+                    yield content
+            if not received:
+                raise RuntimeError("Agent model returned an empty forced summary")
 
     async def _deterministic_partial_summary(
         self,

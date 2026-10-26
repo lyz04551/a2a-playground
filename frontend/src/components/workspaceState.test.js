@@ -1,6 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { approvalStatusAfterDecision, buildRunReconnectCommand, canChangeMode, enrichWorkspaceMessages, getSystemStatus, getWorkspaceSendState, nextWorkspaceMode, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
+import { approvalStatusAfterDecision, buildContinuationPrompt, buildRunReconnectCommand, canChangeMode, enrichWorkspaceMessages, getCoveragePresentation, getSystemStatus, getWorkspaceSendState, getWorkspaceGaps, nextWorkspaceMode, resolveWorkspaceRefreshResults, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
+
+test('coverage card only appears for explicit itemized audits', () => {
+  const incidental = { coverage: { expected_targets: Array.from({ length: 38 }, (_, index) => `Pod/default/${index}`), inspected_targets: [], enumeration_complete: true } }
+  assert.equal(getCoveragePresentation([incidental]), null)
+  assert.equal(getCoveragePresentation([{ ...incidental, coverageRequired: true, inspectionContract: 'pod_pending' }]), null)
+  assert.deepEqual(getCoveragePresentation([{ coverageRequired: true, coverage: { expected_targets: ['Pod/default/a', 'Pod/default/b'], inspected_targets: ['Pod/default/a'], enumeration_complete: true }, evaluation: 'insufficient' }]), {
+    checked: 1, total: 2, missing: ['Pod/default/b'], enumerationComplete: true, complete: false,
+  })
+})
 
 test('mode can change only before a conversation has messages', () => {
   assert.equal(canChangeMode({ messageCount: 0 }), true)
@@ -106,6 +115,33 @@ test('restored legacy messages infer Agent and Host labels from run outputs', ()
   })
 
   assert.deepEqual(messages.map(message => message.agentName), ['K8s Ops Agent', 'Host Agent 总结'])
+})
+
+test('restored messages use persisted source metadata for Agent labels', () => {
+  const messages = enrichWorkspaceMessages([
+    { id: 'agent-output', role: 'agent', content: '检查完成', metadata: { agent_id: 'security', source: 'delegated-agent' } },
+    { id: 'host-output', role: 'agent', content: '已汇总', metadata: { source: 'host' } },
+  ], { agents: [{ id: 'security', name: 'K8s Security Agent' }], language: 'zh-CN' })
+  assert.deepEqual(messages.map(message => message.agentName), ['K8s Security Agent', 'Host Agent 总结'])
+})
+
+test('workspace refresh preserves available data when an independent API fails', () => {
+  const refreshed = resolveWorkspaceRefreshResults([
+    { status: 'fulfilled', value: [{ id: 'ops', health: { online: true } }] },
+    { status: 'rejected', reason: new Error('health unavailable') },
+    { status: 'fulfilled', value: { model: { configured: true } } },
+    { status: 'rejected', reason: new Error('history unavailable') },
+  ], { conversations: [{ id: 'saved' }] })
+  assert.equal(refreshed.agents[0].online, true)
+  assert.equal(refreshed.modelConfigured, true)
+  assert.deepEqual(refreshed.conversations, [{ id: 'saved' }])
+})
+
+test('partial run exposes missing verified targets for a focused continuation', () => {
+  const gaps = getWorkspaceGaps([{ id: 'audit', objective: 'Inspect Pods', evaluation: 'insufficient', evaluationReason: 'coverage incomplete', coverage: { expected_targets: ['Pod/default/a', 'Pod/default/b'], inspected_targets: ['Pod/default/a'] } }])
+  assert.deepEqual(gaps[0].missingTargets, ['Pod/default/b'])
+  assert.match(buildContinuationPrompt(gaps, 'zh-CN'), /Pod\/default\/b/)
+  assert.match(buildContinuationPrompt(gaps, 'zh-CN'), /不要重复/)
 })
 
 test('restoring a direct conversation uses the deterministically latest run target before legacy agent fallback', () => {

@@ -18,6 +18,28 @@ function event(type, sequence, data = {}, overrides = {}) {
   }
 }
 
+test('task evaluation retains its own coverage and missing targets', () => {
+  let state = reduceRunEvent(emptyRunState, event('run.started', 1, { mode: 'auto' }))
+  state = reduceRunEvent(state, event('task.started', 2, { agent_id: 'ops' }))
+  state = reduceRunEvent(state, event('task.evaluated', 3, {
+    outcome: 'insufficient', reason: 'coverage incomplete',
+    coverage: { expected_targets: ['Pod/default/a', 'Pod/default/b'], inspected_targets: ['Pod/default/a'] },
+  }))
+  assert.deepEqual(state.tasksById['task-1'].coverage.expected_targets, ['Pod/default/a', 'Pod/default/b'])
+})
+
+test('Agent thinking remains attached to its task after tool activity and completion', () => {
+  let state = reduceRunEvent(emptyRunState, event('task.started', 1, { agent_id: 'ops' }))
+  state = reduceRunEvent(state, event('agent.thinking_delta', 2, { content: '正在检查调度事件' }))
+  assert.equal(state.tasksById['task-1'].thinkingExcerpt, '正在检查调度事件')
+  state = reduceRunEvent(state, event('tool.called', 3, { id: 'call-1', tool: 'list_k8s_pod_event' }))
+  state = reduceRunEvent(state, event('agent.thinking_delta', 4, { content: '事件已返回，继续分析' }))
+  state = reduceRunEvent(state, event('task.completed', 5, { result: '事件为空' }))
+  assert.equal(state.tasksById['task-1'].thinkingExcerpt, '事件已返回，继续分析')
+  assert.equal(state.tasksById['task-1'].thinkingTranscript, '正在检查调度事件事件已返回，继续分析')
+  assert.equal(state.tasksById['task-1'].thinkingAt, '2026-07-30T12:00:00.000Z')
+})
+
 test('run lifecycle and task events reduce into normalized run and ordered task state', () => {
   let state = reduceRunEvent(emptyRunState, event('run.started', 1, { mode: 'auto' }))
   state = reduceRunEvent(state, event('task.delegated', 2, { agent_id: 'ops', label: 'Inspect cluster' }, { task_id: 'task-ops' }))

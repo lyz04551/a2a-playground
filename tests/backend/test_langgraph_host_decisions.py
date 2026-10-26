@@ -72,6 +72,52 @@ AGENTS = [
 ]
 
 
+@pytest.mark.anyio
+async def test_narrow_task_can_complete_with_incomplete_incidental_enumeration():
+    model = FakeModel('{"outcome":"sufficient","reason":"named Pod was inspected"}')
+    port = LangGraphDecisionPort(model=model)
+    task = PlannedTask(id="pod", agent_id="ops", objective="Inspect pod-a", completion_criteria=["pod-a inspected"])
+    result = DelegationResult(state="completed", output={
+        "summary": "pod-a inspected",
+        "coverage": {
+            "scope": "observed MCP resources", "expected_targets": ["Pod/default/pod-a", "Pod/default/pod-b"],
+            "inspected_targets": ["Pod/default/pod-a"], "enumeration_complete": True,
+            "evidence_call_ids": ["list-1", "read-1"],
+        },
+    })
+    evaluation = await port.evaluate(task, result)
+    assert evaluation.outcome == "sufficient"
+
+
+@pytest.mark.anyio
+async def test_required_coverage_reports_runtime_evidence_gap_without_model_call():
+    port = LangGraphDecisionPort(model=FakeModel())
+    task = PlannedTask(id="audit", agent_id="ops", objective="Inspect all Pods", completion_criteria=["all Pods inspected"], coverage_required=True)
+    result = DelegationResult(state="completed", output={
+        "summary": "checked one Pod", "coverage": {
+            "scope": "observed MCP resources", "expected_targets": ["Pod/default/a", "Pod/default/b"],
+            "inspected_targets": ["Pod/default/a"], "enumeration_complete": True,
+            "evidence_call_ids": ["list-1", "read-1"],
+        },
+    })
+    evaluation = await port.evaluate(task, result)
+    assert evaluation.outcome == "insufficient"
+    assert "Pod/default/b" in evaluation.reason
+
+
+@pytest.mark.anyio
+async def test_pending_pod_contract_rejects_missing_raw_status_evidence():
+    port = LangGraphDecisionPort(model=FakeModel())
+    task = PlannedTask(id="pod", agent_id="ops", objective="Diagnose Pending Pod", completion_criteria=["status and events reviewed"], inspection_contract="pod_pending")
+    result = DelegationResult(state="completed", output={
+        "summary": "likely NFS issue",
+        "evidence": [{"tool": "describe_k8s_pod", "resource_ids": ["Pod/default/pod-a"], "result_state": "returned", "call_id": "read-1"}],
+    })
+    evaluation = await port.evaluate(task, result)
+    assert evaluation.outcome == "insufficient"
+    assert "pod_status_and_scheduling_gates" in evaluation.reason
+
+
 def test_host_final_response_cannot_claim_full_coverage_after_insufficient_evaluation():
     task = PlannedTask(
         id="audit", agent_id="ops", objective="检查全部对象",
@@ -81,7 +127,7 @@ def test_host_final_response_cannot_claim_full_coverage_after_insufficient_evalu
         task.id: ObservedTask(
             task=task,
             result=DelegationResult(state="completed", text="声称全部检查完毕"),
-            evaluation=Evaluation(outcome="insufficient", reason="coverage manifest was not provided"),
+            evaluation=Evaluation(outcome="insufficient", reason="runtime tool evidence is unavailable"),
             actual_agent_id="ops",
         ),
     })
@@ -89,7 +135,7 @@ def test_host_final_response_cannot_claim_full_coverage_after_insufficient_evalu
     final = _terminal_response("检查全部对象", state, "全部对象已检查，任务完成")
 
     assert final.startswith("本次任务部分完成")
-    assert "coverage manifest was not provided" in final
+    assert "runtime tool evidence is unavailable" in final
     assert "全部对象已检查，任务完成" not in final
 
 

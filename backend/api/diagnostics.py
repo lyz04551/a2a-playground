@@ -25,7 +25,7 @@ def refresh_tool_catalogs(repository, agents: list[dict], result: dict) -> None:
             and isinstance(tool.get("name"), str)
             and tool.get("access") in {"allow", "approval_required", "deny"}
         ]
-        repository.add_agent({
+        repository.upsert_agent({
             **agent,
             "tool_catalog": catalog,
             "tool_catalog_state": "ok" if available else "unavailable",

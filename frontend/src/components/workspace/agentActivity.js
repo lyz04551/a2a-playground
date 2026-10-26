@@ -7,6 +7,7 @@ export function recentAgentActivity(tasks = [], limit = 4) {
     id: `${task.id}:${tool.id || index}`,
     agentName: task.agentName || task.agentId || 'Agent',
     name: tool.name || 'Tool',
+    target: [tool.arguments?.namespace, tool.arguments?.name].filter(Boolean).join('/') || tool.arguments?.kind || '',
     status: tool.status || 'working',
     number: index + 1,
     startedAt: tool.startedAt || '',

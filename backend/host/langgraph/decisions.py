@@ -8,6 +8,8 @@ from typing import TypeVar
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
+from backend.host.orchestration.contracts import missing_contract_checks
+
 from backend.host.orchestration.models import (
     DelegationResult,
     Evaluation,
@@ -99,6 +101,16 @@ Never repeat semantic work or a rejected
 write. For a finite multi-target audit, set coverage_required=true on its
 PlannedTask; the specialist must enumerate and account for the target set.
 Never call such a task sufficient without a complete coverage manifest.
+The specialist assessment.facts are runtime-recorded tool returns; interpret
+their result excerpts before stating a Kubernetes fact. Treat inferences as
+uncertain and assessment.unknowns as unresolved. Do not promote report prose
+to a verified finding when its tool evidence is absent or contradictory.
+Set inspection_contract=pod_pending when diagnosing a Pending Pod: require a raw
+Pod status read (including conditions and schedulingGates), Pod scheduling
+events, and node fit evidence. Set inspection_contract=workload_security for a
+full workload security review: require workload configuration, ServiceAccount,
+RBAC binding and rule, and NetworkPolicy evidence. A missing observation is an
+unknown, never proof that a suspected cause is true.
 For a continuation, carry forward the prior coverage target list and name only
 the remaining targets in the new task input. Do not request another target
 enumeration when the prior manifest says enumeration_complete=true for the
@@ -213,6 +225,8 @@ For a Kubernetes deployment mutation, create a Security Agent precheck task
 using its declared security skill, then a mutation task depending on it with
 risk set to write, then an Ops verification task depending on the mutation.
 An Ops resource-conflict check does not replace the Security Agent precheck.
+Use inspection_contract=pod_pending for Pending Pod diagnosis and
+inspection_contract=workload_security for full workload security reviews.
 Maximum six tasks and two attempts each.""",
                 payload,
             )
@@ -253,13 +267,22 @@ Maximum six tasks and two attempts each.""",
                     "criteria; retain its evidence and explicitly report missing coverage"
                 ),
             )
-        if task.coverage_required and (result.output is None or result.output.coverage is None):
-            return Evaluation(outcome="insufficient", reason="coverage manifest was not provided")
-        if result.output is not None and result.output.coverage is not None and not result.output.coverage.complete:
+        if task.coverage_required and not task.inspection_contract and (result.output is None or result.output.coverage is None):
+            return Evaluation(outcome="insufficient", reason="runtime tool evidence is unavailable")
+        if task.coverage_required and not task.inspection_contract and result.output is not None and result.output.coverage is not None and not result.output.coverage.complete:
+            coverage = result.output.coverage
+            missing = sorted(set(coverage.expected_targets) - set(coverage.inspected_targets))
+            reason = "target enumeration is incomplete" if not coverage.enumeration_complete else "runtime target coverage is incomplete"
+            if missing:
+                reason += f"; unverified targets: {', '.join(missing[:20])}"
             return Evaluation(
                 outcome="insufficient",
-                reason="declared target coverage is incomplete",
+                reason=reason,
             )
+        if task.inspection_contract:
+            missing = missing_contract_checks(task.inspection_contract, result.output.evidence if result.output else [])
+            if missing:
+                return Evaluation(outcome="insufficient", reason=f"inspection contract lacks tool evidence: {', '.join(missing)}")
         return await self._invoke_structured(
             Evaluation,
             """Evaluate the Agent result against the completion criteria.
@@ -278,7 +301,10 @@ concise reason. Approval-required work is blocked, never sufficient.""",
             [
                 SystemMessage(content=(
                     "你是 Host Agent。根据结构化计划和各子任务终态，用中文"
-                    "直接回答用户。区分事实与建议，明确失败、阻塞和冲突；"
+                    "直接回答用户。按已验证事实、推断、未知项区分结论；"
+                    "已验证事实必须可追溯到 assessment.facts 的真实工具调用；"
+                    "推断需说明依据和不确定性，未知项不得补写为事实。"
+                    "明确失败、阻塞和冲突；"
                     "没有执行证据时不得声称写操作已经完成。"
                 )),
                 HumanMessage(content=json.dumps(

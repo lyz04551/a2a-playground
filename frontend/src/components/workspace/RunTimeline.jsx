@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -24,6 +24,31 @@ function formatDuration(durationMs) {
   if (!Number.isFinite(durationMs)) return '—'
   if (durationMs < 1000) return `${durationMs} ms`
   return `${(durationMs / 1000).toFixed(durationMs < 10000 ? 1 : 0)} s`
+}
+
+function AgentThinking({ task, zh, now }) {
+  const active = ['working', 'delegated', 'retrying'].includes(task.status)
+  const lastAt = task.thinkingAt || task.startedAt
+  const transcript = task.thinkingTranscript || task.thinkingExcerpt || ''
+  const scrollRef = useRef(null)
+  const [following, setFollowing] = useState(true)
+  useEffect(() => {
+    if (active && following && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
+  }, [active, following, transcript])
+  if (!active && !transcript) return null
+  const seconds = lastAt ? Math.max(0, Math.floor((now - Date.parse(lastAt)) / 1000)) : 0
+  const title = active
+    ? (task.thinkingAt ? (zh ? '正在分析' : 'Analyzing') : (zh ? '等待 Agent 输出' : 'Awaiting Agent output'))
+    : (zh ? '分析过程' : 'Analysis activity')
+  return <div className={`agent-thinking${active ? ' is-live' : ''}`}>
+    <div className="agent-thinking__status"><span className="agent-thinking__pulse" aria-hidden="true" /><strong>{title}</strong>{active && <small>{zh ? `距上次更新 ${seconds} 秒` : `${seconds}s since last update`}</small>}</div>
+    {transcript && <details key={active ? 'active' : 'complete'} open={active || undefined}>
+      <summary>{zh ? '查看实时分析 · 内容尚未核实' : 'View live analysis · unverified'}</summary>
+      <div className="agent-thinking__scroll" ref={scrollRef} tabIndex={0} role="region" aria-label={zh ? 'Agent 分析内容，可滚动' : 'Agent analysis, scrollable'} onScroll={event => { const node = event.currentTarget; setFollowing(node.scrollHeight - node.scrollTop - node.clientHeight < 24) }}>{task.thinkingTruncated && <small>{zh ? '较早的分析内容已省略' : 'Earlier analysis was omitted'}</small>}{transcript}</div>
+      {active && !following && <button className="agent-thinking__latest" type="button" onClick={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; setFollowing(true) }}>{zh ? '跳到最新' : 'Jump to latest'}</button>}
+    </details>}
+    {!transcript && active && <p className="agent-thinking__waiting">{zh ? '模型尚未返回分析文本；工具活动会显示在下方。' : 'No analysis text yet; tool activity appears below.'}</p>}
+  </div>
 }
 
 async function copyText(value) {
@@ -82,7 +107,7 @@ function ToolActivity({ tools, zh }) {
   )
 }
 
-export default function RunTimeline({ run = {}, tasks = [], rounds = [], approvals = [], onApproval, onTaskSelect, selectedTaskId, language = 'en-US' }) {
+export default function RunTimeline({ run = {}, tasks = [], rounds = [], approvals = [], onApproval, onTaskSelect, selectedTaskId, language = 'en-US', now = Date.now() }) {
   const zh = language.startsWith('zh')
   const visibleTasks = tasks.filter(task => (
     task.agentId || task.agentName || task.objective
@@ -103,7 +128,7 @@ export default function RunTimeline({ run = {}, tasks = [], rounds = [], approva
         <React.Fragment key={item.id}>
           <li className={`run-timeline__node is-agent status-${item.task.status || 'queued'}`}>
             <span className="run-timeline__rail"><RobotOutlined /></span>
-            <button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {statusLabel(item.task.status || 'queued', zh)} · {formatDuration(item.task.durationMs)}</small>{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}<em>{zh ? '查看任务与报告' : 'View task and report'} <ArrowRightOutlined /></em></button>
+            <div className="run-timeline__agent-content"><button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {statusLabel(item.task.status || 'queued', zh)} · {formatDuration(item.task.durationMs)}</small>{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}<em>{zh ? '查看任务与报告' : 'View task and report'} <ArrowRightOutlined /></em></button><AgentThinking task={item.task} zh={zh} now={now} /></div>
           </li>
           {(item.task.tools || []).length > 0 && <ToolActivity tools={item.task.tools} zh={zh} />}
           {approvals.filter(approval => (approval.taskId || approval.task_id) === item.task.id).map(approval => (

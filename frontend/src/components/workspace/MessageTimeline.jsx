@@ -6,7 +6,7 @@ import { formatAgentOutput } from './agentOutput'
 import MarkdownContent from '../MarkdownContent'
 import { recentAgentActivity } from './agentActivity'
 
-export default function MessageTimeline({ messages = [], tasks = [], thinking = '', loading = false, stage, error, onRetry, onArtifactOpen, language = 'zh-CN' }) {
+export default function MessageTimeline({ messages = [], tasks = [], loading = false, stage, error, onRetry, onArtifactOpen, language = 'zh-CN' }) {
   const zh = language === 'zh-CN'
   const activity = loading ? recentAgentActivity(tasks) : []
   if (loading && messages.length === 0) return <div className="workspace-state" role="status"><LoadingOutlined /> {zh ? '正在加载会话…' : 'Loading conversation…'}</div>
@@ -33,17 +33,13 @@ export default function MessageTimeline({ messages = [], tasks = [], thinking = 
           <span className="workspace-live__state">{zh ? '实时更新' : 'Live'}</span>
         </div>
         {stage?.active?.length > 0 && <div className="workspace-live__agents">{stage.active.map(item => <span key={item.id}>{item.agentName}{item.objective ? ` · ${item.objective}` : ''}</span>)}</div>}
-        {(thinking || activity.length > 0) && <div className="workspace-live__details">
-          {thinking && <section className="workspace-live__thinking" aria-live="off" aria-label={zh ? '模型实时分析' : 'Live model analysis'}>
-            <div className="workspace-live__section-title"><span className="workspace-live__section-mark" />{zh ? '实时分析' : 'Live analysis'}<small>{zh ? '生成中' : 'Generating'}</small></div>
-            <p>{thinking}</p>
-          </section>}
+        {activity.length > 0 && <div className="workspace-live__details">
           {activity.length > 0 && <section className="workspace-live__tools" aria-label={zh ? '最近工具调用' : 'Recent tool calls'}>
             <div className="workspace-live__section-title">{zh ? '最近工具调用' : 'Recent tool calls'}<small>{zh ? '详细记录见右侧运行轨迹' : 'Details in run trace'}</small></div>
-            <ol>{activity.map(item => <li key={item.id} className={`is-${item.status}`}><span className="workspace-live__tool-number">{String(item.number).padStart(2, '0')}</span><code title={item.name}>{item.name}</code><em>{item.status === 'working' ? (zh ? '执行中' : 'Running') : item.status === 'completed' ? (zh ? '已完成' : 'Done') : (zh ? '未完成' : 'Incomplete')}</em></li>)}</ol>
+            <ol>{activity.map(item => <li key={item.id} className={`is-${item.status}`}><span className="workspace-live__tool-number">{String(item.number).padStart(2, '0')}</span><code title={item.name}>{item.name}</code>{item.target && <small title={item.target}>{item.target}</small>}<em>{item.status === 'working' ? (zh ? '执行中' : 'Running') : item.status === 'completed' ? (zh ? '已完成' : 'Done') : (zh ? '未完成' : 'Incomplete')}</em></li>)}</ol>
           </section>}
         </div>}
-        {!thinking && activity.length === 0 && <p className="workspace-live__waiting">{zh ? '正在准备下一步，新的分析和工具活动会显示在这里。' : 'Preparing the next step. Analysis and tool activity will appear here.'}</p>}
+        {activity.length === 0 && <p className="workspace-live__waiting">{zh ? '正在准备下一步，新的工具活动会显示在这里。' : 'Preparing the next step. Tool activity will appear here.'}</p>}
       </li>}
     </ol>
   )

@@ -103,7 +103,7 @@ def test_mcp_diagnostics_refreshes_catalog_and_invalidates_failed_probe():
         def __init__(self):
             self.agent = {"id": "ops", "tool_catalog_state": "ok", "tool_catalog": [{"name": "old", "access": "allow"}]}
 
-        def add_agent(self, agent):
+        def upsert_agent(self, agent):
             self.agent = agent
 
     repository = Repository()

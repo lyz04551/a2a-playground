@@ -15,3 +15,10 @@ test('shows real tools from the active Agent in execution order', () => {
     [2, 'get_k8s_resource', 'working'],
   ])
 })
+
+test('shows the named Kubernetes resource under inspection', () => {
+  const [activity] = recentAgentActivity([{ id: 'ops', status: 'working', tools: [
+    { id: 'a', name: 'describe_k8s_pod', arguments: { namespace: 'default', name: 'pod-a' }, status: 'working' },
+  ] }])
+  assert.equal(activity.target, 'default/pod-a')
+})
