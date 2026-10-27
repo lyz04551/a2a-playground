@@ -90,8 +90,8 @@ export default function DashboardPage() {
 
           <div className="dashboard-grid">
             <section className="dashboard-section console-card">
-              <header><div><span className="console-eyebrow">Quick start</span><h2>{zh ? '快捷任务' : 'Agent examples'}</h2></div><Tag color="green">{zh ? '在线能力' : 'Available skills'}</Tag></header>
-              <PromptTemplates agents={data.agents.filter(agent => agent.online)} language={language} onSelect={template => navigate(`/workspace?mode=auto&prompt=${encodeURIComponent(template.prompt)}`)} />
+              <header><div><span className="console-eyebrow">Quick start</span><h2>{zh ? '快捷任务' : 'Prompt templates'}</h2></div><Tag color="green">Kubernetes</Tag></header>
+              <PromptTemplates language={language} onSelect={template => navigate(`/workspace?mode=auto&prompt=${encodeURIComponent(template.prompt)}`)} />
             </section>
             <section className="dashboard-section dashboard-runs console-card">
               <header><div><span className="console-eyebrow">Recent activity</span><h2>{zh ? '最近任务' : 'Recent runs'}</h2></div><Button type="link" onClick={() => navigate('/events')}>{zh ? '查看全部' : 'View all'}</Button></header>
