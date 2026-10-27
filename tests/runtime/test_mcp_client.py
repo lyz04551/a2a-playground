@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from contextlib import asynccontextmanager
 import pytest
 import httpx
@@ -316,16 +317,15 @@ async def test_agent_returns_deterministic_partial_result_when_summary_model_is_
 
     events = [event async for event in agent.stream("check cluster", "ctx")]
 
-    assert len(events) == 1
-    assert events[0].is_task_complete is True
-    assert events[0].type is RuntimeEventType.COMPLETED
-    assert events[0].data["status"] == "partial"
-    assert "预算" in events[0].content
-    assert "没有可用的已完成工具结果" in events[0].content
+    assert events[-1].is_task_complete is True
+    assert events[-1].type is RuntimeEventType.COMPLETED
+    assert events[-1].data["status"] == "partial"
+    assert "预算" in events[-1].content
+    assert "没有已完成的工具结果" in events[-1].content
 
 
 @pytest.mark.anyio
-async def test_deterministic_partial_summary_turns_security_results_into_findings():
+async def test_deterministic_partial_summary_reports_generic_tool_inventory():
     config = AgentRuntimeConfig(
         agent_id="security", name="Security", port=8053,
         public_url="http://security", mcp_url="http://mcp/sse",
@@ -346,11 +346,38 @@ async def test_deterministic_partial_summary_turns_security_results_into_finding
         },
     )
 
-    assert "Kubernetes v1.33.4" in summary
-    assert "2 个命名空间" in summary
+    assert "list_k8s_namespace {}：返回 2 项" in summary
     assert "tools-cluster-admin-rolebinding" in summary
-    assert "roleRef 与 subjects" in summary
-    assert "工具调用" not in summary
+    assert "roleRef 与 subjects" not in summary
+    assert "调用 rbac" in summary
+
+
+@pytest.mark.anyio
+async def test_budget_fallback_reports_actual_pod_enumeration_and_missing_reads():
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+    summary = await agent._deterministic_partial_summary(
+        {
+            "list-1": '[{"name":"pod-a","namespace":"default"},{"name":"pod-b","namespace":"default"}]',
+            "read-1": "Name: pod-a\nStatus: Pending",
+        },
+        "工具调用预算已用尽",
+        {
+            "list-1": "list_k8s_pod", "read-1": "describe_k8s_pod",
+        },
+        {
+            "list-1": {"tool": "list_k8s_pod", "arguments": {"namespace": "default"}},
+            "read-1": {"tool": "describe_k8s_pod", "arguments": {"namespace": "default", "name": "pod-a"}},
+        },
+    )
+    assert "本轮部分检查报告" in summary
+    assert "返回 2 项：pod-a, pod-b" in summary
+    assert '"name": "pod-a"' in summary
+    assert "Pod/default/pod-b" in summary
+    assert "调用 list-1" in summary
 
 
 def test_current_run_summary_evidence_is_deduplicated_and_bounded():
@@ -370,6 +397,16 @@ def test_current_run_summary_evidence_is_deduplicated_and_bounded():
     assert "工具调用 call-7" in evidence
 
 
+def test_current_run_evidence_includes_tool_and_resource_arguments():
+    evidence = RuntimeMCPAgent._current_run_evidence(
+        {"list-1": '[{"name":"app"}]'},
+        {"list-1": {"tool": "list_k8s_resource", "arguments": {"kind": "Deployment", "namespace": "default"}}},
+    )
+    assert "list_k8s_resource" in evidence
+    assert "Deployment" in evidence
+    assert "default" in evidence
+
+
 def test_agent_bounds_model_output_and_disables_thinking_by_default(
     monkeypatch,
 ):
@@ -384,8 +421,8 @@ def test_agent_bounds_model_output_and_disables_thinking_by_default(
     agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
 
     assert agent.enable_thinking is False
-    assert agent.max_output_tokens == 4096
-    assert agent.summary_max_tokens == 1024
+    assert agent.max_output_tokens == 8192
+    assert agent.summary_max_tokens == 4096
 
 
 @pytest.mark.anyio
@@ -513,7 +550,7 @@ async def test_agent_converts_step_limit_message_into_partial_evidence():
     completed = events[-1]
 
     assert completed.data["status"] == "partial"
-    assert "list_k8s_resource 已返回" in completed.content
+    assert "返回 1 项：nginx" in completed.content
     assert "nginx" in completed.content
     assert "Sorry" not in completed.content
 
@@ -543,8 +580,72 @@ async def test_agent_rejects_empty_structured_result_as_completed_report():
     completed = events[-1]
 
     assert completed.data["status"] == "partial"
-    assert "现有证据不足" in completed.content
-    assert '"summary"' not in completed.content
+    assert "没有已完成的工具结果" in completed.content
+
+
+@pytest.mark.anyio
+async def test_agent_turns_blank_final_text_into_partial_evidence_report():
+    class BlankResultGraph:
+        async def astream(self, *_args, **_kwargs):
+            yield {"messages": []}
+
+        async def aget_state(self, _config):
+            class State:
+                values = {"messages": [AIMessage(content="")]}
+            return State()
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+    agent._tools_loaded = True
+    agent._graph = BlankResultGraph()
+
+    events = [event async for event in agent.stream("审查 Deployment", "ctx")]
+    completed = events[-1]
+    assert completed.data["status"] == "partial"
+    assert completed.data["summary"].strip()
+    assert "本轮部分检查报告" in completed.content
+    assert any(event.type is RuntimeEventType.TEXT for event in events)
+
+
+@pytest.mark.anyio
+async def test_blank_first_round_asks_model_to_summarize_observed_evidence():
+    class BlankResultGraph:
+        async def astream(self, *_args, **_kwargs):
+            yield {"messages": []}
+
+        async def aget_state(self, _config):
+            return SimpleNamespace(values={"messages": [AIMessage(content="")]})
+
+    class SummaryModel:
+        def __init__(self):
+            self.prompt = ""
+
+        def bind(self, **_kwargs):
+            return self
+
+        async def astream(self, messages):
+            self.prompt = messages[0].content
+            yield SimpleNamespace(content="已枚举 Deployment；副本状态")
+            yield SimpleNamespace(content="尚未逐项读取。")
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    model = SummaryModel()
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession(), model=model)
+    agent._tools_loaded = True
+    agent._graph = BlankResultGraph()
+
+    events = [event async for event in agent.stream("审查 Deployment", "ctx")]
+    assert events[-1].data["status"] == "partial"
+    assert events[-1].data["summary"] == "已枚举 Deployment；副本状态尚未逐项读取。"
+    assert "禁止调用任何工具" in model.prompt
+    assert "本轮正式的部分检查报告" in model.prompt
+    assert [event.content for event in events if event.type is RuntimeEventType.TEXT]
 
 
 @pytest.mark.anyio

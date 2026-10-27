@@ -6,26 +6,19 @@ import json
 from typing import Any
 
 
-_KIND_BY_TOOL = {
-    "pod": "Pod", "node": "Node", "namespace": "Namespace",
-    "event": "Event", "clusters": "Cluster",
-}
-_CLUSTER_SCOPED = {"Node", "Namespace", "Cluster", "PersistentVolume", "StorageClass", "ClusterRole", "ClusterRoleBinding"}
-
-
 def _kind(tool: str, arguments: dict[str, Any]) -> str:
     if arguments.get("kind"):
         return str(arguments["kind"])
-    for suffix, kind in _KIND_BY_TOOL.items():
-        if tool.endswith(f"_{suffix}") or tool.endswith(f"_{suffix}s"):
-            return kind
-    return ""
+    suffix = tool.rsplit("_", 1)[-1]
+    if suffix.endswith("s"):
+        suffix = suffix[:-1]
+    return suffix.capitalize() if suffix and suffix != tool else ""
 
 
 def _resource_id(kind: str, name: str, namespace: str = "") -> str:
     if not kind or not name:
         return ""
-    return f"{kind}/{name}" if kind in _CLUSTER_SCOPED else f"{kind}/{namespace or '_cluster'}/{name}"
+    return f"{kind}/{namespace}/{name}" if namespace else f"{kind}/{name}"
 
 
 def _result_state(value: str) -> str:
@@ -49,12 +42,14 @@ def _listed_resources(kind: str, namespace: str, value: str) -> list[str] | None
     for item in parsed:
         if isinstance(item, dict):
             name = item.get("name") or (item.get("metadata") or {}).get("name")
-            item_namespace = item.get("namespace") or (item.get("metadata") or {}).get("namespace") or namespace
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            item_namespace = item.get("namespace") or metadata.get("namespace") or namespace
+            item_kind = str(item.get("kind") or kind)
         elif isinstance(item, str):
-            name, item_namespace = item, namespace
+            name, item_namespace, item_kind = item, namespace, kind
         else:
             return None
-        target = _resource_id(kind, str(name or ""), str(item_namespace or ""))
+        target = _resource_id(item_kind, str(name or ""), str(item_namespace or ""))
         if not target:
             return None
         targets.append(target)
@@ -83,6 +78,16 @@ def build_evidence_ledger(calls: dict[str, dict], results: dict[str, str]) -> tu
         kind = _kind(tool, arguments)
         namespace = str(arguments.get("namespace") or "")
         name = str(arguments.get("name") or "")
+        if state in {"returned", "empty"}:
+            try:
+                payload = json.loads(result)
+            except (TypeError, ValueError):
+                payload = None
+            if isinstance(payload, dict):
+                metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+                kind = str(payload.get("kind") or kind)
+                namespace = str(metadata.get("namespace") or payload.get("namespace") or namespace)
+                name = str(metadata.get("name") or payload.get("name") or name)
         target = _resource_id(kind, name, namespace)
         resource_ids = [target] if target else []
         if tool.startswith("list_") and kind:

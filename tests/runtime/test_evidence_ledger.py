@@ -22,6 +22,30 @@ def test_runtime_binds_real_call_ids_and_resource_targets():
     assert coverage["enumeration_complete"] is True
 
 
+def test_runtime_uses_tool_arguments_and_returned_metadata_without_kind_table():
+    evidence, coverage = build_evidence_ledger(
+        {
+            "list": {"tool": "list_k8s_resource", "arguments": {"kind": "CustomWidget", "namespace": "team-a"}},
+            "read": {"tool": "get_k8s_resource", "arguments": {"kind": "CustomWidget", "namespace": "team-a", "name": "sample"}},
+        },
+        {
+            "list": '[{"kind":"CustomWidget","metadata":{"name":"sample","namespace":"team-a"}}]',
+            "read": '{"kind":"CustomWidget","metadata":{"name":"sample","namespace":"team-a"},"spec":{}}',
+        },
+    )
+    assert evidence[0]["resource_ids"] == ["CustomWidget/team-a/sample"]
+    assert coverage["inspected_targets"] == ["CustomWidget/team-a/sample"]
+
+
+def test_runtime_uses_absent_namespace_for_cluster_scoped_objects():
+    evidence, coverage = build_evidence_ledger(
+        {"read": {"tool": "get_k8s_resource", "arguments": {"kind": "CustomClusterWidget", "name": "sample"}}},
+        {"read": '{"kind":"CustomClusterWidget","metadata":{"name":"sample"}}'},
+    )
+    assert evidence[0]["resource_ids"] == ["CustomClusterWidget/sample"]
+    assert coverage["inspected_targets"] == ["CustomClusterWidget/sample"]
+
+
 def test_failed_tool_cannot_verify_resource_and_unknown_list_stays_incomplete():
     calls = {
         "list-1": {"tool": "list_k8s_pod", "arguments": {"namespace": "default"}},

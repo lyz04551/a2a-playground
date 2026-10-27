@@ -54,10 +54,9 @@ class LangGraphHostAgent:
     ) -> str:
         messages = [
             SystemMessage(content=(
-                "你是 Host Agent。用户已经通过正式审批，子智能体也已经完成"
-                " Kubernetes 写操作。请根据审批参数和 MCP 执行结果，用中文向"
-                "用户给出简洁明确的执行总结。不要调用任何工具，不要再次请求"
-                "审批，也不要声称尚未执行。"
+                "你是 Host Agent。请根据正式审批记录和 MCP 执行结果，用中文向"
+                "用户总结操作的实际状态。只有结果证明成功时才能称已完成；"
+                "失败或无法验证时明确说明。不要调用工具或再次请求审批。"
             )),
             HumanMessage(content=json.dumps({
                 "tool_name": approval.get("tool_name"),

@@ -13,7 +13,6 @@ class PlannedTask(BaseModel):
     depends_on: list[str] = Field(default_factory=list)
     completion_criteria: list[str] = Field(min_length=1)
     coverage_required: bool = False
-    inspection_contract: Literal["pod_pending", "workload_security"] | None = None
     risk: Literal["read", "write"] = "read"
     required_skill: str | None = None
     required_tags: list[str] = Field(default_factory=list)

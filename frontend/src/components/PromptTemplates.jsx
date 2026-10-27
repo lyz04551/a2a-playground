@@ -1,30 +1,18 @@
 import React from 'react'
-import {
-  BugOutlined,
-  DeploymentUnitOutlined,
-  HeartOutlined,
-  SafetyCertificateOutlined,
-  WarningOutlined,
-} from '@ant-design/icons'
-import { PROMPT_TEMPLATES } from '../data/promptTemplates'
+import { RobotOutlined } from '@ant-design/icons'
+import { agentPromptTemplates } from '../data/promptTemplates'
 
-const ICONS = {
-  pulse: <HeartOutlined />,
-  bug: <BugOutlined />,
-  shield: <SafetyCertificateOutlined />,
-  event: <WarningOutlined />,
-  deploy: <DeploymentUnitOutlined />,
-}
-
-export default function PromptTemplates({ language = 'zh-CN', compact = false, onSelect }) {
+export default function PromptTemplates({ agents = [], language = 'en-US', compact = false, onSelect }) {
+  const templates = agentPromptTemplates(agents, language)
+  if (!templates.length) return null
   return (
     <div className={`prompt-templates ${compact ? 'prompt-templates--compact' : ''}`}>
-      {PROMPT_TEMPLATES.map(template => (
+      {templates.map(template => (
         <button type="button" key={template.id} onClick={() => onSelect?.(template)}>
-          <span className="prompt-template__icon">{ICONS[template.icon]}</span>
+          <span className="prompt-template__icon"><RobotOutlined /></span>
           <span>
-            <strong>{template.title[language]}</strong>
-            {!compact && <small>{template.description[language]}</small>}
+            <strong>{template.title}</strong>
+            {!compact && <small>{template.prompt}</small>}
           </span>
         </button>
       ))}

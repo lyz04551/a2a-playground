@@ -67,11 +67,12 @@ test('tool continuation preserves Agent progress and separates the final answer'
   assert.equal(state.messages.length, 1)
   assert.equal(state.messages[0].content, '让我继续检查\n\n发现 16 个 Deployment')
   state = reduceRunEvent(state, event('message.completed', 7, { content: '实际检查结论' }, { parent_task_id: 'root' }))
-  assert.equal(state.messages.length, 1)
+  assert.equal(state.messages.length, 2)
+  assert.equal(state.messages[0].progress, true)
   assert.equal(state.messages.at(-1).content, '实际检查结论')
 })
 
-test('a reset draft is replaced by the completed Agent report', () => {
+test('a reset draft remains reviewable beside the completed Agent report', () => {
   let state = reduceRunEvent(emptyRunState, event('run.started', 1, { mode: 'auto' }))
   state = reduceRunEvent(state, event('message.delta', 2, { content: '集群 Pod 统计报告：29 个 Po' }, { task_id: 'ops', parent_task_id: 'root' }))
   state = reduceRunEvent(state, event('message.reset', 3, {}, { task_id: 'ops', parent_task_id: 'root' }))
@@ -79,7 +80,24 @@ test('a reset draft is replaced by the completed Agent report', () => {
   assert.equal(state.messages[0].status, '检查进度 · 待核实')
   state = reduceRunEvent(state, event('message.delta', 4, { content: '集群 Pod 统计报告：29 个 Pod' }, { task_id: 'ops', parent_task_id: 'root' }))
   state = reduceRunEvent(state, event('message.completed', 5, { content: '集群 Pod 统计报告：29 个 Pod' }, { task_id: 'ops', parent_task_id: 'root' }))
-  assert.deepEqual(state.messages.map(message => message.content), ['集群 Pod 统计报告：29 个 Pod'])
+  assert.deepEqual(state.messages.map(message => message.content), ['集群 Pod 统计报告：29 个 Po', '集群 Pod 统计报告：29 个 Pod'])
+  assert.equal(state.messages[0].progress, true)
+})
+
+test('restoring saved messages reinserts archived Agent drafts before their final report', () => {
+  const taskId = 'ops'
+  const rawEvents = [
+    event('run.started', 1, { mode: 'auto' }),
+    event('message.delta', 2, { content: '第一轮草稿' }, { task_id: taskId, parent_task_id: 'root' }),
+    event('message.reset', 3, {}, { task_id: taskId, parent_task_id: 'root' }),
+    event('message.completed', 4, { content: '正式部分报告' }, { task_id: taskId, parent_task_id: 'root' }),
+  ]
+  const restored = restoreRunEventState({ rawEvents, messages: [
+    { id: 'user-1', role: 'user', content: '检查集群' },
+    { id: 'saved-1', role: 'agent', task_id: taskId, content: '正式部分报告' },
+  ] })
+  assert.deepEqual(restored.messages.map(message => message.content), ['检查集群', '第一轮草稿', '正式部分报告'])
+  assert.equal(restored.messages[1].progress, true)
 })
 
 test('keeps streamed model analysis separate from the Agent report', () => {

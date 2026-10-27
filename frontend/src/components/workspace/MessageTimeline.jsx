@@ -16,9 +16,9 @@ export default function MessageTimeline({ messages = [], tasks = [], loading = f
   return (
     <ol className="workspace-timeline" aria-label="Conversation messages">
       {messages.map(message => (
-        <li className={`workspace-message workspace-message--${message.role || 'agent'}`} key={message.id}>
-          <header><strong>{message.agentName || (message.role === 'user' ? (zh ? '你' : 'You') : 'Agent')}</strong><span>{message.status && <small>{message.status}</small>}<MessageActions content={message.role === 'user' ? message.content : formatAgentOutput(message.content)} language={language} /></span></header>
-          <div className="workspace-message__body">{message.role === 'user' ? message.content : <MarkdownContent>{formatAgentOutput(message.content)}</MarkdownContent>}</div>
+        <li className={`workspace-message workspace-message--${message.role || 'agent'}${message.progress ? ' workspace-message--progress' : ''}`} key={message.id}>
+          <header><strong>{message.agentName || (message.role === 'user' ? (zh ? '你' : 'You') : 'Agent')}{message.progress ? (zh ? ' · 生成记录' : ' · Draft record') : ''}</strong><span>{message.status && <small>{message.status}</small>}<MessageActions content={message.role === 'user' ? message.content : formatAgentOutput(message.content)} language={language} /></span></header>
+          {message.progress ? <details className="workspace-message__draft"><summary>{zh ? '查看生成草稿 · 未核实，正式结论见后续报告' : 'View generated draft · unverified; see the final report below'}</summary><div className="workspace-message__body"><MarkdownContent>{formatAgentOutput(message.content)}</MarkdownContent></div></details> : <div className="workspace-message__body">{message.role === 'user' ? message.content : <MarkdownContent>{formatAgentOutput(message.content)}</MarkdownContent>}</div>}
           {message.toolCalls?.map(tool => <ToolActivity key={tool.id || tool.tool} tool={tool.tool} status={tool.status} input={tool.arguments || tool.args} output={tool.output || message.toolResults?.[tool.id]} error={tool.error} duration={tool.duration} />)}
           {message.artifacts?.map(artifact => <button className="workspace-artifact" type="button" key={artifact.id} onClick={() => onArtifactOpen?.(artifact)}>Artifact: {artifact.name || artifact.id}</button>)}
         </li>

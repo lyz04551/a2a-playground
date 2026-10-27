@@ -155,7 +155,6 @@ function reduceNormalizedEvent(state, event) {
         risk: task.risk,
         maxAttempts: task.max_attempts,
         coverageRequired: task.coverage_required === true,
-        inspectionContract: task.inspection_contract,
         dependsOn: task.depends_on || [],
         round,
         status: tasksById[task.id]?.status || 'queued',
@@ -208,7 +207,6 @@ function reduceNormalizedEvent(state, event) {
         risk: task.risk,
         maxAttempts: task.max_attempts,
         coverageRequired: task.coverage_required === true,
-        inspectionContract: task.inspection_contract,
         dependsOn: task.depends_on || [],
         status: tasksById[task.id]?.status || 'queued',
       }
@@ -361,7 +359,7 @@ function reduceNormalizedEvent(state, event) {
     }
     const isHostMessage = event.parent_task_id === null && state.run?.mode !== 'direct'
     const messages = event.type === 'message.completed' && event.task_id
-      ? next.messages.filter(message => message.taskId !== event.task_id || message.completed || message.id === id)
+      ? next.messages.filter(message => message.taskId !== event.task_id || message.completed || message.progress || message.id === id)
       : next.messages
     return { ...next,
       ...(event.type === 'message.delta' && event.task_id ? { thinkingByTask: { ...next.thinkingByTask, [event.task_id]: '' } } : {}),
@@ -477,6 +475,14 @@ export function restoreRunEventState({ run = null, messages = [], approvals = []
     (items, approval) => upsertById(items, approval),
     state.approvals,
   )
-  const restored = { ...state, run: { ...(state.run || {}), ...(run || {}) }, messages: messages.length ? messages : state.messages, approvals: restoredApprovals, tasksById, taskOrder }
+  const restoredMessages = messages.length ? [...messages] : state.messages
+  if (messages.length) {
+    for (const progress of state.messages.filter(message => message.progress)) {
+      if (restoredMessages.some(message => message.id === progress.id)) continue
+      const matchingFinal = restoredMessages.findIndex(message => (message.taskId || message.task_id) === progress.taskId && message.role !== 'user')
+      restoredMessages.splice(matchingFinal < 0 ? restoredMessages.length : matchingFinal, 0, progress)
+    }
+  }
+  const restored = { ...state, run: { ...(state.run || {}), ...(run || {}) }, messages: restoredMessages, approvals: restoredApprovals, tasksById, taskOrder }
   return { ...restored, ...adaptRunStateForLegacy(restored) }
 }

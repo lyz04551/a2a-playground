@@ -8,7 +8,6 @@ from typing import TypeVar
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, ValidationError
 
-from backend.host.orchestration.contracts import missing_contract_checks
 
 from backend.host.orchestration.models import (
     DelegationResult,
@@ -102,27 +101,24 @@ write. For a finite multi-target audit, set coverage_required=true on its
 PlannedTask; the specialist must enumerate and account for the target set.
 Never call such a task sufficient without a complete coverage manifest.
 The specialist assessment.facts are runtime-recorded tool returns; interpret
-their result excerpts before stating a Kubernetes fact. Treat inferences as
+their result excerpts before stating a resource fact. Treat inferences as
 uncertain and assessment.unknowns as unresolved. Do not promote report prose
 to a verified finding when its tool evidence is absent or contradictory.
-Set inspection_contract=pod_pending when diagnosing a Pending Pod: require a raw
-Pod status read (including conditions and schedulingGates), Pod scheduling
-events, and node fit evidence. Set inspection_contract=workload_security for a
-full workload security review: require workload configuration, ServiceAccount,
-RBAC binding and rule, and NetworkPolicy evidence. A missing observation is an
-unknown, never proof that a suspected cause is true.
+Derive task completion criteria from the user's goal and available tool catalog.
+State which observations would prove each criterion, and treat any missing
+observation as unknown rather than as proof of a suspected cause.
 For a continuation, carry forward the prior coverage target list and name only
 the remaining targets in the new task input. Do not request another target
 enumeration when the prior manifest says enumeration_complete=true for the
 same scope; request a refresh only if freshness is relevant or prior evidence
 is incomplete.
-A Kubernetes mutation requires a successful Security precheck observation;
+A mutation requires a successful Security precheck observation;
 mutation and verification must never be delegated in the same round. Wait for a
-successful mutation observation, then delegate Ops verification in the next round.
+successful mutation observation, then delegate verification to a capable Agent in the next round.
 If verification proves the resource unhealthy or the write did not take effect,
-one corrective mutation is allowed. For an existing Kubernetes Pod whose immutable
-spec must change, instruct the write Agent to delete and recreate it; both writes
-must go through formal approval. If a mutation observation is insufficient, delegate
+one corrective mutation is allowed. Determine a valid correction from the live
+resource schema and observed error; every write requires formal approval.
+If a mutation observation is insufficient, delegate
 the unmet remainder back to the same mutation-capable Agent; this continues the
 logical correction and is not a new corrective mutation. Never send mutation work
 to a read-only diagnostics Agent. Verify again after the correction. Return
@@ -136,7 +132,7 @@ An incomplete, partial, timed-out, or step-budget-limited verification is not pr
 that the resource is unhealthy and must never justify a corrective mutation.
 Use payload.response_language for every user-visible string. When it is zh-CN,
 reason, response, task objective, task input, and completion criteria must all
-be written in Chinese. Keep Agent IDs, tool names, and Kubernetes identifiers unchanged.
+be written in Chinese. Keep Agent IDs, tool names, and resource identifiers unchanged.
 Do not reveal hidden chain-of-thought."""
         try:
             profiles = {agent["id"]: agent for agent in agents}
@@ -221,12 +217,12 @@ For tasks needing MCP calls, list exact names from the selected Agent's
 tool_catalog in required_tools; denied tools are unavailable. Every write
 task must name an approval_required tool. If the catalog is unavailable,
 do not claim a specific tool exists.
-For a Kubernetes deployment mutation, create a Security Agent precheck task
+For a mutation, create a Security Agent precheck task
 using its declared security skill, then a mutation task depending on it with
-risk set to write, then an Ops verification task depending on the mutation.
-An Ops resource-conflict check does not replace the Security Agent precheck.
-Use inspection_contract=pod_pending for Pending Pod diagnosis and
-inspection_contract=workload_security for full workload security reviews.
+risk set to write, then a verification task depending on the mutation.
+A resource-conflict check does not replace the Security Agent precheck.
+Derive concrete completion criteria and required tools for each task from the
+request and the selected Agent's live catalog.
 Maximum six tasks and two attempts each.""",
                 payload,
             )
@@ -267,9 +263,9 @@ Maximum six tasks and two attempts each.""",
                     "criteria; retain its evidence and explicitly report missing coverage"
                 ),
             )
-        if task.coverage_required and not task.inspection_contract and (result.output is None or result.output.coverage is None):
+        if task.coverage_required and (result.output is None or result.output.coverage is None):
             return Evaluation(outcome="insufficient", reason="runtime tool evidence is unavailable")
-        if task.coverage_required and not task.inspection_contract and result.output is not None and result.output.coverage is not None and not result.output.coverage.complete:
+        if task.coverage_required and result.output is not None and result.output.coverage is not None and not result.output.coverage.complete:
             coverage = result.output.coverage
             missing = sorted(set(coverage.expected_targets) - set(coverage.inspected_targets))
             reason = "target enumeration is incomplete" if not coverage.enumeration_complete else "runtime target coverage is incomplete"
@@ -279,15 +275,13 @@ Maximum six tasks and two attempts each.""",
                 outcome="insufficient",
                 reason=reason,
             )
-        if task.inspection_contract:
-            missing = missing_contract_checks(task.inspection_contract, result.output.evidence if result.output else [])
-            if missing:
-                return Evaluation(outcome="insufficient", reason=f"inspection contract lacks tool evidence: {', '.join(missing)}")
         return await self._invoke_structured(
             Evaluation,
             """Evaluate the Agent result against the completion criteria.
 Return JSON with outcome sufficient, insufficient, failed, or blocked and a
-concise reason. Approval-required work is blocked, never sufficient.""",
+concise reason. Check each completion criterion against actual tool evidence;
+report missing observations explicitly. Model prose alone is not evidence.
+Approval-required work is blocked, never sufficient.""",
             {"task": task.model_dump(), "result": result.model_dump()},
         )
 

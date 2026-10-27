@@ -1,4 +1,5 @@
-from a2a_runtime.agent import _display_content, _extract_coverage, _final_stream_delta, _stream_visible_content
+from langchain_core.messages import AIMessage
+from a2a_runtime.agent import _display_content, _extract_coverage, _final_stream_delta, _stream_visible_content, _truncated_report
 
 
 def test_json_fenced_coverage_is_hidden_even_when_citations_are_invalid():
@@ -39,3 +40,9 @@ def test_structured_summary_can_stream_before_json_object_is_complete():
     partial = report[:report.index('尚未完成') + len('尚未')]
     assert _stream_visible_content(partial) == '第一行\n第二'
     assert _display_content(report) == '第一行\n第二行：检查中，尚未完成'
+
+
+def test_truncated_report_is_not_accepted_as_complete():
+    assert _truncated_report(AIMessage(content='报告', response_metadata={'finish_reason': 'length'}), '报告')
+    assert _truncated_report(AIMessage(content='报告', usage_metadata={'input_tokens': 10, 'output_tokens': 4096, 'total_tokens': 4106}), '报告', 4096)
+    assert not _truncated_report(AIMessage(content='完成。'), '完成。')

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from backend.host.orchestration.contracts import contract_guidance
 from backend.host.orchestration.models import DelegationResult, PlannedTask
 
 
@@ -27,8 +26,6 @@ def build_task_prompt(
         f"Objective:\n{task.objective}\n\n"
         f"Relevant user request:\n{task.input or request}\n\n"
         f"Completion criteria:\n{criteria}\n\n"
-        f"Inspection contract: {task.inspection_contract or 'none'}\n"
-        f"{contract_guidance(task.inspection_contract)}\n\n"
         f"Constraints:\n{constraint}\n\n"
         f"Predecessor findings:\n{findings}\n\n"
         "Return findings, supporting evidence, uncertainty, and recommended "

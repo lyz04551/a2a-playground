@@ -5,7 +5,6 @@ import inspect
 import json
 from collections.abc import AsyncIterator, Awaitable, Callable
 
-from backend.host.orchestration.contracts import contract_guidance
 from backend.host.orchestration.context import build_task_prompt
 from backend.host.orchestration.models import (
     DecisionPort,
@@ -370,9 +369,9 @@ class HostOrchestrationEngine:
                     prior_evidence=[
                         item
                         for observed in state.observations.values()
-                        if observed.actual_agent_id == task.agent_id and observed.result.output
+                        if observed.task.id in task.depends_on and observed.result.output
                         for item in observed.result.output.evidence
-                    ] if task.inspection_contract else None,
+                    ],
                 )
                 for task in decision.tasks
             )))
@@ -546,8 +545,6 @@ class HostOrchestrationEngine:
             f"User goal:\n{request}\n\n"
             f"Your assigned task:\n{task.objective}\n\n"
             f"Task input:\n{task.input}\n\n"
-            f"Inspection contract: {task.inspection_contract or 'none'}\n"
-            f"{contract_guidance(task.inspection_contract)}\n\n"
             "Prior structured observations:\n"
             f"{json.dumps(observations, ensure_ascii=False)}\n\n"
             "Completion criteria:\n- "

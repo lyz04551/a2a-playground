@@ -49,12 +49,12 @@ export function getWorkspaceGaps(tasks = []) {
     taskId: task.id,
     objective: task.objective || task.label || task.id,
     reason: task.evaluationReason || '',
-    missingTargets: task.inspectionContract ? [] : [...new Set((task.coverage?.expected_targets || []).filter(target => !(task.coverage?.inspected_targets || []).includes(target)))].slice(0, 20),
+    missingTargets: [...new Set((task.coverage?.expected_targets || []).filter(target => !(task.coverage?.inspected_targets || []).includes(target)))],
   }))
 }
 
 export function getCoveragePresentation(tasks = []) {
-  const audited = tasks.filter(task => task.coverageRequired === true && !task.inspectionContract && task.coverage)
+  const audited = tasks.filter(task => task.coverageRequired === true && task.coverage)
   if (!audited.length) return null
   const expected = new Set(audited.flatMap(task => task.coverage.expected_targets || []))
   const inspected = new Set(audited.flatMap(task => task.coverage.inspected_targets || []))

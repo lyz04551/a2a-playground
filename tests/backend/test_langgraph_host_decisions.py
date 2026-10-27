@@ -106,16 +106,18 @@ async def test_required_coverage_reports_runtime_evidence_gap_without_model_call
 
 
 @pytest.mark.anyio
-async def test_pending_pod_contract_rejects_missing_raw_status_evidence():
-    port = LangGraphDecisionPort(model=FakeModel())
-    task = PlannedTask(id="pod", agent_id="ops", objective="Diagnose Pending Pod", completion_criteria=["status and events reviewed"], inspection_contract="pod_pending")
+async def test_model_evaluates_task_specific_criteria_from_tool_evidence():
+    model = FakeModel('{"outcome":"insufficient","reason":"status and events were not observed"}')
+    port = LangGraphDecisionPort(model=model)
+    task = PlannedTask(id="pod", agent_id="ops", objective="Diagnose Pending Pod", completion_criteria=["status and events reviewed"])
     result = DelegationResult(state="completed", output={
         "summary": "likely NFS issue",
         "evidence": [{"tool": "describe_k8s_pod", "resource_ids": ["Pod/default/pod-a"], "result_state": "returned", "call_id": "read-1"}],
     })
     evaluation = await port.evaluate(task, result)
     assert evaluation.outcome == "insufficient"
-    assert "pod_status_and_scheduling_gates" in evaluation.reason
+    assert "status and events" in evaluation.reason
+    assert "describe_k8s_pod" in str(model.calls[0])
 
 
 def test_host_final_response_cannot_claim_full_coverage_after_insufficient_evaluation():

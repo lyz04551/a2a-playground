@@ -28,31 +28,6 @@ _PRIMITIVE_TYPES: dict[str, type] = {
 }
 
 
-def _compact_event_result(result: str) -> str:
-    if len(result) <= 30000:
-        return result
-    try:
-        events = json.loads(result)
-    except (TypeError, ValueError):
-        return result
-    if not isinstance(events, list):
-        return result
-    warnings = [event for event in events if isinstance(event, dict) and event.get("type") == "Warning"]
-    if not warnings:
-        return result[:30000] + "\n[事件结果过长，已截断；请缩小查询范围]"
-    selected = sorted(
-        warnings,
-        key=lambda event: event.get("eventTime") or event.get("deprecatedLastTimestamp") or "",
-        reverse=True,
-    )[:30]
-    return json.dumps({
-        "total_events": len(events),
-        "warning_events": len(warnings),
-        "recent_warnings": selected,
-        "note": "结果过长，仅保留最近 30 条 Warning 事件。",
-    }, ensure_ascii=False)
-
-
 def _schema_type(schema: dict[str, Any]) -> type:
     schema_type = schema.get("type", "string")
     if schema_type == "string":
@@ -172,8 +147,6 @@ class MCPToolAdapter:
                 )
             self._calls_by_context[context_id] = used + 1
             result = await self.client.call_tool(tool_name, arguments)
-            if tool_name == "list_k8s_event":
-                result = _compact_event_result(result)
             call_count = used + 1
             if call_count <= self.soft_call_threshold:
                 return result
@@ -181,7 +154,7 @@ class MCPToolAdapter:
                 f"运行时提示：本任务已调用 {call_count} 次工具。"
                 "请先判断现有证据是否已经足够回答用户；若足够，立即停止调用并"
                 "给出结论。若仍需继续调用，请只获取当前目标缺失的关键证据，"
-                "不要扩大 namespace、资源类型或对象范围。仍可继续调用工具。"
+                "不要扩大用户指定的对象范围。仍可继续调用工具。"
             )
             return f"{result}\n\n{guidance}"
 

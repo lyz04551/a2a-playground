@@ -169,6 +169,8 @@ def _display_content(content: str) -> str:
 
 
 def _empty_structured_result(content: str) -> bool:
+    if not content.strip():
+        return True
     try:
         result = json.loads(content)
     except (TypeError, ValueError):
@@ -179,6 +181,19 @@ def _empty_structured_result(content: str) -> bool:
         and isinstance(result.get("summary"), str)
         and not result["summary"].strip()
     )
+
+
+def _truncated_report(message: AIMessage | None, content: str, token_limit: int | None = None) -> bool:
+    if not content.strip():
+        return False
+    metadata = getattr(message, "response_metadata", {}) or {}
+    finish_reason = str(metadata.get("finish_reason") or metadata.get("stop_reason") or "").lower()
+    if finish_reason in {"length", "max_tokens", "max_output_tokens"}:
+        return True
+    usage = getattr(message, "usage_metadata", {}) or {}
+    token_usage = metadata.get("token_usage") or {}
+    output_tokens = usage.get("output_tokens") or token_usage.get("completion_tokens") or 0
+    return bool(token_limit and output_tokens >= token_limit)
 
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
@@ -230,11 +245,8 @@ class RuntimeMCPAgent:
             "除非上次调用失败或数据明确失效，不要用相同参数重复调用同一工具；"
             "每批工具结果返回后，必须先判断现有证据是否已经足以回答用户；"
             "证据足够时立即停止调用并输出结论。继续调用前必须能指出尚缺的关键"
-            "证据，且不得擅自扩大 cluster、namespace、资源类型或对象范围。"
-            "只读诊断默认最多执行两批工具调用：第一批获取概览，第二批只补充"
-            "影响最高优先级结论的证据；不得为了穷尽所有检查项继续调用。最终"
-            "报告优先控制在 1500 个中文字符以内，先回答最重要的发现，并将未"
-            "覆盖范围压缩为简短限制说明。"
+            "证据，且不得擅自扩大用户指定的对象范围。报告应完整呈现已有证据、"
+            "结论和未检查项；不得因固定字数目标省略必要内容。"
         )
         self.mcp_client = mcp_client or K8sMCPClient(
             config.mcp_url, transport=config.mcp_transport
@@ -279,10 +291,10 @@ class RuntimeMCPAgent:
         self.max_steps = int(os.getenv("AGENT_MAX_STEPS", "30"))
         self.max_tool_calls = int(os.getenv("AGENT_MAX_TOOL_CALLS", "40"))
         self.max_output_tokens = int(
-            os.getenv("AGENT_MAX_OUTPUT_TOKENS", "4096")
+            os.getenv("AGENT_MAX_OUTPUT_TOKENS", "8192")
         )
         self.summary_max_tokens = int(
-            os.getenv("AGENT_SUMMARY_MAX_TOKENS", "1024")
+            os.getenv("AGENT_SUMMARY_MAX_TOKENS", "4096")
         )
         self.enable_thinking = os.getenv(
             "AGENT_ENABLE_THINKING", "false"
@@ -652,7 +664,7 @@ class RuntimeMCPAgent:
                 if isinstance(cutoff, TimeoutError)
                 else "investigation step budget reached"
             )
-            evidence = self._current_run_evidence(current_tool_results)
+            evidence = self._current_run_evidence(current_tool_results, current_tool_calls)
             if emitted_content:
                 yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Switch to partial summary")
             summary_emitted = ""
@@ -675,6 +687,7 @@ class RuntimeMCPAgent:
                     current_tool_results,
                     "强制总结模型也达到时间限制",
                     current_tool_names,
+                    current_tool_calls,
                 )
             except Exception as exc:
                 if summary_emitted:
@@ -684,6 +697,7 @@ class RuntimeMCPAgent:
                     current_tool_results,
                     f"强制总结模型不可用：{exc}",
                     current_tool_names,
+                    current_tool_calls,
                 )
             content, evidence_items, coverage = _runtime_result(content, current_tool_calls, current_tool_results)
             reset, delta = _final_stream_delta(_display_content(content), summary_emitted)
@@ -717,14 +731,15 @@ class RuntimeMCPAgent:
         state = await self._graph.aget_state(graph_config)
         messages = state.values.get("messages", [])
         content = ""
-        if messages and isinstance(messages[-1], AIMessage):
-            content = str(messages[-1].content or "")
+        final_message = messages[-1] if messages and isinstance(messages[-1], AIMessage) else None
+        if final_message is not None:
+            content = str(final_message.content or "")
         if (
             self._tool_adapter is not None
             and self._tool_adapter._calls_by_context.get(context_id, 0) >= self.max_tool_calls
         ):
             yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Discard incomplete draft")
-            evidence = self._current_run_evidence(current_tool_results)
+            evidence = self._current_run_evidence(current_tool_results, current_tool_calls)
             summary_emitted = ""
             try:
                 content = ""
@@ -742,7 +757,8 @@ class RuntimeMCPAgent:
                     yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Summary failed")
                 summary_emitted = ""
                 content = await self._deterministic_partial_summary(
-                    current_tool_results, "工具调用预算已用尽", current_tool_names
+                    current_tool_results, "工具调用预算已用尽", current_tool_names,
+                    current_tool_calls,
                 )
             content, evidence_items, coverage = _runtime_result(content, current_tool_calls, current_tool_results)
             reset, delta = _final_stream_delta(_display_content(content), summary_emitted)
@@ -768,6 +784,7 @@ class RuntimeMCPAgent:
                 current_tool_results,
                 "调查步骤预算已用尽",
                 current_tool_names,
+                current_tool_calls,
             )
             yield RuntimeEvent.completed(
                 content=content,
@@ -821,26 +838,48 @@ class RuntimeMCPAgent:
                 },
             )
             return
-        if _empty_structured_result(content):
-            summary = await self._deterministic_partial_summary(
-                current_tool_results,
-                "Agent 返回的结构化结果没有结论",
-                current_tool_names,
-                headline="本次检查未能形成完整结论",
-            )
-            yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Discard empty structured result")
-            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=summary)
+        if _empty_structured_result(content) or _truncated_report(final_message, content, self.max_output_tokens):
+            incomplete_reason = "Agent 最终文本为空" if _empty_structured_result(content) else "Agent 报告生成中断"
+            if emitted_content:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Replace incomplete draft")
+            evidence = self._current_run_evidence(current_tool_results, current_tool_calls)
+            summary_emitted = ""
+            try:
+                summary = ""
+                async for chunk in self._force_summary_chunks(query, evidence, reason=incomplete_reason):
+                    summary += chunk
+                    visible = _stream_visible_content(summary)
+                    if visible.startswith(summary_emitted):
+                        delta = visible[len(summary_emitted):]
+                        if delta:
+                            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+                            summary_emitted = visible
+                summary = summary.strip()
+            except Exception:
+                if summary_emitted:
+                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Evidence summary failed")
+                summary_emitted = ""
+                summary = await self._deterministic_partial_summary(
+                    current_tool_results, incomplete_reason, current_tool_names,
+                    current_tool_calls, headline="本轮检查尚未形成完整结论",
+                )
+            summary, evidence_items, coverage = _runtime_result(summary, current_tool_calls, current_tool_results)
+            reset, delta = _final_stream_delta(_display_content(summary), summary_emitted)
+            if reset:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize evidence summary")
+            if delta:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
             yield RuntimeEvent.completed(
                 content=summary,
                 artifact_name="specialist_result",
                 data={
                     "status": "partial",
                     "summary": summary,
-                    "evidence": _tool_evidence(current_tool_calls, current_tool_results),
+                    "evidence": evidence_items,
                     "assessment": _assessment_data(current_tool_calls, current_tool_results),
-                    **({"coverage": build_evidence_ledger(current_tool_calls, current_tool_results)[1]} if current_tool_results else {}),
-                    "continuation": {"allowed": True, "reason": "empty structured result"},
-                    "limitations": ["Agent 未生成有效结论，未完成的检查不作结论。"],
+                    **({"coverage": coverage} if coverage else {}),
+                    "continuation": {"allowed": True, "reason": incomplete_reason},
+                    "limitations": ["本轮结论仅基于已完成的工具检查；未验证项需要续查。"],
                 },
             )
             return
@@ -877,13 +916,14 @@ class RuntimeMCPAgent:
             raise RuntimeError("Agent model returned an empty forced summary")
         return content
 
-    async def _force_summary_chunks(self, query: str, evidence: str) -> AsyncIterable[str]:
+    async def _force_summary_chunks(self, query: str, evidence: str, *, reason: str = "调查阶段的时间预算已经用完") -> AsyncIterable[str]:
         if self._model is None:
             raise RuntimeError("Agent model is unavailable for forced summary")
         prompt = (
-            "调查阶段的时间预算已经用完。禁止调用任何工具。请仅根据下面已经取得的"
-            "证据回答用户，优先说明已确认的问题、证据和建议，并明确指出哪些检查尚未"
-            "完成。不要声称执行了证据中没有出现的检查。区分已观察事实、推断和未知项。"
+            f"{reason}。禁止调用任何工具。请仅根据下面已经取得的"
+            "证据形成本轮正式的部分检查报告：先概括已枚举的资源及数量，再说明已验证"
+            "的状态、尚未逐项检查的内容和下一轮需要补查的对象。不要声称执行了证据中"
+            "没有出现的检查。区分已观察事实、推断和未知项。"
             "证据关联由运行时自动完成，不要生成 coverage JSON 或调用 ID。\n\n"
             f"用户问题：{query}\n\n已取得证据：\n{evidence}"
         )
@@ -908,87 +948,66 @@ class RuntimeMCPAgent:
         results: dict[str, str],
         reason: str,
         tool_names: dict[str, str] | None = None,
+        tool_calls: dict[str, dict] | None = None,
         *,
         headline: str = "本次检查已达到执行预算",
     ) -> str:
         tool_names = tool_names or {}
-        findings: list[str] = []
+        tool_calls = tool_calls or {}
         evidence_notes: list[str] = []
         for call_id, content in results.items():
-            tool = tool_names.get(call_id, "").lower()
+            call = tool_calls.get(call_id) or {}
+            tool = str(tool_names.get(call_id) or call.get("tool") or "").lower()
+            arguments = call.get("arguments") or {}
             try:
                 payload = json.loads(content)
             except (TypeError, json.JSONDecodeError):
                 payload = None
-            rows = payload if isinstance(payload, list) else []
-            if "namespace" in tool and rows:
-                names = [
-                    str(row.get("name"))
-                    for row in rows
-                    if isinstance(row, dict) and row.get("name")
-                ]
-                evidence_notes.append(
-                    f"已读取 {len(names)} 个命名空间：{', '.join(names[:12])}"
-                )
-            elif "rolebinding" in tool and rows:
-                names = [
-                    str(row.get("name"))
-                    for row in rows
-                    if isinstance(row, dict) and row.get("name")
-                ]
-                elevated = [
-                    name
-                    for name in names
-                    if any(
-                        marker in name.lower()
-                        for marker in (
-                            "cluster-admin",
-                            "full-access",
-                            "admin",
-                            "writer",
-                        )
-                    )
-                ]
-                if elevated:
-                    findings.append(
-                        "发现名称提示高权限的 RBAC 绑定："
-                        f"{', '.join(elevated[:8])}；仅凭名称不能确认实际授权范围，"
-                        "需继续核对 roleRef 与 subjects。"
-                    )
-                evidence_notes.append(f"已读取 {len(names)} 条 RBAC 绑定记录")
-            elif rows and any(isinstance(row, dict) and row.get("version") for row in rows):
-                row = next(row for row in rows if isinstance(row, dict) and row.get("version"))
-                evidence_notes.append(
-                    f"已连接集群 {row.get('name', 'default')}（Kubernetes {row['version']}）"
-                )
-
-        if not findings:
-            findings.append("现有证据不足以完整满足任务要求，仅报告已完成的检查。")
+            target = json.dumps(arguments, ensure_ascii=False, sort_keys=True) if arguments else "{}"
+            if isinstance(payload, list):
+                detail = f"返回 {len(payload)} 项"
+                names = [str(item["name"]) for item in payload if isinstance(item, dict) and item.get("name")]
+                if names:
+                    detail += f"：{', '.join(names)}"
+            elif isinstance(payload, dict):
+                detail = "返回对象"
+            elif content.strip():
+                detail = "返回文本"
+            else:
+                detail = "返回空内容"
+            evidence_notes.append(f"{tool or '工具'} {target}：{detail}（调用 {call_id}）")
         if not evidence_notes:
-            for call_id, content in list(results.items())[:4]:
-                tool = tool_names.get(call_id, "unknown")
-                evidence_notes.append(
-                    f"{tool} 已返回：{content[:500]}"
-                )
-        if not evidence_notes:
-            evidence_notes.append("没有可用的已完成工具结果。")
+            evidence_notes.append("没有已完成的工具结果。")
+        unknowns: list[str] = []
+        if tool_calls:
+            _, coverage = build_evidence_ledger(tool_calls, results)
+            missing = [target for target in coverage["expected_targets"] if target not in coverage["inspected_targets"]]
+            if missing:
+                unknowns.append(f"已枚举但尚未逐项读取的资源：{', '.join(missing)}")
+        if not unknowns:
+            unknowns.append("未完成的任务要求仍需续查；本报告不推断未读取对象的状态或根因。")
         return (
-            f"{self.config.name} {headline}，以下结论基于已完成的只读检查。\n\n"
-            "初步结论：\n- " + "\n- ".join(findings) + "\n\n"
-            "已核实证据：\n- " + "\n- ".join(evidence_notes) + "\n\n"
-            "建议：根据上述已取得证据继续完成尚未覆盖的检查。\n\n"
-            f"限制：{reason}；工作负载配置、网络策略、Secret 暴露等未完成项未作结论，未执行任何写操作。"
+            f"## {self.config.name} 本轮部分检查报告\n\n"
+            f"{headline}。工具检查已停止，以下只陈述已返回的证据。\n\n"
+            "### 已返回的工具结果\n- " + "\n- ".join(evidence_notes) + "\n\n"
+            "### 未完成与未知\n- " + "\n- ".join(unknowns) + "\n\n"
+            f"限制：{reason}。建议仅补查上述缺口；未执行任何写操作。"
         )
 
     @staticmethod
-    def _current_run_evidence(results: dict[str, str]) -> str:
+    def _current_run_evidence(results: dict[str, str], calls: dict[str, dict] | None = None) -> str:
         chunks: list[str] = []
+        calls = calls or {}
         remaining = 12_000
         per_call = min(2_000, max(250, remaining // max(1, len(results)) - 100))
         for call_id, content in results.items():
             excerpt = content[: min(per_call, remaining)] if content else "[工具返回空输出]"
+            call = calls.get(call_id) or {}
+            tool = str(call.get("tool") or "")
+            arguments = call.get("arguments") or {}
+            target = f"，工具 {tool}，参数 {_evidence_excerpt(json.dumps(arguments, ensure_ascii=False), limit=300)}" if tool else ""
             chunks.append(
-                f"- 工具调用 {call_id or 'unknown'} 的结果：{excerpt}"
+                f"- 工具调用 {call_id or 'unknown'}{target} 的结果：{excerpt}"
             )
             remaining -= len(excerpt)
             if remaining <= 0:

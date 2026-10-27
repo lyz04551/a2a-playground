@@ -99,6 +99,22 @@ async def test_allowed_tool_calls_real_client_boundary():
 
 
 @pytest.mark.anyio
+async def test_tool_adapter_preserves_full_tool_result_without_event_rules():
+    class LargeResultClient(FakeMCPClient):
+        async def call_tool(self, name, arguments):
+            self.calls.append((name, arguments))
+            return '[{"type":"Normal","message":"' + ('x' * 31_000) + '"}]'
+
+    client = LargeResultClient()
+    adapter = MCPToolAdapter(client, ToolPolicy(ToolPolicyConfig(allow=["list_k8s_event"])), agent_id="ops")
+    tool = adapter.build_tools([{"name": "list_k8s_event", "input_schema": {"type": "object", "properties": {}}}])[0]
+    result = await tool.ainvoke({})
+
+    assert len(result) > 30_000
+    assert result.endswith('"}]')
+
+
+@pytest.mark.anyio
 async def test_approval_required_tool_never_calls_mcp():
     client = FakeMCPClient()
     adapter = MCPToolAdapter(

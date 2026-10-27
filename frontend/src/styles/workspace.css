@@ -25,6 +25,7 @@
 .workspace-message { min-width: 0; max-width: 100%; padding: var(--space-16); border: 1px solid var(--color-border); border-radius: var(--radius-12); color: var(--color-text); background: var(--color-surface); }
 .workspace-message--user { border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border)); background: var(--color-primary-subtle); }
 .workspace-message header { display: flex; justify-content: space-between; align-items: center; gap: var(--space-8); margin-bottom: var(--space-8); }.workspace-message header > span { display: flex; align-items: center; gap: 4px; opacity: .35; transition: opacity var(--motion-fast); }.workspace-message:hover header > span, .workspace-message:focus-within header > span { opacity: 1; }.workspace-message small { color: var(--color-text-muted); }.workspace-message__body { min-width: 0; max-width: 100%; white-space: pre-wrap; line-height: 1.6; }
+.workspace-message--progress { border-style: dashed; background: var(--color-surface-subtle); }.workspace-message__draft > summary { cursor: pointer; color: var(--color-text-muted); font-size: 12px; font-weight: 650; }.workspace-message__draft > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }.workspace-message__draft .workspace-message__body { max-height: 55vh; margin-top: 12px; padding-top: 12px; overflow: auto; border-top: 1px solid var(--color-border); }
 .workspace-message--agent .workspace-message__body {
   max-height: min(52dvh, 520px);
   padding-right: var(--space-8);

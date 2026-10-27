@@ -5,7 +5,7 @@ import { approvalStatusAfterDecision, buildContinuationPrompt, buildRunReconnect
 test('coverage card only appears for explicit itemized audits', () => {
   const incidental = { coverage: { expected_targets: Array.from({ length: 38 }, (_, index) => `Pod/default/${index}`), inspected_targets: [], enumeration_complete: true } }
   assert.equal(getCoveragePresentation([incidental]), null)
-  assert.equal(getCoveragePresentation([{ ...incidental, coverageRequired: true, inspectionContract: 'pod_pending' }]), null)
+  assert.equal(getCoveragePresentation([{ ...incidental, coverageRequired: true }])?.total, 38)
   assert.deepEqual(getCoveragePresentation([{ coverageRequired: true, coverage: { expected_targets: ['Pod/default/a', 'Pod/default/b'], inspected_targets: ['Pod/default/a'], enumeration_complete: true }, evaluation: 'insufficient' }]), {
     checked: 1, total: 2, missing: ['Pod/default/b'], enumerationComplete: true, complete: false,
   })
