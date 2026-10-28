@@ -160,6 +160,28 @@ async def test_all_namespace_audit_requires_a_list_call_for_each_discovered_name
 
 
 @pytest.mark.anyio
+async def test_namespace_scans_follow_explicit_task_scope_and_structured_evidence():
+    model = FakeModel(json.dumps({"outcome": "sufficient", "reason": "target inspected"}))
+    task = PlannedTask(
+        id="audit", agent_id="ops", objective="检查指定命名空间",
+        completion_criteria=["逐一检查"], coverage_required=True,
+        coverage_kinds=["Pod"], coverage_namespaces=["alpha"],
+    )
+    assert task.coverage_namespaces == ["alpha"]
+    output = {
+        "summary": "alpha 已检查",
+        "coverage": {"scope": "observed MCP resources", "expected_targets": ["Namespace/alpha", "Namespace/beta", "Pod/alpha/a"], "inspected_targets": ["Pod/alpha/a"], "enumeration_complete": True, "evidence_call_ids": ["n", "p", "d"]},
+        "evidence": [
+            {"call_id": "n", "tool": "list_k8s_namespace", "resource_ids": ["Namespace/alpha", "Namespace/beta"], "result_state": "returned", "arguments_excerpt": "{}"},
+            {"call_id": "p", "tool": "list_k8s_pod", "resource_ids": ["Pod/alpha/a"], "result_state": "returned", "scope": {"kind": "Pod", "namespace": "alpha"}, "arguments_excerpt": "[truncated]"},
+            {"call_id": "d", "tool": "describe_k8s_pod", "resource_ids": ["Pod/alpha/a"], "result_state": "returned", "arguments_excerpt": "{}"},
+        ],
+    }
+    evaluation = await LangGraphDecisionPort(model).evaluate(task, DelegationResult(state="completed", output=output))
+    assert evaluation.outcome == "sufficient"
+
+
+@pytest.mark.anyio
 async def test_next_host_decision_sees_only_requested_audit_targets():
     model = FakeModel(json.dumps({"action": "stop", "reason": "budget reached", "response": "部分完成"}))
     task = PlannedTask(

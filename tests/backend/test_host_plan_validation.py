@@ -76,6 +76,19 @@ def test_validate_plan_accepts_dependency_graph():
     assert validate_plan(plan, AGENTS) is plan
 
 
+def test_continuation_cannot_narrow_coverage_scope():
+    first = task("first").model_copy(update={"coverage_required": True, "coverage_kinds": ["Pod"]})
+    state = HostRunState(goal="Inspect all Pods", observations={
+        "first": ObservedTask(task=first, result=DelegationResult(state="completed", text="partial"), evaluation=Evaluation(outcome="insufficient", reason="missing namespaces"), actual_agent_id="k8s-ops"),
+    })
+    narrowed = task("followup").model_copy(update={
+        "continues_task_id": "first", "coverage_required": True,
+        "coverage_kinds": ["Pod"], "coverage_namespaces": ["alpha"],
+    })
+    with pytest.raises(PlanValidationError, match="coverage scope"):
+        validate_decision(HostDecision(action="delegate", reason="continue", tasks=[narrowed]), AGENTS, state)
+
+
 def test_validate_plan_checks_declared_tools_against_live_agent_catalog():
     agents = {**AGENTS, "k8s-ops": {
         **AGENTS["k8s-ops"], "tool_catalog_state": "ok",

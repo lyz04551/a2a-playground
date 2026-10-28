@@ -15,6 +15,7 @@ def test_runtime_binds_real_call_ids_and_resource_targets():
     evidence, coverage = build_evidence_ledger(calls, results)
 
     assert [item["call_id"] for item in evidence] == ["list-1", "read-1"]
+    assert evidence[0]["scope"] == {"kind": "Pod", "namespace": "default"}
     assert evidence[1]["resource_ids"] == ["Pod/default/pod-a"]
     assert coverage["expected_targets"] == ["Pod/default/pod-a", "Pod/default/pod-b"]
     assert coverage["inspected_targets"] == ["Pod/default/pod-a"]

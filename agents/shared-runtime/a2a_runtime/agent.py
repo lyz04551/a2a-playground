@@ -77,6 +77,7 @@ def _tool_evidence(calls: dict[str, dict], results: dict[str, str]) -> list[dict
             "call_id": item["call_id"],
             "tool": item["tool"],
             "resource_ids": item["resource_ids"],
+            "scope": item["scope"],
             "arguments_excerpt": _evidence_excerpt(json.dumps(item["arguments"], ensure_ascii=False)),
             "called_at": item["called_at"],
             "result_state": item["result_state"],

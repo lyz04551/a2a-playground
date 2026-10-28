@@ -27,6 +27,8 @@ def task_fingerprint(task: PlannedTask) -> str:
         "required_skill": (task.required_skill or "").strip().lower(),
         "required_tags": sorted(tag.lower() for tag in task.required_tags),
         "required_tools": sorted(task.required_tools),
+        "coverage_kinds": sorted(task.coverage_kinds),
+        "coverage_namespaces": sorted(task.coverage_namespaces),
     }
     payload = json.dumps(
         normalized, ensure_ascii=True, sort_keys=True, separators=(",", ":")
@@ -120,6 +122,23 @@ def validate_decision(
             raise PlanValidationError(
                 f"task '{task.id}' may continue only an insufficient task"
             )
+        if task.continues_task_id:
+            prior = state.observations[task.continues_task_id].task
+            if prior.coverage_required and (
+                not task.coverage_required
+                or not set(prior.coverage_kinds) <= set(task.coverage_kinds)
+                or (
+                    not prior.coverage_namespaces and bool(task.coverage_namespaces)
+                )
+                or (
+                    bool(prior.coverage_namespaces)
+                    and bool(task.coverage_namespaces)
+                    and not set(prior.coverage_namespaces) <= set(task.coverage_namespaces)
+                )
+            ):
+                raise PlanValidationError(
+                    f"task '{task.id}' cannot narrow the prior coverage scope"
+                )
         if current_ids.intersection(task.depends_on):
             raise PlanValidationError(
                 f"task '{task.id}' depends on another task in the same parallel round; "

@@ -98,19 +98,23 @@ def _missing_namespace_scans(task: PlannedTask, evidence: list[dict]) -> list[st
             parts = str(target).split("/")
             if len(parts) == 2 and parts[0] == "Namespace":
                 discovered.add(parts[1])
-        try:
-            arguments = json.loads(item.get("arguments_excerpt") or "{}")
-        except (TypeError, ValueError):
-            arguments = {}
-        if not isinstance(arguments, dict):
-            arguments = {}
-        kind = str(arguments.get("kind") or "")
-        if not kind:
-            kind = tool.rsplit("_", 1)[-1]
-            if kind.endswith("s"):
-                kind = kind[:-1]
-            kind = kind.capitalize()
-        namespace = str(arguments.get("namespace") or "")
+        scope = item.get("scope")
+        if not isinstance(scope, dict):
+            try:
+                arguments = json.loads(item.get("arguments_excerpt") or "{}")
+            except (TypeError, ValueError):
+                arguments = {}
+            if not isinstance(arguments, dict):
+                arguments = {}
+            kind = str(arguments.get("kind") or "")
+            if not kind:
+                kind = tool.rsplit("_", 1)[-1]
+                if kind.endswith("s"):
+                    kind = kind[:-1]
+                kind = kind.capitalize()
+            scope = {"kind": kind, "namespace": arguments.get("namespace") or ""}
+        kind = str(scope.get("kind") or "")
+        namespace = str(scope.get("namespace") or "")
         if namespace:
             scanned.add((kind, namespace))
         else:
@@ -119,13 +123,19 @@ def _missing_namespace_scans(task: PlannedTask, evidence: list[dict]) -> list[st
     for kind in task.coverage_kinds:
         if kind in global_kinds:
             continue
+        required_namespaces = task.coverage_namespaces or sorted(discovered)
         if not any(scanned_kind == kind for scanned_kind, _ in scanned):
             if evidence:
-                missing.append(f"{kind}/*")
+                missing.extend(
+                    f"{kind}/{namespace}" for namespace in (required_namespaces or ["*"])
+                )
+            continue
+        if not required_namespaces:
+            missing.append(f"{kind}/*")
             continue
         missing.extend(
             f"{kind}/{namespace}"
-            for namespace in discovered
+            for namespace in required_namespaces
             if (kind, namespace) not in scanned
         )
     return sorted(missing)
@@ -205,6 +215,8 @@ PlannedTask; the specialist must enumerate and account for the target set.
 Set coverage_kinds to the resource kinds the user asked to inspect (for
 example ["Deployment"]); discovery-only Cluster and Namespace metadata must
 not count as audit targets unless the user requested those objects.
+Set coverage_namespaces to explicitly requested namespaces for a scoped audit;
+leave it empty for a cluster-wide audit. A continuation preserves that scope.
 Never call such a task sufficient without complete coverage of the requested
 resource kinds and evidence for every other completion criterion.
 The specialist assessment.facts are runtime-recorded tool returns; interpret
@@ -332,6 +344,8 @@ risk set to write, then a verification task depending on the mutation.
 A resource-conflict check does not replace the Security Agent precheck.
 Derive concrete completion criteria and required tools for each task from the
 request and the selected Agent's live catalog.
+For a scoped audit, set coverage_namespaces to the requested namespace names;
+leave it empty for a cluster-wide audit.
 Maximum six tasks and two attempts each.""",
                 payload,
             )

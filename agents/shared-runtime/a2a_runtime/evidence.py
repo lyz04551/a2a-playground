@@ -109,6 +109,7 @@ def build_evidence_ledger(calls: dict[str, dict], results: dict[str, str]) -> tu
             "arguments": arguments,
             "called_at": call.get("called_at", ""),
             "result_state": state,
+            "scope": {"kind": kind, "namespace": namespace} if tool.startswith("list_") else None,
             "result": result,
         })
     coverage = {

@@ -15,6 +15,7 @@ class PlannedTask(BaseModel):
     completion_criteria: list[str] = Field(min_length=1)
     coverage_required: bool = False
     coverage_kinds: list[str] = Field(default_factory=list)
+    coverage_namespaces: list[str] = Field(default_factory=list)
     risk: Literal["read", "write"] = "read"
     required_skill: str | None = None
     required_tags: list[str] = Field(default_factory=list)
