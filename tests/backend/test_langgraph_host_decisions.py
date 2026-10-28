@@ -132,6 +132,34 @@ async def test_deployment_audit_coverage_excludes_cluster_and_namespace_metadata
 
 
 @pytest.mark.anyio
+async def test_all_namespace_audit_requires_a_list_call_for_each_discovered_namespace():
+    model = FakeModel(json.dumps({"outcome": "sufficient", "reason": "all inspected"}))
+    task = PlannedTask(
+        id="audit", agent_id="ops", objective="检查全部 Pod",
+        completion_criteria=["逐一检查"], coverage_required=True,
+        coverage_kinds=["Pod"],
+    )
+    evidence = [
+        {"call_id": "namespaces", "tool": "list_k8s_namespace", "resource_ids": ["Namespace/alpha", "Namespace/beta"], "result_state": "returned", "arguments_excerpt": "{}"},
+        {"call_id": "pods-alpha", "tool": "list_k8s_pod", "resource_ids": ["Pod/alpha/a"], "result_state": "returned", "arguments_excerpt": '{"namespace":"alpha"}'},
+        {"call_id": "describe-a", "tool": "describe_k8s_pod", "resource_ids": ["Pod/alpha/a"], "result_state": "returned", "arguments_excerpt": '{"namespace":"alpha","name":"a"}'},
+    ]
+    output = {
+        "summary": "alpha 已检查，beta 未查询",
+        "coverage": {"scope": "observed MCP resources", "expected_targets": ["Namespace/alpha", "Namespace/beta", "Pod/alpha/a"], "inspected_targets": ["Pod/alpha/a"], "enumeration_complete": True, "evidence_call_ids": [item["call_id"] for item in evidence]},
+        "evidence": evidence,
+    }
+    missing = await LangGraphDecisionPort(model).evaluate(task, DelegationResult(state="completed", output=output))
+    assert missing.outcome == "insufficient"
+    assert "beta" in missing.reason
+    assert model.calls == []
+
+    output["evidence"] = [*evidence, {"call_id": "pods-beta", "tool": "list_k8s_pod", "resource_ids": [], "result_state": "returned", "arguments_excerpt": '{"namespace":"beta"}'}]
+    complete = await LangGraphDecisionPort(model).evaluate(task, DelegationResult(state="completed", output=output))
+    assert complete.outcome == "sufficient"
+
+
+@pytest.mark.anyio
 async def test_next_host_decision_sees_only_requested_audit_targets():
     model = FakeModel(json.dumps({"action": "stop", "reason": "budget reached", "response": "部分完成"}))
     task = PlannedTask(

@@ -83,6 +83,54 @@ def _scoped_coverage(task: PlannedTask, coverage) -> dict:
     return data
 
 
+def _missing_namespace_scans(task: PlannedTask, evidence: list[dict]) -> list[str]:
+    """Compare discovered namespaces with actual list scopes for requested kinds."""
+    discovered: set[str] = set()
+    scanned: set[tuple[str, str]] = set()
+    global_kinds: set[str] = set()
+    for item in evidence:
+        if not isinstance(item, dict) or item.get("result_state") not in {"returned", "empty"}:
+            continue
+        tool = str(item.get("tool") or "")
+        if not tool.startswith("list_"):
+            continue
+        for target in item.get("resource_ids") or []:
+            parts = str(target).split("/")
+            if len(parts) == 2 and parts[0] == "Namespace":
+                discovered.add(parts[1])
+        try:
+            arguments = json.loads(item.get("arguments_excerpt") or "{}")
+        except (TypeError, ValueError):
+            arguments = {}
+        if not isinstance(arguments, dict):
+            arguments = {}
+        kind = str(arguments.get("kind") or "")
+        if not kind:
+            kind = tool.rsplit("_", 1)[-1]
+            if kind.endswith("s"):
+                kind = kind[:-1]
+            kind = kind.capitalize()
+        namespace = str(arguments.get("namespace") or "")
+        if namespace:
+            scanned.add((kind, namespace))
+        else:
+            global_kinds.add(kind)
+    missing: list[str] = []
+    for kind in task.coverage_kinds:
+        if kind in global_kinds:
+            continue
+        if not any(scanned_kind == kind for scanned_kind, _ in scanned):
+            if evidence:
+                missing.append(f"{kind}/*")
+            continue
+        missing.extend(
+            f"{kind}/{namespace}"
+            for namespace in discovered
+            if (kind, namespace) not in scanned
+        )
+    return sorted(missing)
+
+
 class LangGraphDecisionPort:
     def __init__(self, model=None, *, model_factory=None, stream_model_factory=None):
         self._model = model
@@ -328,6 +376,13 @@ Maximum six tasks and two attempts each.""",
             return Evaluation(outcome="insufficient", reason="runtime tool evidence is unavailable")
         if task.coverage_required and result.output is not None and result.output.coverage is not None:
             coverage = result.output.coverage
+            missing_scans = _missing_namespace_scans(task, result.output.evidence)
+            if missing_scans:
+                return Evaluation(
+                    outcome="insufficient",
+                    reason="namespace resource enumeration is incomplete; unscanned scopes: "
+                    + ", ".join(missing_scans[:20]),
+                )
             scoped = _scoped_coverage(task, coverage)
             expected = set(scoped["expected_targets"])
             inspected = set(scoped["inspected_targets"])

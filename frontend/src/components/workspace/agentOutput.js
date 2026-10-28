@@ -15,16 +15,22 @@ export function hideCoverageManifest(value) {
   let visible = value.replace(/```(?:coverage|json)?[ \t]*\n([\s\S]*?)\n```/gi, (block, body) => {
     try { return isCoverage(JSON.parse(body)) ? '' : block } catch { return block }
   })
-  const bareStart = visible.lastIndexOf('\n{')
-  if (bareStart >= 0) {
-    try {
-      if (isCoverage(JSON.parse(visible.slice(bareStart + 1)))) visible = visible.slice(0, bareStart)
-    } catch {
-      if (!visible.slice(bareStart).trimEnd().endsWith('}')) visible = visible.slice(0, bareStart)
+  const fences = [...visible.matchAll(/^```(?:coverage|json)?[^\n]*$/gim)]
+  if (fences.length % 2) {
+    const unfinished = visible.slice(fences.at(-1).index)
+    if (/^```(?:coverage|json)[^\n]*\n\s*\{\s*"scope"\s*:/i.test(unfinished)) {
+      visible = visible.slice(0, fences.at(-1).index)
     }
   }
-  const fences = [...visible.matchAll(/^```(?:coverage|json)?[^\n]*$/gim)]
-  if (fences.length % 2) visible = visible.slice(0, fences.at(-1).index)
+  const bareStart = visible.lastIndexOf('\n{')
+  if (bareStart >= 0) {
+    const candidate = visible.slice(bareStart + 1).trim()
+    try {
+      if (isCoverage(JSON.parse(candidate))) visible = visible.slice(0, bareStart)
+    } catch {
+      if (/^\{\s*"scope"\s*:/.test(candidate) && !candidate.endsWith('}')) visible = visible.slice(0, bareStart)
+    }
+  }
   return visible.trim()
 }
 

@@ -34,3 +34,9 @@ test('hides coverage JSON embedded in a report', () => {
   assert.equal(formatAgentOutput('检查完成。\n```json\n{"scope":'), '检查完成。')
   assert.equal(formatAgentOutput('检查完成。\n{"scope":'), '检查完成。')
 })
+
+test('keeps JSON log blocks and all report text after them', () => {
+  const report = '# Pod 检查\n\n**日志片段**：\n```json\n{"level":"info","msg":"healthy"}\n```\n\n**结论**：Pod 正常。'
+  assert.equal(formatAgentOutput(report), report)
+  assert.equal(formatAgentOutput('日志片段：\n```json\n{"level":"info"'), '日志片段：\n```json\n{"level":"info"')
+})
