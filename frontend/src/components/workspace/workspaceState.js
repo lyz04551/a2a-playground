@@ -53,22 +53,6 @@ export function getWorkspaceGaps(tasks = []) {
   }))
 }
 
-export function getCoveragePresentation(tasks = []) {
-  const audited = tasks.filter(task => task.coverageRequired === true && task.coverage)
-  if (!audited.length) return null
-  const expected = new Set(audited.flatMap(task => task.coverage.expected_targets || []))
-  const inspected = new Set(audited.flatMap(task => task.coverage.inspected_targets || []))
-  const missing = [...expected].filter(target => !inspected.has(target))
-  const enumerationComplete = audited.every(task => task.coverage.enumeration_complete === true)
-  return {
-    checked: [...expected].filter(target => inspected.has(target)).length,
-    total: expected.size,
-    missing,
-    enumerationComplete,
-    complete: enumerationComplete && missing.length === 0 && audited.every(task => task.evaluation !== 'insufficient'),
-  }
-}
-
 export function buildContinuationPrompt(gaps = [], language = 'zh-CN') {
   const lines = gaps.flatMap(gap => gap.missingTargets.length ? gap.missingTargets.map(target => `- ${target}`) : [`- ${gap.objective}: ${gap.reason}`])
   return language === 'zh-CN'

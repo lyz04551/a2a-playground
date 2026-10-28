@@ -27,12 +27,17 @@ _TERMINAL_RUN_STATUSES = {"completed", "partial", "evidence_insufficient", "fail
 
 
 def _has_unresolved_insufficient_evaluation(events) -> bool:
-    latest_by_agent = {}
+    evaluations = {}
+    continued_tasks = set()
     for event in events:
         if event.type == RunEventType.TASK_EVALUATED:
-            agent_id = event.data.get("agent_id") or event.task_id
-            latest_by_agent[agent_id] = event.data.get("outcome")
-    return "insufficient" in latest_by_agent.values()
+            evaluations[event.task_id] = event.data.get("outcome")
+            if event.data.get("continues_task_id"):
+                continued_tasks.add(event.data["continues_task_id"])
+    return any(
+        outcome == "insufficient" and task_id not in continued_tasks
+        for task_id, outcome in evaluations.items()
+    )
 _CONVERSATION_CONTEXT_MESSAGES = 12
 _CONVERSATION_CONTEXT_CHARS = 12000
 

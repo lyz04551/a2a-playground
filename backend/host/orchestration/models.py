@@ -11,8 +11,10 @@ class PlannedTask(BaseModel):
     objective: str = Field(min_length=1)
     input: str = ""
     depends_on: list[str] = Field(default_factory=list)
+    continues_task_id: str | None = None
     completion_criteria: list[str] = Field(min_length=1)
     coverage_required: bool = False
+    coverage_kinds: list[str] = Field(default_factory=list)
     risk: Literal["read", "write"] = "read"
     required_skill: str | None = None
     required_tags: list[str] = Field(default_factory=list)
@@ -199,4 +201,11 @@ class DecisionPort(Protocol):
         request: str,
         plan: HostPlan,
         results: dict[str, DelegationResult],
+    ) -> str: ...
+
+    async def synthesize_react(
+        self,
+        request: str,
+        state: HostRunState,
+        decision: HostDecision,
     ) -> str: ...

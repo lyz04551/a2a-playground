@@ -31,7 +31,7 @@
 | 参数/字段 | 默认或来源 | 用途 |
 | --- | --- | --- |
 | `checkpoint_database_url` | `AGENT_CHECKPOINT_DATABASE_URL` | 持久化 LangGraph 消息；缺失则初始化失败 |
-| `run_timeout` | `AGENT_RUN_TIMEOUT` / 90 秒 | 总时间基数 |
+| `idle_timeout_seconds` | `AGENT_IDLE_TIMEOUT_SECONDS` / 300 秒 | 流连续无新事件时的超时阈值；每次新事件重置，不限制运行总时长 |
 | `summary_reserve_seconds` | 配置值或 `min(35, run_timeout × 0.2)` | 为兜底总结留时间 |
 | `timeout_safety_margin_seconds` | 配置值或 `min(5, run_timeout × 0.05)` | 安全余量 |
 | `investigation_timeout` | 上述三者相减 | 调查循环实际限时，必须大于 0 |

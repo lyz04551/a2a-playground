@@ -12,18 +12,35 @@ from backend.host.orchestration.models import Evaluation
 from backend.orchestration.service import _has_unresolved_insufficient_evaluation
 
 
-def test_partial_evaluation_is_cleared_by_later_sufficient_result():
-    def evaluated(sequence, agent, outcome):
+def test_partial_evaluation_is_cleared_by_linked_sufficient_result():
+    def evaluated(sequence, agent, outcome, continues_task_id=None):
         return RunEvent.create(
             event_type=RunEventType.TASK_EVALUATED,
             run_id="run", conversation_id="conversation", sequence=sequence,
-            task_id=f"task-{sequence}", data={"agent_id": agent, "outcome": outcome},
+            task_id=f"task-{sequence}", data={"agent_id": agent, "outcome": outcome, "continues_task_id": continues_task_id},
         )
 
     assert _has_unresolved_insufficient_evaluation([evaluated(1, "ops", "insufficient")])
     assert not _has_unresolved_insufficient_evaluation([
+        evaluated(1, "ops", "insufficient"), evaluated(2, "ops", "sufficient", "task-1"),
+    ])
+    assert _has_unresolved_insufficient_evaluation([
         evaluated(1, "ops", "insufficient"), evaluated(2, "ops", "sufficient"),
     ])
+
+
+def test_cross_agent_continuation_clears_prior_insufficient_result():
+    first = RunEvent.create(
+        event_type=RunEventType.TASK_EVALUATED,
+        run_id="run", conversation_id="conversation", sequence=1,
+        task_id="first", data={"agent_id": "ops", "outcome": "insufficient"},
+    )
+    followup = RunEvent.create(
+        event_type=RunEventType.TASK_EVALUATED,
+        run_id="run", conversation_id="conversation", sequence=2,
+        task_id="followup", data={"agent_id": "security", "outcome": "sufficient", "continues_task_id": "first"},
+    )
+    assert not _has_unresolved_insufficient_evaluation([first, followup])
 
 
 class FakeGateway:

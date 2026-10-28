@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import inspect
 import json
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
 from backend.host.orchestration.context import build_task_prompt
@@ -10,6 +11,7 @@ from backend.host.orchestration.models import (
     DecisionPort,
     DelegationResult,
     Evaluation,
+    HostDecision,
     HostRunState,
     ObservedTask,
     PlannedTask,
@@ -22,31 +24,7 @@ from backend.host.orchestration.validation import (
 
 
 Delegate = Callable[..., Awaitable[DelegationResult]]
-
-
-def _terminal_response(request: str, state: HostRunState, proposed: str) -> str:
-    latest_by_agent: dict[str, ObservedTask] = {}
-    for observed in state.observations.values():
-        latest_by_agent[observed.actual_agent_id] = observed
-    unresolved = [
-        observed for observed in latest_by_agent.values()
-        if observed.evaluation.outcome == "insufficient"
-    ]
-    if not unresolved:
-        return proposed
-    zh = any("\u4e00" <= char <= "\u9fff" for char in request)
-    title = "本次任务部分完成。以下检查尚未通过结构化证据校验，不能确认全量完成：" if zh else "This run is partially complete. These checks lack verified evidence:"
-    lines = [title]
-    for observed in unresolved:
-        lines.append(f"- {observed.task.objective}: {observed.evaluation.reason}")
-        coverage = observed.result.output.coverage if observed.result.output else None
-        if coverage is not None:
-            missing = sorted(set(coverage.expected_targets) - set(coverage.inspected_targets))
-            if missing:
-                label = "未验证对象" if zh else "Unverified targets"
-                lines.append(f"  {label}: {', '.join(missing)}")
-    lines.append("已获取的检查结果和工具证据见上方 Agent 报告。" if zh else "See the Agent reports above for the inspection results and tool evidence.")
-    return "\n".join(lines)
+logger = logging.getLogger(__name__)
 
 
 class HostOrchestrationEngine:
@@ -284,8 +262,14 @@ class HostOrchestrationEngine:
                 return
 
         yield {"type": "synthesis_started"}
-        text = await self._decisions.synthesize(request, plan, dict(results))
-        yield {"type": "text", "text": text}
+        stream_synthesis = getattr(self._decisions, "synthesize_stream", None)
+        if stream_synthesis is not None:
+            async for chunk in stream_synthesis(request, plan, dict(results)):
+                if chunk:
+                    yield {"type": "text", "text": chunk}
+        else:
+            text = await self._decisions.synthesize(request, plan, dict(results))
+            yield {"type": "text", "text": text}
         yield {"type": "done", "session_id": run_id}
 
     async def _stream_react(
@@ -306,12 +290,37 @@ class HostOrchestrationEngine:
                 "round": state.round,
                 "checkpoint": state.model_dump(mode="json"),
             }
-            decision = await self._decisions.decide_next(
-                request, agents, state
-            )
-            validate_decision(decision, profiles, state)
-            if state.total_tasks + len(decision.tasks) > self._max_tasks:
-                raise ValueError("Host ReAct task budget exceeded")
+            try:
+                decision = await self._decisions.decide_next(
+                    request, agents, state
+                )
+                validate_decision(decision, profiles, state)
+                if state.total_tasks + len(decision.tasks) > self._max_tasks:
+                    raise ValueError("Host ReAct task budget exceeded")
+            except Exception:
+                if not state.observations:
+                    raise
+                logger.exception("Host decision failed after specialist observations; returning partial evidence")
+                notes = []
+                for observed in state.observations.values():
+                    summary = (
+                        observed.result.output.summary
+                        if observed.result.output is not None
+                        else observed.result.text
+                    )
+                    notes.append(
+                        f"- {observed.task.objective}: "
+                        f"{(summary or observed.evaluation.reason)[:1000]} "
+                        f"（评估：{observed.evaluation.outcome}）"
+                    )
+                decision = HostDecision(
+                    action="stop",
+                    reason="Host 无法生成有效的下一步决策；保留已完成的检查证据。",
+                    response=(
+                        "本次检查未完成。Host 无法继续决定下一步，以下仅为已返回的部分结果，"
+                        "尚未验证的对象和根因仍为未知。\n\n" + "\n".join(notes)
+                    ),
+                )
             state.decisions.append(decision)
             yield {
                 "type": "decision_created",
@@ -323,9 +332,32 @@ class HostOrchestrationEngine:
             }
 
             if decision.action != "delegate":
+                response = decision.response
+                if state.observations and decision.action in {"complete", "stop"}:
+                    yield {"type": "synthesis_started"}
+                    stream_synthesis = getattr(self._decisions, "synthesize_react_stream", None)
+                    if stream_synthesis is not None:
+                        emitted = False
+                        try:
+                            async for chunk in stream_synthesis(request, state, decision):
+                                if chunk:
+                                    emitted = True
+                                    yield {"type": "text", "text": chunk, "host_action": decision.action}
+                        except Exception:
+                            if emitted:
+                                raise
+                            yield {"type": "text", "text": response, "host_action": decision.action}
+                        yield {"type": "done", "session_id": run_id}
+                        return
+                    synthesize = getattr(self._decisions, "synthesize_react", None)
+                    if synthesize is not None:
+                        try:
+                            response = await synthesize(request, state, decision)
+                        except Exception:
+                            response = decision.response
                 yield {
                     "type": "text",
-                    "text": _terminal_response(request, state, decision.response),
+                    "text": response,
                     "host_action": decision.action,
                 }
                 yield {"type": "done", "session_id": run_id}
@@ -363,13 +395,15 @@ class HostOrchestrationEngine:
                     prior_coverage=[
                         observed.result.output.coverage
                         for observed in state.observations.values()
-                        if observed.actual_agent_id == task.agent_id
+                        if (observed.task.id == task.continues_task_id
+                            or (not task.continues_task_id and observed.actual_agent_id == task.agent_id))
                         and observed.result.output and observed.result.output.coverage
                     ],
                     prior_evidence=[
                         item
                         for observed in state.observations.values()
-                        if observed.task.id in task.depends_on and observed.result.output
+                        if (observed.task.id in task.depends_on or observed.task.id == task.continues_task_id)
+                        and observed.result.output
                         for item in observed.result.output.evidence
                     ],
                 )
@@ -411,6 +445,7 @@ class HostOrchestrationEngine:
                     "agent_id": agent_id,
                     "outcome": evaluation.outcome,
                     "reason": evaluation.reason,
+                    "continues_task_id": task.continues_task_id,
                     "coverage": result.output.coverage.model_dump() if result.output and result.output.coverage else None,
                 }
                 if result.state == "completed":
@@ -486,6 +521,7 @@ class HostOrchestrationEngine:
                     and (
                         observed.actual_agent_id == task.agent_id
                         or task_id in task.depends_on
+                        or task_id == task.continues_task_id
                     )
                     else []
                 ),
@@ -509,6 +545,7 @@ class HostOrchestrationEngine:
                         and (
                             observed.actual_agent_id == task.agent_id
                             or task_id in task.depends_on
+                            or task_id == task.continues_task_id
                         )
                         else []
                     )

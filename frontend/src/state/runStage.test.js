@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { deriveRunStage } from './runStage.js'
+import { deriveRunStage, deriveRunStageTiming } from './runStage.js'
 
 const event = (type, sequence, data = {}, taskId = null) => ({ type, sequence, data, task_id: taskId, timestamp: `2026-08-07T08:00:0${sequence}Z` })
 
@@ -57,4 +57,18 @@ test('names the live tool and the subsequent model analysis phase', () => {
   assert.equal(deriveRunStage(started, agents).textZh, 'K8s Security Agent 正在调用 get_k8s_resource…')
   assert.equal(deriveRunStage([...started, event('tool.completed', 3, { agent_id: 'security', tool: 'get_k8s_resource' }, 'audit')], agents).textZh, 'K8s Security Agent 正在分析工具结果并决定下一步…')
   assert.equal(deriveRunStage([...started, event('agent.thinking_delta', 3, { agent_id: 'security', content: '分析中' }, 'audit')], agents).textZh, 'K8s Security Agent 正在分析…')
+})
+
+test('stage timing keeps analysis start while thinking updates arrive', () => {
+  const events = [
+    event('tool.completed', 1),
+    event('agent.thinking_delta', 2),
+    event('agent.thinking_delta', 3),
+    event('message.delta', 4, { agent_id: 'ops' }),
+  ]
+  const analysis = deriveRunStageTiming(events.slice(0, 3), Date.parse('2026-08-07T08:00:10Z'))
+  assert.equal(analysis.stageSeconds, 9)
+  assert.equal(analysis.silentSeconds, 7)
+  const writing = deriveRunStageTiming(events, Date.parse('2026-08-07T08:00:10Z'))
+  assert.equal(writing.stageSeconds, 6)
 })

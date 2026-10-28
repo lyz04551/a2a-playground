@@ -111,6 +111,15 @@ def validate_decision(
     if len(current_ids) != len(decision.tasks):
         raise PlanValidationError("decision contains duplicate task IDs")
     for task in decision.tasks:
+        if task.continues_task_id and task.continues_task_id not in state.observations:
+            raise PlanValidationError(
+                f"task '{task.id}' continues unknown task '{task.continues_task_id}'"
+            )
+        if (task.continues_task_id
+            and state.observations[task.continues_task_id].evaluation.outcome != "insufficient"):
+            raise PlanValidationError(
+                f"task '{task.id}' may continue only an insufficient task"
+            )
         if current_ids.intersection(task.depends_on):
             raise PlanValidationError(
                 f"task '{task.id}' depends on another task in the same parallel round; "
@@ -206,6 +215,19 @@ def validate_decision(
                 )
 
     if decision.action == "complete":
+        continued = {
+            observed.task.continues_task_id
+            for observed in state.observations.values()
+            if observed.task.continues_task_id
+        }
+        if any(
+            task_id not in continued and observed.evaluation.outcome == "insufficient"
+            for task_id, observed in state.observations.items()
+        ):
+            raise PlanValidationError(
+                "Host cannot complete while the latest specialist result is insufficient; "
+                "delegate the missing work or stop with a partial synthesis"
+            )
         successful_mutation = any(
             observed.task.workflow_role == "mutation"
             and observed.evaluation.outcome == "sufficient"

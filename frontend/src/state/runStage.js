@@ -1,5 +1,31 @@
 const TERMINAL_TASKS = new Set(['task.completed', 'task.failed', 'task.blocked'])
 
+function timingPhase(event) {
+  if (event.type === 'tool.called') return 'tool'
+  if (event.type === 'tool.completed' || event.type === 'agent.thinking_delta') return 'analysis'
+  if (event.type === 'message.delta') return event.data?.agent_id ? 'agent-writing' : 'host-writing'
+  if (event.type === 'host.planning') return 'planning'
+  if (event.type === 'host.synthesis_started') return 'synthesis'
+  return event.type
+}
+
+export function deriveRunStageTiming(events = [], now = Date.now()) {
+  const latest = events.at(-1)
+  const latestAt = Date.parse(latest?.timestamp || '')
+  if (!Number.isFinite(latestAt)) return { stageSeconds: 0, silentSeconds: 0 }
+  const phase = timingPhase(latest)
+  let firstAt = latestAt
+  for (let index = events.length - 2; index >= 0; index -= 1) {
+    if (timingPhase(events[index]) !== phase) break
+    const at = Date.parse(events[index].timestamp || '')
+    if (Number.isFinite(at)) firstAt = at
+  }
+  return {
+    stageSeconds: Math.max(0, Math.floor((now - firstAt) / 1000)),
+    silentSeconds: Math.max(0, Math.floor((now - latestAt) / 1000)),
+  }
+}
+
 export function deriveRunStage(events = [], agents = []) {
   const ordered = [...events].sort((a, b) => (a.sequence || 0) - (b.sequence || 0))
   const latest = ordered.at(-1)

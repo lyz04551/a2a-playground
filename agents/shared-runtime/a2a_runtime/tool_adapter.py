@@ -147,6 +147,13 @@ class MCPToolAdapter:
                 )
             self._calls_by_context[context_id] = used + 1
             result = await self.client.call_tool(tool_name, arguments)
+            if tool_name == "get_k8s_pod_logs" and len(result) > 2400:
+                omitted = len(result) - 2200
+                result = (
+                    result[:200]
+                    + f"\n[truncated {omitted} characters from the middle of the log]\n"
+                    + result[-2000:]
+                )
             call_count = used + 1
             if call_count <= self.soft_call_threshold:
                 return result

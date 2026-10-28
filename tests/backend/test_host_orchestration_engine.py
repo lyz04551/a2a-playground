@@ -353,6 +353,136 @@ async def test_react_tasks_in_one_round_execute_concurrently():
 
 
 @pytest.mark.anyio
+async def test_react_host_synthesizes_all_observations_after_delegation():
+    class ReactDecisions:
+        async def decide_next(self, request, agents, state):
+            if state.round == 1:
+                return HostDecision(action="delegate", reason="Inspect", tasks=[planned("inspect", "ops")])
+            return HostDecision(action="complete", reason="Inspection finished", response="Draft response")
+
+        async def evaluate(self, task, result):
+            return Evaluation(outcome="sufficient", reason="evidence returned")
+
+        async def synthesize_react(self, request, state, decision):
+            assert request == "user request"
+            assert state.observations["inspect"].result.text == "observed result"
+            assert decision.action == "complete"
+            return "Host synthesis from observed result"
+
+    async def delegate(run_id, agent_id, prompt):
+        return DelegationResult(state="completed", text="observed result")
+
+    events = await collect(HostOrchestrationEngine(
+        FakeRegistry("ops"), ReactDecisions(), delegate,
+    ))
+    assert events[-2]["text"] == "Host synthesis from observed result"
+    assert any(event["type"] == "synthesis_started" for event in events)
+
+
+@pytest.mark.anyio
+async def test_react_host_emits_synthesis_chunks_before_done():
+    class StreamDecisions:
+        async def decide_next(self, request, agents, state):
+            if state.round == 1:
+                return HostDecision(action="delegate", reason="Inspect", tasks=[planned("inspect", "ops")])
+            return HostDecision(action="complete", reason="Finished", response="Fallback")
+
+        async def evaluate(self, task, result):
+            return Evaluation(outcome="sufficient", reason="evidence returned")
+
+        async def synthesize_react_stream(self, request, state, decision):
+            yield "第一段"
+            yield "第二段"
+
+    async def delegate(run_id, agent_id, prompt):
+        return DelegationResult(state="completed", text="evidence")
+
+    events = await collect(HostOrchestrationEngine(FakeRegistry("ops"), StreamDecisions(), delegate))
+    synthesis = next(i for i, event in enumerate(events) if event["type"] == "synthesis_started")
+    assert [event["text"] for event in events[synthesis + 1:] if event["type"] == "text"] == ["第一段", "第二段"]
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.anyio
+async def test_react_host_reports_partial_evidence_if_next_decision_fails():
+    class FailingDecisions:
+        async def decide_next(self, request, agents, state):
+            if state.round == 1:
+                return HostDecision(action="delegate", reason="Inspect", tasks=[planned("inspect", "ops")])
+            raise RuntimeError("model could not produce a valid decision")
+
+        async def evaluate(self, task, result):
+            return Evaluation(outcome="insufficient", reason="log evidence missing")
+
+    async def delegate(run_id, agent_id, prompt):
+        return DelegationResult(state="completed", output={"status": "partial", "summary": "已读取部分日志"})
+
+    events = await collect(HostOrchestrationEngine(FakeRegistry("ops"), FailingDecisions(), delegate))
+
+    assert events[-1]["type"] == "done"
+    assert any(event["type"] == "text" and "已读取部分日志" in event["text"] for event in events)
+    assert any(event["type"] == "decision_created" and event["action"] == "stop" for event in events)
+
+
+def test_cross_agent_continuation_receives_prior_tool_evidence():
+    previous = planned("first", "ops")
+    state = HostRunState(goal="审查 Deployment", observations={
+        "first": ObservedTask(
+            task=previous,
+            result=DelegationResult(state="completed", output={
+                "status": "partial", "summary": "已枚举目标",
+                "evidence": [{"call_id": "list-1", "tool": "list_k8s_resource", "result_excerpt": "Deployment/default/api"}],
+            }),
+            evaluation=Evaluation(outcome="insufficient", reason="还缺资源配置"),
+            actual_agent_id="ops",
+        ),
+    })
+    continuation = planned("followup", "security").model_copy(update={"continues_task_id": "first"})
+    prompt = HostOrchestrationEngine._react_task_prompt("审查 Deployment", continuation, state)
+    assert "list-1" in prompt
+
+
+@pytest.mark.anyio
+async def test_host_continues_with_another_agent_then_synthesizes():
+    class Decisions:
+        async def decide_next(self, request, agents, state):
+            if state.round == 1:
+                return HostDecision(action="delegate", reason="First check", tasks=[planned("first", "ops")])
+            if state.round == 2:
+                followup = planned("followup", "security").model_copy(update={"continues_task_id": "first"})
+                return HostDecision(action="delegate", reason="Use new specialist", tasks=[followup])
+            return HostDecision(action="complete", reason="Goal met", response="draft")
+
+        async def evaluate(self, task, result):
+            return Evaluation(
+                outcome="insufficient" if task.id == "first" else "sufficient",
+                reason="missing detail" if task.id == "first" else "checked",
+            )
+
+        async def synthesize_react(self, request, state, decision):
+            assert list(state.observations) == ["first", "followup"]
+            return "Final Host report based on both specialists"
+
+    calls = []
+
+    async def delegate(run_id, agent_id, prompt):
+        calls.append((agent_id, prompt))
+        if agent_id == "ops":
+            return DelegationResult(state="completed", output={
+                "status": "partial", "summary": "targets listed",
+                "evidence": [{"call_id": "list-1", "tool": "list_k8s_resource", "result_excerpt": "api"}],
+            })
+        return DelegationResult(state="completed", text="detail checked")
+
+    events = await collect(HostOrchestrationEngine(
+        FakeRegistry("ops", "security"), Decisions(), delegate,
+    ))
+    assert [agent for agent, _ in calls] == ["ops", "security"]
+    assert "list-1" in calls[1][1]
+    assert events[-2]["text"] == "Final Host report based on both specialists"
+
+
+@pytest.mark.anyio
 @pytest.mark.parametrize("action", ["direct_response", "clarification"])
 async def test_host_only_decision_never_delegates_evaluates_or_synthesizes(action):
     class HostOnlyDecisions(FakeDecisions):

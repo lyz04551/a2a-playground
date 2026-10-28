@@ -5,13 +5,112 @@ from types import SimpleNamespace
 from contextlib import asynccontextmanager
 import pytest
 import httpx
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
 
 from a2a_runtime.mcp_client import K8sMCPClient
 import a2a_runtime.mcp_client as mcp_client_module
 from a2a_runtime.agent import RuntimeMCPAgent
 from a2a_runtime.config import AgentRuntimeConfig
 from a2a_runtime.streaming import RuntimeEventType
+
+
+@pytest.mark.anyio
+async def test_completed_report_keeps_the_text_already_streamed():
+    class ChangedFinalGraph:
+        async def astream(self, *_args, **_kwargs):
+            yield ("messages", (AIMessageChunk(content="本轮部分检查报告"), {"langgraph_node": "agent"}))
+            yield ("messages", (AIMessageChunk(content="：已检查 16 个 Deployment。"), {"langgraph_node": "agent"}))
+
+        async def aget_state(self, _config):
+            return SimpleNamespace(values={"messages": [AIMessage(content="另一份最终报告")]})
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+    agent._tools_loaded = True
+    agent._graph = ChangedFinalGraph()
+
+    events = [event async for event in agent.stream("审查 Deployment", "ctx")]
+    visible = ""
+    for event in events:
+        if event.type is RuntimeEventType.TEXT_RESET:
+            visible = ""
+        elif event.type is RuntimeEventType.TEXT:
+            visible += event.content
+    assert visible == "本轮部分检查报告：已检查 16 个 Deployment。"
+    assert events[-1].content == visible
+    assert all(event.type is not RuntimeEventType.TEXT_RESET for event in events)
+
+
+@pytest.mark.anyio
+async def test_tool_budget_keeps_streamed_partial_report_without_rewriting_it():
+    class BudgetGraph:
+        async def astream(self, *_args, **_kwargs):
+            yield ("messages", (AIMessageChunk(content="已检查副本；其余待补查。"), {"langgraph_node": "agent"}))
+
+        async def aget_state(self, _config):
+            return SimpleNamespace(values={"messages": [AIMessage(content="已检查副本；其余待补查。")]})
+
+    class ExhaustedBudget:
+        _calls_by_context = {"ctx": 1}
+
+        def reset_budget(self, _context_id):
+            pass
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+    agent._tools_loaded = True
+    agent._graph = BudgetGraph()
+    agent._tool_adapter = ExhaustedBudget()
+    agent.max_tool_calls = 1
+
+    events = [event async for event in agent.stream("审查 Deployment", "ctx")]
+    assert events[-1].data["status"] == "partial"
+    assert events[-1].content == "已检查副本；其余待补查。"
+    assert all(event.type is not RuntimeEventType.TEXT_RESET for event in events)
+
+
+@pytest.mark.anyio
+async def test_timed_out_forced_summary_keeps_text_already_streamed():
+    class BlankResultGraph:
+        async def astream(self, *_args, **_kwargs):
+            yield {"messages": []}
+
+        async def aget_state(self, _config):
+            return SimpleNamespace(values={"messages": [AIMessage(content="")]})
+
+    class TimedOutSummaryModel:
+        def bind(self, **_kwargs):
+            return self
+
+        async def astream(self, _messages):
+            yield SimpleNamespace(content="已检查 16 个 Deployment，")
+            raise TimeoutError("summary deadline")
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="K8s Ops Agent", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession(), model=TimedOutSummaryModel())
+    agent._tools_loaded = True
+    agent._graph = BlankResultGraph()
+
+    events = [event async for event in agent.stream("审查 Deployment", "ctx")]
+    visible = ""
+    for event in events:
+        if event.type is RuntimeEventType.TEXT_RESET:
+            visible = ""
+        elif event.type is RuntimeEventType.TEXT:
+            visible += event.content
+    assert visible
+    assert events[-1].content == visible
+    assert events[-1].data["status"] == "partial"
+    assert all(event.type is not RuntimeEventType.TEXT_RESET for event in events)
 
 
 class FakeSession:
@@ -322,6 +421,28 @@ async def test_agent_returns_deterministic_partial_result_when_summary_model_is_
     assert events[-1].data["status"] == "partial"
     assert "预算" in events[-1].content
     assert "没有已完成的工具结果" in events[-1].content
+
+
+@pytest.mark.anyio
+async def test_context_window_rejection_returns_partial_instead_of_a2a_error():
+    class ContextOverflowGraph:
+        async def astream(self, *_args, **_kwargs):
+            raise RuntimeError("ContextWindowExceededError: maximum context length exceeded")
+            yield {}
+
+    config = AgentRuntimeConfig(
+        agent_id="ops", name="Ops", port=8052,
+        public_url="http://ops", mcp_url="http://mcp/sse",
+    )
+    agent = RuntimeMCPAgent(config, "prompt", mcp_client=FakeSession())
+    agent._tools_loaded = True
+    agent._graph = ContextOverflowGraph()
+
+    events = [event async for event in agent.stream("check cluster", "ctx")]
+
+    assert events[-1].type is RuntimeEventType.COMPLETED
+    assert events[-1].data["status"] == "partial"
+    assert events[-1].data["continuation"]["reason"] == "model context window exceeded"
 
 
 @pytest.mark.anyio

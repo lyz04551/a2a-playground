@@ -1011,7 +1011,8 @@ async def test_auto_normalizes_structured_orchestration_lifecycle():
                 "result": "healthy",
             },
             {"type": "synthesis_started"},
-            {"type": "text", "text": "Pod is healthy"},
+            {"type": "text", "text": "Pod is "},
+            {"type": "text", "text": "healthy"},
             {"type": "done"},
         ]
     )
@@ -1031,9 +1032,12 @@ async def test_auto_normalizes_structured_orchestration_lifecycle():
         RunEventType.TASK_COMPLETED,
         RunEventType.HOST_SYNTHESIS_STARTED,
         RunEventType.MESSAGE_DELTA,
+        RunEventType.MESSAGE_DELTA,
         RunEventType.MESSAGE_COMPLETED,
         RunEventType.TASK_COMPLETED,
     ]
+    assert [event.data["content"] for event in events if event.type == RunEventType.MESSAGE_DELTA and event.parent_task_id is None] == ["Pod is ", "healthy"]
+    assert [event.data["content"] for event in events if event.type == RunEventType.MESSAGE_COMPLETED and event.parent_task_id is None] == ["Pod is healthy"]
     child = next(
         event for event in events
         if event.type == RunEventType.TASK_DELEGATED
@@ -1169,6 +1173,27 @@ async def test_auto_accepts_blocked_plan_task_that_was_never_routed():
     assert any(event.type == RunEventType.TASK_BLOCKED for event in events)
     assert any(event.type == RunEventType.MESSAGE_COMPLETED for event in events)
     assert events[-1].type == RunEventType.TASK_COMPLETED
+
+
+@pytest.mark.anyio
+async def test_auto_maps_continuation_to_persisted_task_id():
+    host = FakeHostManager([
+        {"type": "decision_created", "round": 1, "action": "delegate", "reason": "inspect", "tasks": [
+            {"id": "first", "agent_id": "ops", "objective": "inspect"},
+        ]},
+        {"type": "task_evaluated", "task_id": "first", "agent_id": "ops", "outcome": "insufficient"},
+        {"type": "decision_created", "round": 2, "action": "delegate", "reason": "continue", "tasks": [
+            {"id": "followup", "agent_id": "security", "objective": "finish", "continues_task_id": "first"},
+        ]},
+        {"type": "task_evaluated", "task_id": "followup", "agent_id": "security", "outcome": "sufficient", "continues_task_id": "first"},
+        {"type": "task_completed", "task_id": "first", "agent_id": "ops", "result": "partial"},
+        {"type": "task_completed", "task_id": "followup", "agent_id": "security", "result": "complete"},
+        {"type": "text", "text": "complete"},
+        {"type": "done"},
+    ])
+    events = await _collect(_auto_strategy(host), RunCommand(mode="auto", message="Inspect"))
+    evaluated = [event for event in events if event.type == RunEventType.TASK_EVALUATED]
+    assert evaluated[-1].data["continues_task_id"] == "task-host:plan:first"
 
 
 @pytest.mark.anyio

@@ -29,7 +29,8 @@ class LangGraphHostManager:
         self._registry = registry or AgentRegistry(database.repository)
         self._host_agent = LangGraphHostAgent(gateway=self._gateway, config_loader=config_loader)
         self._decisions = decisions or LangGraphDecisionPort(
-            model_factory=lambda: self._host_agent._make_model(streaming=False)
+            model_factory=lambda: self._host_agent._make_model(streaming=False),
+            stream_model_factory=lambda: self._host_agent._make_model(streaming=True),
         )
         self._engine = HostOrchestrationEngine(
             self._registry,

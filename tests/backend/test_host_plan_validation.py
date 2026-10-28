@@ -741,3 +741,21 @@ def test_react_rejects_complete_after_mutation_without_verification():
 
     with pytest.raises(PlanValidationError, match="verification"):
         validate_decision(decision, AGENTS, state)
+
+
+def test_react_rejects_complete_while_latest_continuation_is_insufficient():
+    first = task("first", "k8s-ops")
+    state = HostRunState(
+        goal="inspect all Deployments",
+        observations={
+            first.id: ObservedTask(
+                task=first,
+                result=DelegationResult(state="completed", text="partial"),
+                evaluation=Evaluation(outcome="insufficient", reason="missing rollout status"),
+                actual_agent_id="k8s-ops",
+            ),
+        },
+    )
+    decision = HostDecision(action="complete", reason="done", response="all done")
+    with pytest.raises(PlanValidationError, match="insufficient"):
+        validate_decision(decision, AGENTS, state)

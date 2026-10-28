@@ -986,6 +986,9 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                         raise _UpstreamProtocolError(
                             "evaluation references an unknown plan task"
                         )
+                    prior = by_logical_id.get(
+                        str(upstream.get("continues_task_id") or "")
+                    )
                     yield builder.create(
                         RunEventType.TASK_EVALUATED,
                         task_id=delegation.task_id,
@@ -996,6 +999,7 @@ class AutoExecutionStrategy(_RunBoundStrategy):
                             ),
                             "outcome": upstream.get("outcome", ""),
                             "reason": upstream.get("reason", ""),
+                            "continues_task_id": prior.task_id if prior else None,
                             "coverage": upstream.get("coverage"),
                         },
                     )

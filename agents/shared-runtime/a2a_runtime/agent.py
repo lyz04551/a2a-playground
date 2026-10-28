@@ -19,6 +19,33 @@ _COVERAGE_KEYS = frozenset({"scope", "expected_targets", "inspected_targets", "e
 _SENSITIVE_FIELD = re.compile(r"password|passwd|secret|token|authorization|cookie|api[_-]?key|private[_-]?key|credential", re.I)
 
 
+def _is_context_window_error(exc: Exception) -> bool:
+    current: BaseException | None = exc
+    while current is not None:
+        message = str(current).lower()
+        if "contextwindowexceeded" in message or "maximum context length" in message:
+            return True
+        current = current.__cause__ or current.__context__
+    return False
+
+
+async def _with_idle_timeout(source: AsyncIterable[Any], seconds: float) -> AsyncIterable[Any]:
+    """Limit silence between stream items, without limiting total run time."""
+    iterator = aiter(source)
+    try:
+        while True:
+            try:
+                async with asyncio.timeout(seconds):
+                    item = await anext(iterator)
+            except StopAsyncIteration:
+                return
+            yield item
+    finally:
+        close = getattr(iterator, "aclose", None)
+        if close is not None:
+            await close()
+
+
 def _evidence_excerpt(value: str, *, limit: int = 800) -> str:
     try:
         parsed = json.loads(value)
@@ -258,36 +285,14 @@ class RuntimeMCPAgent:
             if checkpoint_database_url is None
             else checkpoint_database_url
         )
-        self.run_timeout = run_timeout or float(os.getenv("AGENT_RUN_TIMEOUT", "90"))
-        configured_summary_reserve = os.getenv("AGENT_SUMMARY_RESERVE_SECONDS")
-        self.summary_reserve_seconds = (
-            summary_reserve_seconds
-            if summary_reserve_seconds is not None
-            else (
-                float(configured_summary_reserve)
-                if configured_summary_reserve is not None
-                else min(35.0, self.run_timeout * 0.2)
-            )
+        # Legacy constructor arguments remain accepted for callers, but the
+        # runtime no longer divides a fixed wall-clock budget into phases.
+        self.idle_timeout_seconds = (
+            run_timeout if run_timeout is not None
+            else float(os.getenv("AGENT_IDLE_TIMEOUT_SECONDS", "300"))
         )
-        configured_safety_margin = os.getenv("AGENT_TIMEOUT_SAFETY_MARGIN_SECONDS")
-        self.timeout_safety_margin_seconds = (
-            timeout_safety_margin_seconds
-            if timeout_safety_margin_seconds is not None
-            else (
-                float(configured_safety_margin)
-                if configured_safety_margin is not None
-                else min(5.0, self.run_timeout * 0.05)
-            )
-        )
-        self.investigation_timeout = (
-            self.run_timeout
-            - self.summary_reserve_seconds
-            - self.timeout_safety_margin_seconds
-        )
-        if self.investigation_timeout <= 0:
-            raise ValueError(
-                "AGENT_RUN_TIMEOUT must exceed the summary reserve and safety margin"
-            )
+        if self.idle_timeout_seconds <= 0:
+            raise ValueError("AGENT_IDLE_TIMEOUT_SECONDS must be positive")
         self.max_steps = int(os.getenv("AGENT_MAX_STEPS", "30"))
         self.max_tool_calls = int(os.getenv("AGENT_MAX_TOOL_CALLS", "40"))
         self.max_output_tokens = int(
@@ -570,13 +575,14 @@ class RuntimeMCPAgent:
             # A new context may not have a checkpoint yet.
             pass
         try:
-            async with asyncio.timeout(self.investigation_timeout):
-                async for item in self._graph.astream(
+            async for item in _with_idle_timeout(
+                self._graph.astream(
                     {"messages": [("user", query)]},
                     graph_config,
                     stream_mode=["values", "messages"],
                     context={"session_id": context_id},
-                ):
+                ), self.idle_timeout_seconds,
+            ):
                     mode, state = item if isinstance(item, tuple) and len(item) == 2 else ("values", item)
                     if mode == "messages":
                         chunk, metadata = state
@@ -658,12 +664,38 @@ class RuntimeMCPAgent:
             self._pending_by_context[context_id] = exc.pending_action
             yield RuntimeEvent.approval_required(exc.pending_action)
             return
-        except (TimeoutError, GraphRecursionError) as cutoff:
+        except Exception as cutoff:
+            if not isinstance(cutoff, (TimeoutError, GraphRecursionError)) and not _is_context_window_error(cutoff):
+                raise
             cutoff_reason = (
-                "investigation time budget reached"
+                "investigation stream stalled"
                 if isinstance(cutoff, TimeoutError)
+                else "model context window exceeded"
+                if _is_context_window_error(cutoff)
                 else "investigation step budget reached"
             )
+            if emitted_content and streamed_content:
+                content, evidence_items, coverage = _runtime_result(
+                    streamed_content, current_tool_calls, current_tool_results
+                )
+                reset, delta = _final_stream_delta(_display_content(content), emitted_content)
+                if reset:
+                    content = emitted_content
+                elif delta:
+                    yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+                yield RuntimeEvent.completed(
+                    content=content,
+                    artifact_name="specialist_result",
+                    data={
+                        "status": "partial", "summary": content,
+                        "evidence": evidence_items,
+                        "assessment": _assessment_data(current_tool_calls, current_tool_results),
+                        "continuation": {"allowed": True, "reason": cutoff_reason},
+                        "limitations": ["调查流长时间无新事件或达到步骤预算，已展示文本可能不完整。"],
+                        **({"coverage": coverage} if coverage else {}),
+                    },
+                )
+                return
             evidence = self._current_run_evidence(current_tool_results, current_tool_calls)
             if emitted_content:
                 yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Switch to partial summary")
@@ -681,28 +713,30 @@ class RuntimeMCPAgent:
                 content = content.strip()
             except TimeoutError:
                 if summary_emitted:
-                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Summary timed out")
-                summary_emitted = ""
-                content = await self._deterministic_partial_summary(
-                    current_tool_results,
-                    "强制总结模型也达到时间限制",
-                    current_tool_names,
-                    current_tool_calls,
-                )
+                    content = summary_emitted
+                else:
+                    content = await self._deterministic_partial_summary(
+                        current_tool_results,
+                        "总结模型长时间无新输出",
+                        current_tool_names,
+                        current_tool_calls,
+                    )
             except Exception as exc:
                 if summary_emitted:
-                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Summary failed")
-                summary_emitted = ""
-                content = await self._deterministic_partial_summary(
-                    current_tool_results,
-                    f"强制总结模型不可用：{exc}",
-                    current_tool_names,
-                    current_tool_calls,
-                )
+                    content = summary_emitted
+                else:
+                    content = await self._deterministic_partial_summary(
+                        current_tool_results,
+                        f"强制总结模型不可用：{exc}",
+                        current_tool_names,
+                        current_tool_calls,
+                    )
             content, evidence_items, coverage = _runtime_result(content, current_tool_calls, current_tool_results)
             reset, delta = _final_stream_delta(_display_content(content), summary_emitted)
             if reset:
-                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize partial summary")
+                if summary_emitted:
+                    content = summary_emitted
+                    delta = ""
             if delta:
                 yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
             yield RuntimeEvent.completed(
@@ -721,7 +755,7 @@ class RuntimeMCPAgent:
                         "reason": cutoff_reason,
                     },
                     "limitations": [
-                        "调查阶段达到时间预算，以上结论仅基于已完成的检查。"
+                        "调查流长时间无新事件或达到步骤预算，以上结论仅基于已完成的检查。"
                     ],
                     **({"coverage": coverage} if coverage else {}),
                 },
@@ -734,10 +768,38 @@ class RuntimeMCPAgent:
         final_message = messages[-1] if messages and isinstance(messages[-1], AIMessage) else None
         if final_message is not None:
             content = str(final_message.content or "")
+        # The user has already seen the streamed response. A checkpointed final
+        # message can differ (or be empty), so use the stream as the report text.
+        if emitted_content and streamed_content:
+            content = streamed_content
         if (
             self._tool_adapter is not None
             and self._tool_adapter._calls_by_context.get(context_id, 0) >= self.max_tool_calls
         ):
+            if emitted_content and content.strip():
+                content, evidence_items, coverage = _runtime_result(
+                    content, current_tool_calls, current_tool_results
+                )
+                reset, delta = _final_stream_delta(_display_content(content), emitted_content)
+                if reset:
+                    # Keep the text the user already saw; metadata still marks
+                    # the investigation as partial.
+                    content = emitted_content
+                elif delta:
+                    yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+                yield RuntimeEvent.completed(
+                    content=content,
+                    artifact_name="specialist_result",
+                    data={
+                        "status": "partial", "summary": content,
+                        "evidence": evidence_items,
+                        "assessment": _assessment_data(current_tool_calls, current_tool_results),
+                        "continuation": {"allowed": True, "reason": "tool call budget reached"},
+                        "limitations": ["工具调用预算已用尽，未覆盖的检查不作结论。"],
+                        **({"coverage": coverage} if coverage else {}),
+                    },
+                )
+                return
             yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Discard incomplete draft")
             evidence = self._current_run_evidence(current_tool_results, current_tool_calls)
             summary_emitted = ""
@@ -754,16 +816,18 @@ class RuntimeMCPAgent:
                 content = content.strip()
             except Exception:
                 if summary_emitted:
-                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Summary failed")
-                summary_emitted = ""
-                content = await self._deterministic_partial_summary(
-                    current_tool_results, "工具调用预算已用尽", current_tool_names,
-                    current_tool_calls,
-                )
+                    content = summary_emitted
+                else:
+                    content = await self._deterministic_partial_summary(
+                        current_tool_results, "工具调用预算已用尽", current_tool_names,
+                        current_tool_calls,
+                    )
             content, evidence_items, coverage = _runtime_result(content, current_tool_calls, current_tool_results)
             reset, delta = _final_stream_delta(_display_content(content), summary_emitted)
             if reset:
-                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize partial summary")
+                if summary_emitted:
+                    content = summary_emitted
+                    delta = ""
             if delta:
                 yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
             yield RuntimeEvent.completed(
@@ -838,6 +902,28 @@ class RuntimeMCPAgent:
                 },
             )
             return
+        if _truncated_report(final_message, content, self.max_output_tokens) and emitted_content:
+            content, evidence_items, coverage = _runtime_result(
+                content, current_tool_calls, current_tool_results
+            )
+            reset, delta = _final_stream_delta(_display_content(content), emitted_content)
+            if reset:
+                content = emitted_content
+            elif delta:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+            yield RuntimeEvent.completed(
+                content=content,
+                artifact_name="specialist_result",
+                data={
+                    "status": "partial", "summary": content,
+                    "evidence": evidence_items,
+                    "assessment": _assessment_data(current_tool_calls, current_tool_results),
+                    **({"coverage": coverage} if coverage else {}),
+                    "continuation": {"allowed": True, "reason": "Agent report generation interrupted"},
+                    "limitations": ["报告生成中断，已展示文本可能不完整。"],
+                },
+            )
+            return
         if _empty_structured_result(content) or _truncated_report(final_message, content, self.max_output_tokens):
             incomplete_reason = "Agent 最终文本为空" if _empty_structured_result(content) else "Agent 报告生成中断"
             if emitted_content:
@@ -857,16 +943,18 @@ class RuntimeMCPAgent:
                 summary = summary.strip()
             except Exception:
                 if summary_emitted:
-                    yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Evidence summary failed")
-                summary_emitted = ""
-                summary = await self._deterministic_partial_summary(
-                    current_tool_results, incomplete_reason, current_tool_names,
-                    current_tool_calls, headline="本轮检查尚未形成完整结论",
-                )
+                    summary = summary_emitted
+                else:
+                    summary = await self._deterministic_partial_summary(
+                        current_tool_results, incomplete_reason, current_tool_names,
+                        current_tool_calls, headline="本轮检查尚未形成完整结论",
+                    )
             summary, evidence_items, coverage = _runtime_result(summary, current_tool_calls, current_tool_results)
             reset, delta = _final_stream_delta(_display_content(summary), summary_emitted)
             if reset:
-                yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize evidence summary")
+                if summary_emitted:
+                    summary = summary_emitted
+                    delta = ""
             if delta:
                 yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
             yield RuntimeEvent.completed(
@@ -887,7 +975,8 @@ class RuntimeMCPAgent:
         display_content = _display_content(content)
         reset, delta = _final_stream_delta(display_content, emitted_content)
         if reset:
-            yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Finalize specialist response")
+            content = emitted_content
+            delta = ""
         if delta:
             yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
         yield RuntimeEvent.completed(
@@ -916,7 +1005,7 @@ class RuntimeMCPAgent:
             raise RuntimeError("Agent model returned an empty forced summary")
         return content
 
-    async def _force_summary_chunks(self, query: str, evidence: str, *, reason: str = "调查阶段的时间预算已经用完") -> AsyncIterable[str]:
+    async def _force_summary_chunks(self, query: str, evidence: str, *, reason: str = "调查阶段已中止") -> AsyncIterable[str]:
         if self._model is None:
             raise RuntimeError("Agent model is unavailable for forced summary")
         prompt = (
@@ -927,21 +1016,21 @@ class RuntimeMCPAgent:
             "证据关联由运行时自动完成，不要生成 coverage JSON 或调用 ID。\n\n"
             f"用户问题：{query}\n\n已取得证据：\n{evidence}"
         )
-        async with asyncio.timeout(self.summary_reserve_seconds):
-            summary_model = self._model.bind(
-                max_tokens=self.summary_max_tokens,
-                extra_body={
-                    "chat_template_kwargs": {"enable_thinking": False}
-                },
-            )
-            received = False
-            async for response in summary_model.astream([HumanMessage(content=prompt)]):
-                content = getattr(response, "content", "")
-                if isinstance(content, str) and content:
-                    received = True
-                    yield content
-            if not received:
-                raise RuntimeError("Agent model returned an empty forced summary")
+        summary_model = self._model.bind(
+            max_tokens=self.summary_max_tokens,
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+        received = False
+        async for response in _with_idle_timeout(
+            summary_model.astream([HumanMessage(content=prompt)]),
+            self.idle_timeout_seconds,
+        ):
+            content = getattr(response, "content", "")
+            if isinstance(content, str) and content:
+                received = True
+                yield content
+        if not received:
+            raise RuntimeError("Agent model returned an empty forced summary")
 
     async def _deterministic_partial_summary(
         self,

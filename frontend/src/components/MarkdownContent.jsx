@@ -1,9 +1,10 @@
 import React from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { normalizeMarkdown } from '../state/markdown'
+import { normalizeMarkdown, normalizeReportHeadings } from '../state/markdown'
 
-export default function MarkdownContent({ children, compact = false, interactiveLinks = true }) {
+export default function MarkdownContent({ children, compact = false, interactiveLinks = true, reportHeadings = false }) {
+  const content = normalizeMarkdown(children)
   return <div className={`markdown-content${compact ? ' is-compact' : ''}`}>
     <ReactMarkdown
       remarkPlugins={[remarkGfm]}
@@ -13,6 +14,6 @@ export default function MarkdownContent({ children, compact = false, interactive
           ? <a href={href} target="_blank" rel="noreferrer noopener">{linkChildren}</a>
           : <span>{linkChildren}</span>,
       }}
-    >{normalizeMarkdown(children)}</ReactMarkdown>
+    >{reportHeadings ? normalizeReportHeadings(content) : content}</ReactMarkdown>
   </div>
 }

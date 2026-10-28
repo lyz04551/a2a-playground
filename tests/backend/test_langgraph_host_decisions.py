@@ -6,11 +6,11 @@ import json
 import pytest
 from langchain_core.messages import AIMessage
 
-from backend.host.langgraph.decisions import LangGraphDecisionPort
-from backend.host.orchestration.engine import _terminal_response
+from backend.host.langgraph.decisions import LangGraphDecisionPort, _compact_decision_state
 from backend.host.orchestration.models import (
     DelegationResult,
     Evaluation,
+    HostDecision,
     HostRunState,
     ObservedTask,
     PlannedTask,
@@ -25,6 +25,140 @@ class FakeModel:
     async def ainvoke(self, messages):
         self.calls.append(messages)
         return AIMessage(content=self.responses.pop(0))
+
+    async def astream(self, messages):
+        self.calls.append(messages)
+        for content in self.responses.pop(0):
+            yield AIMessage(content=content)
+
+
+def test_host_decision_state_bounds_large_specialist_evidence():
+    task = PlannedTask(id="audit", agent_id="ops", objective="检查 Pod", completion_criteria=["检查日志"])
+    state = HostRunState(goal="检查 Pod", observations={
+        "audit": ObservedTask(
+            task=task,
+            result=DelegationResult(state="completed", output={
+                "summary": "摘要" * 5000,
+                "evidence": [{"call_id": f"call-{index}", "result_excerpt": "LONG_LOG" * 2000} for index in range(20)],
+                "coverage": {"scope": "Pods", "expected_targets": ["Pod/default/api"], "inspected_targets": ["Pod/default/api"], "enumeration_complete": True, "evidence_call_ids": ["call-1"]},
+            }),
+            evaluation=Evaluation(outcome="insufficient", reason="日志未核实"),
+            actual_agent_id="ops",
+        ),
+    })
+
+    compact = _compact_decision_state(state)
+
+    output = compact["observations"]["audit"]["result"]["output"]
+    assert len(str(compact)) < 12000
+    assert output["coverage"]["expected_targets"] == ["Pod/default/api"]
+    assert output["evidence"][-1]["call_id"] == "call-19"
+
+
+@pytest.mark.anyio
+async def test_react_synthesis_streams_model_chunks_with_evidence_context():
+    model = FakeModel(["已核实", "，仍有未知。"])
+    task = PlannedTask(id="audit", agent_id="ops", objective="审查 Deployment", completion_criteria=["检查副本"])
+    state = HostRunState(goal="审查 Deployment", observations={
+        "audit": ObservedTask(
+            task=task,
+            result=DelegationResult(state="completed", text="已取得副本信息"),
+            evaluation=Evaluation(outcome="sufficient", reason="工具证据已返回"),
+            actual_agent_id="ops",
+        ),
+    })
+    decision = HostDecision(action="complete", reason="检查完成", response="旧草稿")
+
+    chunks = [chunk async for chunk in LangGraphDecisionPort(model).synthesize_react_stream("审查 Deployment", state, decision)]
+
+    assert chunks == ["已核实", "，仍有未知。"]
+    assert "工具证据已返回" in str(model.calls[0])
+
+
+@pytest.mark.anyio
+async def test_react_synthesis_uses_each_rounds_evidence_and_limitations():
+    model = FakeModel("已核实部分副本；其余检查仍需继续。")
+    task = PlannedTask(id="audit", agent_id="ops", objective="审查 Deployment", completion_criteria=["检查副本"], coverage_kinds=["Deployment"])
+    state = HostRunState(goal="审查 Deployment", observations={
+        "audit": ObservedTask(
+            task=task,
+            result=DelegationResult(state="completed", output={
+                "status": "partial", "summary": "已取得副本信息", "limitations": ["滚动更新未检查"],
+                "evidence": [{"call_id": "call-1", "tool": "get_k8s_resource", "result_excerpt": "readyReplicas=1"}],
+                "coverage": {
+                    "scope": "observed MCP resources",
+                    "expected_targets": ["Namespace/default", "Deployment/default/api"],
+                    "inspected_targets": ["Deployment/default/api"],
+                    "enumeration_complete": True,
+                    "evidence_call_ids": ["call-1"],
+                },
+            }),
+            evaluation=Evaluation(outcome="insufficient", reason="滚动更新缺失"),
+            actual_agent_id="ops",
+        ),
+    })
+    decision = HostDecision(action="stop", reason="当前无法继续", response="旧草稿")
+
+    answer = await LangGraphDecisionPort(model).synthesize_react("审查 Deployment", state, decision)
+
+    assert answer == "已核实部分副本；其余检查仍需继续。"
+    payload = str(model.calls[0])
+    assert "call-1" in payload
+    assert "滚动更新未检查" in payload
+    assert "Namespace/default" not in payload
+    assert "旧草稿" not in answer
+
+
+@pytest.mark.anyio
+async def test_deployment_audit_coverage_excludes_cluster_and_namespace_metadata():
+    model = FakeModel(json.dumps({"outcome": "sufficient", "reason": "all Deployments inspected"}))
+    task = PlannedTask(
+        id="audit", agent_id="ops", objective="检查 Deployment",
+        completion_criteria=["每个 Deployment 已检查"],
+        coverage_required=True, coverage_kinds=["Deployment"],
+    )
+    result = DelegationResult(state="completed", output={
+        "summary": "Deployment 已检查",
+        "coverage": {
+            "scope": "observed MCP resources",
+            "expected_targets": ["Cluster/default", "Namespace/default", "Deployment/default/api"],
+            "inspected_targets": ["Deployment/default/api"],
+            "enumeration_complete": True,
+            "evidence_call_ids": ["list-1", "get-1"],
+        },
+    })
+    evaluation = await LangGraphDecisionPort(model).evaluate(task, result)
+    assert evaluation.outcome == "sufficient"
+
+
+@pytest.mark.anyio
+async def test_next_host_decision_sees_only_requested_audit_targets():
+    model = FakeModel(json.dumps({"action": "stop", "reason": "budget reached", "response": "部分完成"}))
+    task = PlannedTask(
+        id="audit", agent_id="ops", objective="审查 Deployment",
+        completion_criteria=["逐项检查"], coverage_required=True,
+        coverage_kinds=["Deployment"],
+    )
+    state = HostRunState(goal="审查 Deployment", observations={
+        "audit": ObservedTask(
+            task=task,
+            result=DelegationResult(state="completed", output={
+                "summary": "部分已检查",
+                "coverage": {
+                    "scope": "observed MCP resources",
+                    "expected_targets": ["Namespace/default", "Deployment/default/api"],
+                    "inspected_targets": ["Deployment/default/api"],
+                    "enumeration_complete": True,
+                    "evidence_call_ids": ["get-1"],
+                },
+            }),
+            evaluation=Evaluation(outcome="insufficient", reason="还缺滚动更新状态"),
+            actual_agent_id="ops",
+        ),
+    })
+    await LangGraphDecisionPort(model).decide_next("审查 Deployment", AGENTS, state)
+    assert "Deployment/default/api" in str(model.calls[0])
+    assert "Namespace/default" not in str(model.calls[0])
 
 
 class SchemaAwareModel:
@@ -118,27 +252,6 @@ async def test_model_evaluates_task_specific_criteria_from_tool_evidence():
     assert evaluation.outcome == "insufficient"
     assert "status and events" in evaluation.reason
     assert "describe_k8s_pod" in str(model.calls[0])
-
-
-def test_host_final_response_cannot_claim_full_coverage_after_insufficient_evaluation():
-    task = PlannedTask(
-        id="audit", agent_id="ops", objective="检查全部对象",
-        completion_criteria=["逐一验证"], coverage_required=True,
-    )
-    state = HostRunState(goal="检查全部对象", observations={
-        task.id: ObservedTask(
-            task=task,
-            result=DelegationResult(state="completed", text="声称全部检查完毕"),
-            evaluation=Evaluation(outcome="insufficient", reason="runtime tool evidence is unavailable"),
-            actual_agent_id="ops",
-        ),
-    })
-
-    final = _terminal_response("检查全部对象", state, "全部对象已检查，任务完成")
-
-    assert final.startswith("本次任务部分完成")
-    assert "runtime tool evidence is unavailable" in final
-    assert "全部对象已检查，任务完成" not in final
 
 
 @pytest.mark.anyio

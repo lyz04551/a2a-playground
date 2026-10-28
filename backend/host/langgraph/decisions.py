@@ -27,6 +27,32 @@ from backend.host.orchestration.validation import (
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+def _compact_decision_state(state: HostRunState) -> dict:
+    compact = state.model_dump(mode="json")
+    for observation in compact.get("observations", {}).values():
+        task = observation.get("task") or {}
+        task["input"] = str(task.get("input") or "")[:2000]
+        result = observation.get("result") or {}
+        result["text"] = str(result.get("text") or "")[:1200]
+        output = result.get("output") or {}
+        output["summary"] = str(output.get("summary") or "")[:1800]
+        output["evidence"] = [
+            {**item, "result_excerpt": str(item.get("result_excerpt") or "")[:400]}
+            for item in output.get("evidence", [])[-8:]
+            if isinstance(item, dict)
+        ]
+        for field in ("findings", "resources", "recommendations", "limitations"):
+            output[field] = output.get(field, [])[-8:]
+        assessment = output.get("assessment") or {}
+        for field in ("facts", "inferences", "unknowns"):
+            assessment[field] = [
+                {key: str(value)[:400] if isinstance(value, str) else value for key, value in item.items()}
+                for item in assessment.get(field, [])[-8:]
+                if isinstance(item, dict)
+            ]
+    return compact
+
+
 def _response_language(request: str) -> str:
     return "zh-CN" if any("\u4e00" <= char <= "\u9fff" for char in request) else "en"
 
@@ -45,10 +71,23 @@ def _planning_agents(agents: list[dict]) -> list[dict]:
     ]
 
 
+def _scoped_coverage(task: PlannedTask, coverage) -> dict:
+    data = coverage.model_dump()
+    kinds = set(task.coverage_kinds)
+    if kinds:
+        for field in ("expected_targets", "inspected_targets"):
+            data[field] = [
+                target for target in data[field]
+                if target.split("/", 1)[0] in kinds
+            ]
+    return data
+
+
 class LangGraphDecisionPort:
-    def __init__(self, model=None, *, model_factory=None):
+    def __init__(self, model=None, *, model_factory=None, stream_model_factory=None):
         self._model = model
         self._model_factory = model_factory
+        self._stream_model_factory = stream_model_factory
         self._decision_timeout_seconds = float(
             os.getenv("HOST_DECISION_TIMEOUT_SECONDS", "45")
         )
@@ -56,16 +95,32 @@ class LangGraphDecisionPort:
     def _current_model(self):
         return self._model_factory() if self._model_factory else self._model
 
+    def _current_stream_model(self):
+        return self._stream_model_factory() if self._stream_model_factory else self._current_model()
+
     async def decide_next(
         self,
         request: str,
         agents: list[dict],
         state: HostRunState,
     ) -> HostDecision:
-        compact_state = state.model_dump(mode="json")
+        compact_state = _compact_decision_state(state)
         for observation in compact_state.get("observations", {}).values():
             result = observation.get("result", {})
-            result["text"] = str(result.get("text") or "")[:2000]
+            output = result.get("output") or {}
+            kinds = set((observation.get("task") or {}).get("coverage_kinds") or [])
+            coverage = output.get("coverage")
+            if kinds and isinstance(coverage, dict):
+                for field in ("expected_targets", "inspected_targets"):
+                    coverage[field] = [
+                        target for target in coverage.get(field, [])
+                        if target.split("/", 1)[0] in kinds
+                    ]
+                assessment = output.get("assessment") or {}
+                assessment["unknowns"] = [
+                    item for item in assessment.get("unknowns", [])
+                    if str(item.get("resource_id") or "").split("/", 1)[0] in kinds
+                ]
         payload = {
             "request": request,
             "response_language": _response_language(request),
@@ -99,7 +154,11 @@ tool. If tool_catalog_state is unavailable, do not claim a tool exists.
 Never repeat semantic work or a rejected
 write. For a finite multi-target audit, set coverage_required=true on its
 PlannedTask; the specialist must enumerate and account for the target set.
-Never call such a task sufficient without a complete coverage manifest.
+Set coverage_kinds to the resource kinds the user asked to inspect (for
+example ["Deployment"]); discovery-only Cluster and Namespace metadata must
+not count as audit targets unless the user requested those objects.
+Never call such a task sufficient without complete coverage of the requested
+resource kinds and evidence for every other completion criterion.
 The specialist assessment.facts are runtime-recorded tool returns; interpret
 their result excerpts before stating a resource fact. Treat inferences as
 uncertain and assessment.unknowns as unresolved. Do not promote report prose
@@ -111,7 +170,9 @@ For a continuation, carry forward the prior coverage target list and name only
 the remaining targets in the new task input. Do not request another target
 enumeration when the prior manifest says enumeration_complete=true for the
 same scope; request a refresh only if freshness is relevant or prior evidence
-is incomplete.
+is incomplete. Set continues_task_id to the prior task's ID whenever a task
+continues an incomplete observation, even when a different Agent is now the
+best capable choice. The Host will hand that Agent the prior tool evidence.
 A mutation requires a successful Security precheck observation;
 mutation and verification must never be delegated in the same round. Wait for a
 successful mutation observation, then delegate verification to a capable Agent in the next round.
@@ -265,16 +326,25 @@ Maximum six tasks and two attempts each.""",
             )
         if task.coverage_required and (result.output is None or result.output.coverage is None):
             return Evaluation(outcome="insufficient", reason="runtime tool evidence is unavailable")
-        if task.coverage_required and result.output is not None and result.output.coverage is not None and not result.output.coverage.complete:
+        if task.coverage_required and result.output is not None and result.output.coverage is not None:
             coverage = result.output.coverage
-            missing = sorted(set(coverage.expected_targets) - set(coverage.inspected_targets))
-            reason = "target enumeration is incomplete" if not coverage.enumeration_complete else "runtime target coverage is incomplete"
-            if missing:
-                reason += f"; unverified targets: {', '.join(missing[:20])}"
-            return Evaluation(
-                outcome="insufficient",
-                reason=reason,
+            scoped = _scoped_coverage(task, coverage)
+            expected = set(scoped["expected_targets"])
+            inspected = set(scoped["inspected_targets"])
+            missing = sorted(expected - inspected)
+            scoped_complete = (
+                bool(coverage.evidence_call_ids)
+                and coverage.enumeration_complete
+                and not missing
             )
+            if not scoped_complete:
+                reason = "target enumeration is incomplete" if not coverage.enumeration_complete else "runtime target coverage is incomplete"
+                if missing:
+                    reason += f"; unverified targets: {', '.join(missing[:20])}"
+                return Evaluation(
+                    outcome="insufficient",
+                    reason=reason,
+                )
         return await self._invoke_structured(
             Evaluation,
             """Evaluate the Agent result against the completion criteria.
@@ -291,8 +361,17 @@ Approval-required work is blocked, never sufficient.""",
         plan: HostPlan,
         results: dict[str, DelegationResult],
     ) -> str:
-        response = await self._current_model().ainvoke(
-            [
+        return "".join([
+            chunk async for chunk in self.synthesize_stream(request, plan, results)
+        ])
+
+    async def synthesize_stream(
+        self,
+        request: str,
+        plan: HostPlan,
+        results: dict[str, DelegationResult],
+    ):
+        messages = [
                 SystemMessage(content=(
                     "你是 Host Agent。根据结构化计划和各子任务终态，用中文"
                     "直接回答用户。按已验证事实、推断、未知项区分结论；"
@@ -312,9 +391,80 @@ Approval-required work is blocked, never sufficient.""",
                     },
                     ensure_ascii=False,
                 )),
-            ]
-        )
-        return str(response.content or "")
+        ]
+        async for response in self._current_stream_model().astream(messages):
+            content = response.content
+            if isinstance(content, str) and content:
+                yield content
+
+    async def synthesize_react(
+        self,
+        request: str,
+        state: HostRunState,
+        decision: HostDecision,
+    ) -> str:
+        return "".join([
+            chunk async for chunk in self.synthesize_react_stream(request, state, decision)
+        ])
+
+    async def synthesize_react_stream(
+        self,
+        request: str,
+        state: HostRunState,
+        decision: HostDecision,
+    ):
+        """Write the Host's final answer from all observed specialist work."""
+        observations = []
+        for task_id, observed in state.observations.items():
+            output = observed.result.output
+            observations.append({
+                "task_id": task_id,
+                "agent_id": observed.actual_agent_id,
+                "objective": observed.task.objective,
+                "completion_criteria": observed.task.completion_criteria,
+                "evaluation": observed.evaluation.model_dump(),
+                "result_state": observed.result.state,
+                "summary": (output.summary if output else observed.result.text)[:2500],
+                "limitations": output.limitations if output else [],
+                "coverage": _scoped_coverage(observed.task, output.coverage) if output and output.coverage else None,
+                "assessment": output.assessment.model_dump() if output else None,
+                "evidence": [
+                    {
+                        "call_id": item.get("call_id"),
+                        "tool": item.get("tool"),
+                        "resource_ids": item.get("resource_ids", []),
+                        "result_state": item.get("result_state"),
+                        "result_excerpt": str(item.get("result_excerpt") or "")[:800],
+                    }
+                    for item in (output.evidence[:12] if output else [])
+                    if isinstance(item, dict)
+                ],
+            })
+        payload = {
+            "request": request,
+            "final_action": decision.action,
+            "decision_reason": decision.reason,
+            "observations": observations,
+        }
+        messages = [
+            SystemMessage(content=(
+                "你是 Host Agent。现在根据所有轮次的子 Agent 结果，直接给用户写最终总结。"
+                "先判断原始目标是否完成，再汇总有真实工具证据支持的结论、需要关注的对象和仍未知的项目。"
+                "子 Agent 的文字报告是线索，不能替代工具证据；不要把未读取对象写成已验证。"
+                "若评估仍为 insufficient、failed 或 blocked，明确说明部分完成或受阻，"
+                "不要声称全量完成。不要照抄评估器的英文内部原因或生成固定模板。"
+                "只回答用户，不输出 JSON。按用户请求的语言回答。"
+            )),
+            HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+        ]
+        received = False
+        async for response in self._current_stream_model().astream(messages):
+            content = response.content
+            if isinstance(content, str) and content:
+                received = True
+                yield content
+        if not received:
+            raise RuntimeError("Host final synthesis was empty")
 
     async def _invoke_structured(
         self,

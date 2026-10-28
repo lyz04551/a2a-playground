@@ -22,7 +22,7 @@ from a2a.types import (
 from a2a.utils.constants import AGENT_CARD_WELL_KNOWN_PATH, PREV_AGENT_CARD_WELL_KNOWN_PATH
 
 logger = logging.getLogger(__name__)
-A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "120"))
+A2A_CLIENT_TIMEOUT = float(os.getenv("A2A_CLIENT_TIMEOUT", "360"))
 
 
 class A2AClientError(RuntimeError):

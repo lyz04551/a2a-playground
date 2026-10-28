@@ -1,15 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { approvalStatusAfterDecision, buildContinuationPrompt, buildRunReconnectCommand, canChangeMode, enrichWorkspaceMessages, getCoveragePresentation, getSystemStatus, getWorkspaceSendState, getWorkspaceGaps, nextWorkspaceMode, resolveWorkspaceRefreshResults, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
-
-test('coverage card only appears for explicit itemized audits', () => {
-  const incidental = { coverage: { expected_targets: Array.from({ length: 38 }, (_, index) => `Pod/default/${index}`), inspected_targets: [], enumeration_complete: true } }
-  assert.equal(getCoveragePresentation([incidental]), null)
-  assert.equal(getCoveragePresentation([{ ...incidental, coverageRequired: true }])?.total, 38)
-  assert.deepEqual(getCoveragePresentation([{ coverageRequired: true, coverage: { expected_targets: ['Pod/default/a', 'Pod/default/b'], inspected_targets: ['Pod/default/a'], enumeration_complete: true }, evaluation: 'insufficient' }]), {
-    checked: 1, total: 2, missing: ['Pod/default/b'], enumerationComplete: true, complete: false,
-  })
-})
+import { approvalStatusAfterDecision, buildContinuationPrompt, buildRunReconnectCommand, canChangeMode, enrichWorkspaceMessages, getSystemStatus, getWorkspaceSendState, getWorkspaceGaps, nextWorkspaceMode, resolveWorkspaceRefreshResults, restoreWorkspaceState, selectLatestConversationRun } from './workspace/workspaceState.js'
 
 test('mode can change only before a conversation has messages', () => {
   assert.equal(canChangeMode({ messageCount: 0 }), true)

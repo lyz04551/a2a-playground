@@ -17,6 +17,30 @@ class FakeMCPClient:
         return f"called:{name}"
 
 
+@pytest.mark.anyio
+async def test_long_pod_logs_are_bounded_before_reaching_model():
+    class LargeLogClient(FakeMCPClient):
+        async def call_tool(self, name, arguments):
+            return "old line\n" + "x" * 10000 + "\nrecent error"
+
+    adapter = MCPToolAdapter(
+        LargeLogClient(),
+        ToolPolicy(ToolPolicyConfig(allow=["get_k8s_*"])),
+        agent_id="k8s-ops",
+    )
+    tool = adapter.build_tools([{
+        "name": "get_k8s_pod_logs",
+        "description": "Read logs",
+        "input_schema": {"type": "object", "properties": {}},
+    }])[0]
+
+    result = await tool.ainvoke({})
+
+    assert len(result) < 3000
+    assert "recent error" in result
+    assert "truncated" in result.lower()
+
+
 def test_schema_model_enforces_required_and_accepts_nested_values():
     model = schema_to_model(
         "PatchArgs",
