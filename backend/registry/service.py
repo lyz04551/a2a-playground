@@ -6,16 +6,20 @@ from typing import Any
 class AgentRegistry:
     """Stable-ID capability registry backed by SQLite."""
 
-    def __init__(self, repository):
+    def __init__(self, repository, *, allowed_ids: set[str] | None = None):
         self.repository = repository
+        self.allowed_ids = allowed_ids
 
     def get(self, agent_id: str) -> dict[str, Any] | None:
+        if self.allowed_ids is not None and agent_id not in self.allowed_ids:
+            return None
         return self.repository.get_agent(agent_id)
 
     def list(self) -> list[dict[str, Any]]:
         return [
             agent for agent in self.repository.list_agents()
             if not agent.get("superseded_by")
+            and (self.allowed_ids is None or agent["id"] in self.allowed_ids)
         ]
 
     def capability_profile(self, agent_id: str) -> dict[str, Any] | None:

@@ -84,6 +84,16 @@ test('a reset draft remains reviewable beside the completed Agent report', () =>
   assert.equal(state.messages[0].progress, true)
 })
 
+test('task keeps all streamed draft segments for the trace panel', () => {
+  let state = reduceRunEvent(emptyRunState, event('run.started', 1, { mode: 'direct' }))
+  state = reduceRunEvent(state, event('task.started', 2, { agent_id: 'security' }))
+  state = reduceRunEvent(state, event('message.delta', 3, { content: '先检查 RBAC' }, { parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.reset', 4, {}, { parent_task_id: 'root' }))
+  state = reduceRunEvent(state, event('message.delta', 5, { content: '再检查 NetworkPolicy' }, { parent_task_id: 'root' }))
+  assert.deepEqual(state.tasksById['task-1'].draftSegments, ['先检查 RBAC'])
+  assert.equal(state.tasksById['task-1'].streamingOutput, '再检查 NetworkPolicy')
+})
+
 test('restoring saved messages reinserts archived Agent drafts before their final report', () => {
   const taskId = 'ops'
   const rawEvents = [

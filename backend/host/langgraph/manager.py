@@ -26,7 +26,10 @@ class LangGraphHostManager:
     def __init__(self, *, registry=None, gateway=None, decisions=None, config_loader=None):
         settings = AppSettings.from_env()
         self._gateway = gateway or A2AGateway(database.repository)
-        self._registry = registry or AgentRegistry(database.repository)
+        self._registry = registry or AgentRegistry(
+            database.repository,
+            allowed_ids=set(settings.auto_agent_ids) if settings.auto_agent_ids else None,
+        )
         self._host_agent = LangGraphHostAgent(gateway=self._gateway, config_loader=config_loader)
         self._decisions = decisions or LangGraphDecisionPort(
             model_factory=lambda: self._host_agent._make_model(streaming=False),
@@ -44,6 +47,8 @@ class LangGraphHostManager:
 
     def register_agents_from_db(self, agents: list[dict]):
         for a in agents:
+            if self._registry.get(a["id"]) is None:
+                continue
             try:
                 card = AgentCard(
                     name=a.get("name", "Unknown"),

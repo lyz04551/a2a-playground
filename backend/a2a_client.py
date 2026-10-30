@@ -373,6 +373,7 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
         sdk_msg = _make_sdk_message(text, conversation_id)
         task_id = ""
         accumulated = ""
+        has_explicit_text = False
         artifacts = []
         try:
             async for event in client.send_message(sdk_msg):
@@ -393,10 +394,10 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                     if isinstance(update, TaskStatusUpdateEvent):
                         msg = update.status.message
                         if msg:
-                            event_type = "text"
                             metadata = msg.metadata or {}
-                            if "event_type" in metadata:
-                                event_type = metadata["event_type"]
+                            event_type = metadata.get("event_type") or "thinking"
+                            if event_type == "text" and metadata.get("event_type"):
+                                has_explicit_text = True
                             data = metadata.get("data") or {}
                             for part in msg.parts:
                                 t = _get_text_from_part(part)
@@ -437,8 +438,13 @@ async def stream_message_to_agent(agent_url: str, text: str, conversation_id: st
                             if update.final
                             else ""
                         )
-                        if artifact_text and not accumulated:
-                            accumulated += artifact_text
+                        if artifact_text and not has_explicit_text and artifact_text != accumulated:
+                            if accumulated:
+                                yield {"type": "text_reset", "state": state, "task_id": task_id}
+                            accumulated = artifact_text
+                            yield {"type": "text", "text": artifact_text, "state": state, "task_id": task_id}
+                        elif artifact_text and not accumulated:
+                            accumulated = artifact_text
                             yield {"type": "text", "text": artifact_text, "state": state, "task_id": task_id}
                         yield {"type": "status", "state": state, "final": update.final, "task_id": task_id}
                     elif isinstance(update, TaskArtifactUpdateEvent):

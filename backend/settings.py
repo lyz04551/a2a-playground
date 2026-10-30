@@ -21,6 +21,7 @@ class AppSettings:
     host_max_rounds: int = 8
     host_max_concurrency: int = 3
     host_max_attempts: int = 2
+    auto_agent_ids: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -45,6 +46,10 @@ class AppSettings:
             host_max_rounds=host_max_rounds,
             host_max_concurrency=host_max_concurrency,
             host_max_attempts=host_max_attempts,
+            auto_agent_ids=tuple(
+                item.strip() for item in os.getenv("AUTO_AGENT_IDS", "").split(",")
+                if item.strip()
+            ),
         )
 
 

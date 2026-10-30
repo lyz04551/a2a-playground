@@ -104,6 +104,13 @@
 .workspace-connection.is-interrupted { border-color: #f59e0b; color: #b45309; }
 .workspace-connection.is-recovered { border-color: #34d399; color: #047857; }
 
+.run-timeline__task > span { display: block; overflow: visible; white-space: normal; overflow-wrap: anywhere; -webkit-line-clamp: unset; }
+.agent-thinking__drafts .agent-thinking__scroll { max-height: none; overflow: visible; }
+.agent-thinking__drafts p, .task-details__drafts p { margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.agent-thinking__drafts p:last-child, .task-details__drafts p:last-child { margin-bottom: 0; }
+.task-details__drafts { margin-top: 18px; padding: 14px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-surface-subtle); }
+.task-details__drafts strong { display: block; margin-bottom: 10px; }
+
 .workspace-tool__actions {
   display: flex;
   gap: 8px;

@@ -30,12 +30,14 @@ function AgentThinking({ task, zh, now }) {
   const active = ['working', 'delegated', 'retrying'].includes(task.status)
   const lastAt = task.thinkingAt || task.startedAt
   const transcript = task.thinkingTranscript || task.thinkingExcerpt || ''
+  const drafts = task.draftSegments || []
+  const currentDraft = active ? task.streamingOutput || '' : ''
   const scrollRef = useRef(null)
   const [following, setFollowing] = useState(true)
   useEffect(() => {
     if (active && following && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight
   }, [active, following, transcript])
-  if (!active && !transcript) return null
+  if (!active && !transcript && !drafts.length) return null
   const seconds = lastAt ? Math.max(0, Math.floor((now - Date.parse(lastAt)) / 1000)) : 0
   const title = active
     ? (task.thinkingAt ? (zh ? '正在分析' : 'Analyzing') : (zh ? '等待 Agent 输出' : 'Awaiting Agent output'))
@@ -48,6 +50,13 @@ function AgentThinking({ task, zh, now }) {
       {active && !following && <button className="agent-thinking__latest" type="button" onClick={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; setFollowing(true) }}>{zh ? '跳到最新' : 'Jump to latest'}</button>}
     </details>}
     {!transcript && active && <p className="agent-thinking__waiting">{zh ? '模型尚未返回分析文本；工具活动会显示在下方。' : 'No analysis text yet; tool activity appears below.'}</p>}
+    {(drafts.length > 0 || currentDraft) && <details className="agent-thinking__drafts" open={active || undefined}>
+      <summary>{zh ? '生成记录 · 尚未核实' : 'Generated drafts · unverified'}</summary>
+      <div className="agent-thinking__scroll" role="region" aria-label={zh ? 'Agent 生成记录' : 'Agent generated drafts'}>
+        {drafts.map((draft, index) => <p key={index}>{draft}</p>)}
+        {currentDraft && <p>{currentDraft}</p>}
+      </div>
+    </details>}
   </div>
 }
 

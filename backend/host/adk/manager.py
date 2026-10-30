@@ -32,7 +32,10 @@ class ADKHostManager:
     def __init__(self, *, registry=None, gateway=None, decisions=None):
         settings = AppSettings.from_env()
         self._host_agent = HostAgent()
-        self._registry = registry or AgentRegistry(database.repository)
+        self._registry = registry or AgentRegistry(
+            database.repository,
+            allowed_ids=set(settings.auto_agent_ids) if settings.auto_agent_ids else None,
+        )
         self._gateway = gateway or A2AGateway(database.repository)
         self._decisions = decisions or ADKDecisionPort(
             LangGraphHostAgent._make_model(streaming=False)
@@ -54,6 +57,8 @@ class ADKHostManager:
 
     def register_agents_from_db(self, agents: list[dict]):
         for a in agents:
+            if self._registry.get(a["id"]) is None:
+                continue
             try:
                 card = AgentCard(
                     name=a.get("name", "Unknown"),

@@ -324,7 +324,12 @@ function reduceNormalizedEvent(state, event) {
   }
   if (event.type === 'message.reset') {
     const task = event.task_id ? state.tasksById[event.task_id] : null
-    const next = task ? updateTask(state, event, { streamingOutput: '' }) : state
+    const next = task ? updateTask(state, event, {
+      streamingOutput: '',
+      draftSegments: task.streamingOutput
+        ? [...(task.draftSegments || []), task.streamingOutput]
+        : (task.draftSegments || []),
+    }) : state
     const progressId = `progress:${event.task_id}`
     const progress = next.messages.find(message => message.id === progressId)
     const drafts = next.messages.filter(message => message.taskId === event.task_id && !message.completed && !message.progress && message.content.trim())
@@ -345,7 +350,7 @@ function reduceNormalizedEvent(state, event) {
       ? `${current?.content || ''}${data.content || data.text || ''}`
       : (data.content || data.text || current?.content || '')
     let next = state
-    if (event.parent_task_id !== null && event.task_id) {
+    if (event.task_id) {
       const task = state.tasksById[event.task_id]
       const output = event.type === 'message.delta'
         ? `${task?.streamingOutput || ''}${data.content || data.text || ''}`
@@ -354,8 +359,9 @@ function reduceNormalizedEvent(state, event) {
         streamingOutput: output,
         ...(event.type === 'message.completed' ? { output } : {}),
       })
-    } else if (event.type === 'message.completed' && state.run?.mode !== 'direct') {
-      next = { ...state, hostSummary: content }
+    }
+    if (event.parent_task_id === null && event.type === 'message.completed' && state.run?.mode !== 'direct') {
+      next = { ...next, hostSummary: content }
     }
     const isHostMessage = event.parent_task_id === null && state.run?.mode !== 'direct'
     const messages = event.type === 'message.completed' && event.task_id

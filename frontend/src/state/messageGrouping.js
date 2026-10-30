@@ -11,3 +11,7 @@ export function groupAgentDrafts(messages = []) {
   })
   return grouped.filter(message => !message.progress || !attached.has(message.taskId))
 }
+
+export function visibleConversationMessages(messages = [], loading = false) {
+  return messages.filter(message => !message.progress)
+}

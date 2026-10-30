@@ -53,6 +53,7 @@ export default function RunTracePanel({ run = {}, stage, agents = [], language =
         {details && <div className="task-details">
           <div className="task-details__heading"><h3>{details.objective}</h3><Tag>{statusLabel(details.status || 'queued', zh)}</Tag><small>{details.agentName}</small></div>
           <section className="task-details__report"><strong>{zh ? '返回结果' : 'Result'}</strong><MarkdownContent>{formatAgentOutput(details.resultText)}</MarkdownContent></section>
+          {(details.draftSegments?.length > 0 || (details.status !== 'completed' && details.streamingOutput)) && <section className="task-details__drafts"><strong>{zh ? '生成记录 · 尚未核实' : 'Generated drafts · unverified'}</strong>{details.draftSegments?.map((draft, index) => <p key={index}>{draft}</p>)}{details.status !== 'completed' && details.streamingOutput && <p>{details.streamingOutput}</p>}</section>}
           {details.assessment && <section className="task-evidence"><strong>{zh ? '证据分类' : 'Evidence classification'}</strong>
             <p>{zh ? '已验证工具结果' : 'Observed tool results'}: {details.assessment.facts?.length || 0}</p>
             {!!details.assessment.inferences?.length && <p>{zh ? '推断' : 'Inferences'}: {details.assessment.inferences.length}</p>}
