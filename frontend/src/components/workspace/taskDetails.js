@@ -32,6 +32,13 @@ export function groupToolCalls(tools = []) {
   return [...groups.values()]
 }
 
+export function taskDurationMs(task = {}, now = Date.now()) {
+  if (Number.isFinite(task.durationMs)) return task.durationMs
+  if (!['working', 'delegated', 'retrying'].includes(task.status)) return null
+  const startedAt = Date.parse(task.startedAt || '')
+  return Number.isFinite(startedAt) ? Math.max(0, now - startedAt) : null
+}
+
 export function buildTaskDetails(task = {}, tasks = [], agents = []) {
   const effectiveAgentId = task.replacedAgentId || task.agentId
   const agent = agents.find(item => item.id === effectiveAgentId)

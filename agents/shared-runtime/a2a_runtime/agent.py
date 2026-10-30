@@ -223,7 +223,7 @@ def _truncated_report(message: AIMessage | None, content: str, token_limit: int 
     output_tokens = usage.get("output_tokens") or token_usage.get("completion_tokens") or 0
     return bool(token_limit and output_tokens >= token_limit)
 
-from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.runnables import RunnableLambda
 from langchain_openai import ChatOpenAI  #调用 OpenAI 兼容模型
 from langgraph.errors import GraphRecursionError
@@ -930,34 +930,23 @@ class RuntimeMCPAgent:
             if emitted_content:
                 yield RuntimeEvent(type=RuntimeEventType.TEXT_RESET, content="Replace incomplete draft")
             evidence = self._current_run_evidence(current_tool_results, current_tool_calls)
-            summary_emitted = ""
+            summary = ""
             try:
-                summary = ""
-                async for chunk in self._force_summary_chunks(query, evidence, reason=incomplete_reason):
+                async for chunk in self._force_summary_chunks(query, evidence):
                     summary += chunk
-                    visible = _stream_visible_content(summary)
-                    if visible.startswith(summary_emitted):
-                        delta = visible[len(summary_emitted):]
-                        if delta:
-                            yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
-                            summary_emitted = visible
                 summary = summary.strip()
             except Exception:
-                if summary_emitted:
-                    summary = summary_emitted
-                else:
+                if not summary.strip():
                     summary = await self._deterministic_partial_summary(
                         current_tool_results, incomplete_reason, current_tool_names,
                         current_tool_calls, headline="本轮检查尚未形成完整结论",
                     )
+            summary = _display_content(summary).strip()
+            if summary and not re.match(r"^#{1,6}\s", summary):
+                summary = f"# {self.config.name} 部分检查报告\n\n{summary}"
             summary, evidence_items, coverage = _runtime_result(summary, current_tool_calls, current_tool_results)
-            reset, delta = _final_stream_delta(_display_content(summary), summary_emitted)
-            if reset:
-                if summary_emitted:
-                    summary = summary_emitted
-                    delta = ""
-            if delta:
-                yield RuntimeEvent(type=RuntimeEventType.TEXT, content=delta)
+            if summary:
+                yield RuntimeEvent(type=RuntimeEventType.TEXT, content=_display_content(summary))
             yield RuntimeEvent.completed(
                 content=summary,
                 artifact_name="specialist_result",
@@ -1006,16 +995,18 @@ class RuntimeMCPAgent:
             raise RuntimeError("Agent model returned an empty forced summary")
         return content
 
-    async def _force_summary_chunks(self, query: str, evidence: str, *, reason: str = "调查阶段已中止") -> AsyncIterable[str]:
+    async def _force_summary_chunks(self, query: str, evidence: str) -> AsyncIterable[str]:
         if self._model is None:
             raise RuntimeError("Agent model is unavailable for forced summary")
-        prompt = (
-            f"{reason}。禁止调用任何工具。请仅根据下面已经取得的"
-            "证据形成本轮正式的部分检查报告：先概括已枚举的资源及数量，再说明已验证"
+        instructions = (
+            "仅根据已取得的证据形成本轮部分检查报告。先概括已枚举的资源及数量，再说明已验证"
             "的状态、尚未逐项检查的内容和下一轮需要补查的对象。不要声称执行了证据中"
             "没有出现的检查。区分已观察事实、推断和未知项。"
-            "证据关联由运行时自动完成，不要生成 coverage JSON 或调用 ID。\n\n"
-            f"用户问题：{query}\n\n已取得证据：\n{evidence}"
+            "证据关联由运行时自动完成，不要生成 coverage JSON 或调用 ID。只输出报告正文。"
+            "报告仅覆盖当前分配任务在本轮实际完成的检查、新增证据和本轮仍未验证项。"
+            "历史结果只作背景；必要引用时明确标记为前轮证据，不要冒充本轮检查。"
+            "不要合并前轮报告或输出整个审计的最终总结，全部轮次由 Host 最后汇总。"
+            "若本轮没有新增检查，直接说明，不要重新生成历史报告。"
         )
         summary_model = self._model.bind(
             max_tokens=self.summary_max_tokens,
@@ -1023,7 +1014,10 @@ class RuntimeMCPAgent:
         )
         received = False
         async for response in _with_idle_timeout(
-            summary_model.astream([HumanMessage(content=prompt)]),
+            summary_model.astream([
+                SystemMessage(content=instructions),
+                HumanMessage(content=f"用户问题：{query}\n\n已取得证据：\n{evidence}"),
+            ]),
             self.idle_timeout_seconds,
         ):
             content = getattr(response, "content", "")

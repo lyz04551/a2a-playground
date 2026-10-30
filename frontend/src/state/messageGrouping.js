@@ -12,6 +12,10 @@ export function groupAgentDrafts(messages = []) {
   return grouped.filter(message => !message.progress || !attached.has(message.taskId))
 }
 
+export function isStreamingReport(content = '') {
+  return /^\s{0,3}#{1,6}\s+[^\n]*(?:报告|审计结果|检查结果|检查结论|report|findings|assessment|summary)[^\n]*$/im.test(content)
+}
+
 export function visibleConversationMessages(messages = [], loading = false) {
-  return messages.filter(message => !message.progress)
+  return messages.filter(message => !message.progress && (message.completed !== false || isStreamingReport(message.content)))
 }

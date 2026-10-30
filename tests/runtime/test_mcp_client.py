@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from contextlib import asynccontextmanager
 import pytest
 import httpx
-from langchain_core.messages import AIMessage, AIMessageChunk, ToolMessage
+from langchain_core.messages import AIMessage, AIMessageChunk, SystemMessage, ToolMessage
 
 from a2a_runtime.mcp_client import K8sMCPClient
 import a2a_runtime.mcp_client as mcp_client_module
@@ -742,13 +742,13 @@ async def test_blank_first_round_asks_model_to_summarize_observed_evidence():
 
     class SummaryModel:
         def __init__(self):
-            self.prompt = ""
+            self.messages = []
 
         def bind(self, **_kwargs):
             return self
 
         async def astream(self, messages):
-            self.prompt = messages[0].content
+            self.messages = messages
             yield SimpleNamespace(content="已枚举 Deployment；副本状态")
             yield SimpleNamespace(content="尚未逐项读取。")
 
@@ -763,10 +763,12 @@ async def test_blank_first_round_asks_model_to_summarize_observed_evidence():
 
     events = [event async for event in agent.stream("审查 Deployment", "ctx")]
     assert events[-1].data["status"] == "partial"
-    assert events[-1].data["summary"] == "已枚举 Deployment；副本状态尚未逐项读取。"
-    assert "禁止调用任何工具" in model.prompt
-    assert "本轮正式的部分检查报告" in model.prompt
-    assert [event.content for event in events if event.type is RuntimeEventType.TEXT]
+    assert events[-1].data["summary"] == "# K8s Ops Agent 部分检查报告\n\n已枚举 Deployment；副本状态尚未逐项读取。"
+    assert isinstance(model.messages[0], SystemMessage)
+    assert "已枚举的资源及数量" in model.messages[0].content
+    assert "Agent 最终文本为空" not in model.messages[-1].content
+    assert "禁止调用任何工具" not in model.messages[-1].content
+    assert "".join(event.content for event in events if event.type is RuntimeEventType.TEXT) == events[-1].content
 
 
 @pytest.mark.anyio

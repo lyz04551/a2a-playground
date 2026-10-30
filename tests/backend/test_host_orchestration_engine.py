@@ -380,6 +380,56 @@ async def test_react_host_synthesizes_all_observations_after_delegation():
 
 
 @pytest.mark.anyio
+async def test_round_limit_synthesizes_every_round_without_another_decision():
+    class Decisions:
+        async def decide_next(self, request, agents, state):
+            return HostDecision(action="delegate", reason="Inspect next target", tasks=[planned(f"inspect-{state.round}", "ops")])
+
+        async def evaluate(self, task, result):
+            return Evaluation(outcome="insufficient", reason="remaining targets unknown")
+
+        async def synthesize_react_stream(self, request, state, decision):
+            assert state.round == 2
+            assert set(state.observations) == {"inspect-1", "inspect-2"}
+            assert decision.action == "complete"
+            assert "轮" in decision.reason
+            yield "最终总结："
+            yield "汇总两轮证据，未验证项明确列出。"
+
+    async def delegate(run_id, agent_id, prompt):
+        return DelegationResult(state="completed", text="observed evidence")
+
+    events = await collect(HostOrchestrationEngine(FakeRegistry("ops"), Decisions(), delegate, max_rounds=2))
+    assert sum(event["type"] == "round_started" for event in events) == 2
+    assert sum(event["type"] == "synthesis_started" for event in events) == 1
+    assert "".join(event["text"] for event in events if event["type"] == "text") == "最终总结：汇总两轮证据，未验证项明确列出。"
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.anyio
+async def test_context_exhaustion_without_tool_progress_finishes_instead_of_repeating():
+    class Decisions:
+        async def decide_next(self, request, agents, state):
+            assert state.round == 1
+            return HostDecision(action="delegate", reason="Inspect", tasks=[planned("inspect", "ops")])
+
+        async def evaluate(self, task, result):
+            return Evaluation(outcome="insufficient", reason="no new evidence")
+
+    async def delegate(run_id, agent_id, prompt):
+        return DelegationResult(state="completed", text="已有证据", output={
+            "status": "partial", "summary": "已有证据；剩余目标未验证",
+            "continuation": {"allowed": True, "reason": "model context window exceeded"},
+        })
+
+    events = await collect(HostOrchestrationEngine(FakeRegistry("ops"), Decisions(), delegate))
+    assert sum(event["type"] == "round_started" for event in events) == 1
+    assert any(event["type"] == "synthesis_started" for event in events)
+    assert "已有证据" in events[-2]["text"]
+    assert events[-1]["type"] == "done"
+
+
+@pytest.mark.anyio
 async def test_react_host_emits_synthesis_chunks_before_done():
     class StreamDecisions:
         async def decide_next(self, request, agents, state):

@@ -1,6 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildTaskDetails, buildToolDetails, groupToolCalls, statusLabel } from './taskDetails.js'
+import { buildTaskDetails, buildToolDetails, groupToolCalls, statusLabel, taskDurationMs } from './taskDetails.js'
+
+test('shows elapsed time for an active Agent task and preserves completed duration', () => {
+  const now = Date.parse('2026-10-30T02:18:03.000Z')
+  const startedAt = '2026-10-30T02:12:47.000Z'
+  assert.equal(taskDurationMs({ status: 'working', startedAt }, now), 316000)
+  assert.equal(taskDurationMs({ status: 'completed', startedAt, durationMs: 315000 }, now), 315000)
+  assert.equal(taskDurationMs({ status: 'queued' }, now), null)
+})
 
 test('localizes internal execution states without changing their values', () => {
   assert.equal(statusLabel('working', true), '正在执行')

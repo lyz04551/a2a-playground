@@ -45,10 +45,10 @@ export function resolveWorkspaceRefreshResults(results, previous = {}) {
 }
 
 export function getWorkspaceGaps(tasks = []) {
-  return tasks.filter(task => task.evaluation === 'insufficient').map(task => ({
+  return tasks.filter(task => (task.evaluation?.outcome || task.evaluation) === 'insufficient').map(task => ({
     taskId: task.id,
     objective: task.objective || task.label || task.id,
-    reason: task.evaluationReason || '',
+    reason: task.evaluationReason || task.evaluation?.reason || '',
     missingTargets: [...new Set((task.coverage?.expected_targets || []).filter(target => !(task.coverage?.inspected_targets || []).includes(target)))],
   }))
 }
@@ -90,8 +90,14 @@ export function enrichWorkspaceMessages(messages = [], { agents = [], tasksById 
     const inferredTask = tasks.find(task => [task.output, task.streamingOutput, task.result].some(output => output != null && comparableContent(output) === content))
     const isHost = message.source === 'host' || message.metadata?.source === 'host' || (hostSummary && comparableContent(hostSummary) === content)
     if (isHost) return { ...message, source: 'host', agentName: zh ? 'Host Agent 总结' : 'Host Agent summary' }
-    const agentId = message.agentId || message.agent_id || message.metadata?.agent_id || tasksById[message.taskId]?.agentId || inferredTask?.agentId || ''
-    return { ...message, agentId, agentName: message.agentName || namesById.get(agentId) || agentId || 'Agent' }
+    const task = tasksById[message.taskId] || inferredTask
+    const agentId = message.agentId || message.agent_id || message.metadata?.agent_id || task?.agentId || ''
+    const roundStatus = task?.round && message.completed
+      ? (zh
+          ? `第 ${task.round} 轮 · ${task.evaluation === 'insufficient' ? '部分检查' : '检查结果'}`
+          : `Round ${task.round} · ${task.evaluation === 'insufficient' ? 'Partial check' : 'Result'}`)
+      : null
+    return { ...message, agentId, agentName: message.agentName || namesById.get(agentId) || agentId || 'Agent', ...(roundStatus ? { status: roundStatus } : {}) }
   })
 }
 

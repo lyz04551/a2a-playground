@@ -79,6 +79,9 @@ export default function WorkspacePage() {
   const timelineMessages = useMemo(() => enrichWorkspaceMessages(workspace.state.messages, { agents, tasksById: workspace.state.tasksById, hostSummary: workspace.state.hostSummary, language }), [workspace.state.messages, workspace.state.tasksById, workspace.state.hostSummary, agents, language])
   const runStage = useMemo(() => deriveRunStage(trace.rawEvents, agents), [trace.rawEvents, agents])
   const gaps = useMemo(() => getWorkspaceGaps(trace.tasks), [trace.tasks])
+  const gapItems = useMemo(() => [...new Set(gaps.flatMap(gap => gap.missingTargets.length
+    ? gap.missingTargets
+    : [`${gap.objective}：${gap.reason}`]))], [gaps])
   const changeMode = mode => {
     if (workspace.state.messages.length > 0) {
       workspace.beginNewConversation(mode, mode === 'direct' ? workspace.selectedAgentId : '')
@@ -140,8 +143,13 @@ export default function WorkspacePage() {
       {refreshError && <div className="workspace-connection is-interrupted" role="alert">{refreshError} <Button size="small" onClick={() => void refresh()}>{zh ? '重试' : 'Retry'}</Button></div>}
       <section className="agent-workspace__messages"><MessageTimeline messages={timelineMessages} tasks={trace.tasks} loading={(workspace.loading || workspace.canCancel) && !['completed', 'partial', 'evidence_insufficient', 'failed', 'cancelled'].includes(workspace.state.run?.status)} stage={runStage} error={workspace.error} onRetry={workspace.retry} language={language} /></section>
       {!workspace.loading && ['partial', 'evidence_insufficient'].includes(workspace.state.run?.status) && gaps.length > 0 && <section className="workspace-gaps" aria-label={zh ? '尚未验证的检查' : 'Unverified checks'}>
-        <div><strong>{zh ? '尚未验证的检查' : 'Unverified checks'}</strong><Button size="small" onClick={() => setDraft(buildContinuationPrompt(gaps, language))}>{zh ? '填入续查请求' : 'Prepare follow-up'}</Button></div>
-        <ul>{gaps.flatMap(gap => gap.missingTargets.length ? gap.missingTargets.map(target => <li key={`${gap.taskId}:${target}`}>{target}</li>) : [<li key={gap.taskId}>{gap.objective}：{gap.reason}</li>])}</ul>
+        <div className="workspace-gaps__inner">
+          <details key={workspace.conversationId} className="workspace-gaps__details">
+            <summary><span className="workspace-gaps__title">{zh ? '待验证检查' : 'Unverified checks'}<span className="workspace-gaps__count">{zh ? `${gapItems.length} 项` : gapItems.length}</span></span><span className="workspace-gaps__toggle">{zh ? '查看清单' : 'View checks'}</span></summary>
+            <ul>{gapItems.map(target => <li key={target}>{target}</li>)}</ul>
+          </details>
+          <Button className="workspace-gaps__action" size="small" onClick={() => setDraft(buildContinuationPrompt(gaps, language))}>{zh ? '填入续查请求' : 'Prepare follow-up'}</Button>
+        </div>
       </section>}
       <footer className="agent-workspace__composer"><div className="agent-workspace__composer-main">{workspace.state.messages.length === 0 && <PromptTemplates language={language} compact onSelect={template => setDraft(template.prompt)} />}<Input.TextArea value={draft} onChange={event => setDraft(event.target.value)} onPressEnter={event => { if (!event.shiftKey) { event.preventDefault(); submit() } }} placeholder={sendState.reason || (zh ? '描述一个目标…' : 'Describe a goal…')} autoSize={{ minRows: 2, maxRows: 6 }} disabled={workspace.loading} /></div>{workspace.canCancel || workspace.loading ? <Button danger icon={<StopOutlined />} loading={cancelling} onClick={stopRun}>{zh ? '停止' : 'Stop'}</Button> : <Button type="primary" icon={<SendOutlined />} onClick={submit} disabled={sendState.disabled || !draft.trim()}>{zh ? '发送' : 'Send'}</Button>}</footer>
     </main>

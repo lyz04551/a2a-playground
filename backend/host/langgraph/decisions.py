@@ -518,10 +518,11 @@ Approval-required work is blocked, never sufficient.""",
         messages = [
             SystemMessage(content=(
                 "你是 Host Agent。现在根据所有轮次的子 Agent 结果，直接给用户写最终总结。"
-                "先判断原始目标是否完成，再汇总有真实工具证据支持的结论、需要关注的对象和仍未知的项目。"
+                "汇总有真实工具证据支持的结论、需要关注的对象和仍未知的项目，合并跨轮次的重复发现。"
                 "子 Agent 的文字报告是线索，不能替代工具证据；不要把未读取对象写成已验证。"
-                "若评估仍为 insufficient、failed 或 blocked，明确说明部分完成或受阻，"
-                "不要声称全量完成。不要照抄评估器的英文内部原因或生成固定模板。"
+                "若评估仍为 insufficient、failed 或 blocked，在正文明确列出未验证项和阻碍原因，"
+                "不必使用‘部分完成’作为标题或固定开场；不要声称全量完成。"
+                "不要照抄评估器的英文内部原因或生成固定模板。"
                 "只回答用户，不输出 JSON。按用户请求的语言回答。"
             )),
             HumanMessage(content=json.dumps(payload, ensure_ascii=False)),

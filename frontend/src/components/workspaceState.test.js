@@ -7,6 +7,14 @@ test('mode can change only before a conversation has messages', () => {
   assert.equal(canChangeMode({ messageCount: 1 }), false)
 })
 
+test('restored task evaluations retain the unverified checks shown during streaming', () => {
+  const task = { id: 'audit', objective: 'Inspect Pods', coverage: { expected_targets: ['Pod/default/a', 'Pod/default/b'], inspected_targets: ['Pod/default/a'] } }
+  const live = getWorkspaceGaps([{ ...task, evaluation: 'insufficient', evaluationReason: 'coverage incomplete' }])
+  const restored = getWorkspaceGaps([{ ...task, evaluation: { outcome: 'insufficient', reason: 'coverage incomplete' } }])
+  assert.deepEqual(restored, live)
+  assert.deepEqual(restored[0].missingTargets, ['Pod/default/b'])
+})
+
 test('system status maps distinct operational states to accessible labels and icons', () => {
   assert.deepEqual(getSystemStatus({ state: 'offline', kind: 'agent' }), {
     label: 'Agent offline', icon: 'offline', tone: 'muted',
@@ -114,6 +122,26 @@ test('restored messages use persisted source metadata for Agent labels', () => {
     { id: 'host-output', role: 'agent', content: '已汇总', metadata: { source: 'host' } },
   ], { agents: [{ id: 'security', name: 'K8s Security Agent' }], language: 'zh-CN' })
   assert.deepEqual(messages.map(message => message.agentName), ['K8s Security Agent', 'Host Agent 总结'])
+})
+
+test('Auto Agent reports show their round and evidence status without changing report text', () => {
+  const messages = enrichWorkspaceMessages([
+    { id: 'first', role: 'agent', taskId: 'audit-1', content: '# 第一轮报告', completed: true },
+    { id: 'second', role: 'agent', taskId: 'audit-2', content: '# 第二轮报告', completed: true },
+    { id: 'third', role: 'agent', taskId: 'audit-3', content: '# 第三轮报告', completed: true },
+    { id: 'host', role: 'agent', source: 'host', content: '# 汇总结论', completed: true },
+  ], {
+    tasksById: {
+      'audit-1': { agentId: 'ops', round: 1, evaluation: 'insufficient' },
+      'audit-2': { agentId: 'ops', round: 2, evaluation: 'sufficient' },
+      'audit-3': { agentId: 'security', round: 3, evaluation: 'sufficient' },
+    },
+    agents: [{ id: 'ops', name: 'K8s Ops Agent' }, { id: 'security', name: 'K8s Security Agent' }],
+    language: 'zh-CN',
+  })
+  assert.deepEqual(messages.map(message => message.status), ['第 1 轮 · 部分检查', '第 2 轮 · 检查结果', '第 3 轮 · 检查结果', undefined])
+  assert.deepEqual(messages.map(message => message.agentName), ['K8s Ops Agent', 'K8s Ops Agent', 'K8s Security Agent', 'Host Agent 总结'])
+  assert.deepEqual(messages.map(message => message.content), ['# 第一轮报告', '# 第二轮报告', '# 第三轮报告', '# 汇总结论'])
 })
 
 test('workspace refresh preserves available data when an independent API fails', () => {

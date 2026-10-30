@@ -9,20 +9,23 @@ import ApprovalCard from '../ApprovalCard'
 import MarkdownContent from '../MarkdownContent'
 import { formatAgentOutput } from './agentOutput'
 import { deriveRunStageTiming } from '../../state/runStage'
+import { isStreamingReport } from '../../state/messageGrouping'
 
 export default function RunTracePanel({ run = {}, stage, agents = [], language = 'en-US', loading = false, error, canCancel = false, cancelling = false, onCancel, onApproval, onArtifactOpen, onDebug }) {
   const zh = language.startsWith('zh')
   const navigate = useNavigate()
   const [selectedTaskId, setSelectedTaskId] = useState(null)
   const [now, setNow] = useState(Date.now())
+  const active = (loading || canCancel || ['running', 'planning'].includes(run.status)) && !['completed', 'partial', 'evidence_insufficient', 'failed', 'cancelled'].includes(run.status)
   useEffect(() => {
-    if (!loading) return undefined
+    if (!active) return undefined
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [loading])
+  }, [active])
   const tasks = run.tasks || run.steps || []
   const selectedTask = tasks.find(task => task.id === selectedTaskId)
   const details = useMemo(() => selectedTask ? buildTaskDetails(selectedTask, tasks, agents) : null, [selectedTask, tasks, agents])
+  const streamingReport = details?.status !== 'completed' && isStreamingReport(details?.streamingOutput)
   const approvals = run.approvals || []
   const previousMatchingApproval = (approval, index) => [...approvals.slice(0, index)].reverse().find(candidate => (candidate.agent_id || candidate.agentId) === (approval.agent_id || approval.agentId) && (candidate.tool_name || candidate.toolName) === (approval.tool_name || approval.toolName))
   const enrichedApprovals = approvals.map((approval, index) => ({
@@ -43,7 +46,7 @@ export default function RunTracePanel({ run = {}, stage, agents = [], language =
     <aside className="workspace-trace" aria-label="Run trace">
       <header><div><span className="workspace-eyebrow">Execution</span><h2>Run trace</h2></div><div className="workspace-trace__actions"><SystemStatus status={{ state: run.status || 'online' }} />{run.id && <Button type="text" size="small" aria-label={zh ? '打开完整任务流' : 'Open full task flow'} icon={<BranchesOutlined />} onClick={() => navigate(`/tasks?run=${encodeURIComponent(run.id)}`)} />}{canCancel && <Button danger size="small" loading={cancelling} aria-label={zh ? '停止当前运行' : 'Stop current run'} icon={<StopOutlined />} onClick={onCancel}>{zh ? '停止' : 'Stop'}</Button>}<Button type="text" size="small" aria-label="Open run debugger" icon={<BugOutlined />} onClick={onDebug} /></div></header>
       {stage?.textZh && <section className={`run-stage is-${stage.state || 'working'}`}><strong>{stage?.state === 'failed' ? (zh ? '运行失败' : 'Run failed') : stageText}</strong>{failureDetail && <details><summary>{zh ? '查看失败原因' : 'View failure reason'}</summary><p>{failureDetail}</p></details>}{stage.active?.map(item => <small key={item.id}>{item.agentName}{item.objective ? ` · ${item.objective}` : ''}</small>)}</section>}
-      {loading && <p className="workspace-state" role="status"><LoadingOutlined /> {waitingText}</p>}
+      {active && <p className="workspace-state" role="status"><LoadingOutlined /> {waitingText}</p>}
       {error && <p className="workspace-state workspace-state--error" role="alert">{error}</p>}
       {!loading && !error && tasks.length === 0 && <p className="workspace-empty">Run activity will appear here.</p>}
       <RunTimeline run={run} tasks={tasks} rounds={run.rounds || []} approvals={enrichedApprovals} onApproval={onApproval} selectedTaskId={selectedTaskId} onTaskSelect={task => setSelectedTaskId(task.id)} language={language} now={now} />
@@ -52,8 +55,8 @@ export default function RunTracePanel({ run = {}, stage, agents = [], language =
       <Drawer title={zh ? 'Agent 任务详情' : 'Agent task details'} open={Boolean(details)} onClose={() => setSelectedTaskId(null)} width={520}>
         {details && <div className="task-details">
           <div className="task-details__heading"><h3>{details.objective}</h3><Tag>{statusLabel(details.status || 'queued', zh)}</Tag><small>{details.agentName}</small></div>
-          <section className="task-details__report"><strong>{zh ? '返回结果' : 'Result'}</strong><MarkdownContent>{formatAgentOutput(details.resultText)}</MarkdownContent></section>
-          {(details.draftSegments?.length > 0 || (details.status !== 'completed' && details.streamingOutput)) && <section className="task-details__drafts"><strong>{zh ? '生成记录 · 尚未核实' : 'Generated drafts · unverified'}</strong>{details.draftSegments?.map((draft, index) => <p key={index}>{draft}</p>)}{details.status !== 'completed' && details.streamingOutput && <p>{details.streamingOutput}</p>}</section>}
+          <section className="task-details__report"><strong>{zh ? '返回结果' : 'Result'}</strong><MarkdownContent>{formatAgentOutput(streamingReport ? details.streamingOutput : details.resultText)}</MarkdownContent></section>
+          {(details.draftSegments?.length > 0 || (details.status !== 'completed' && !streamingReport && details.streamingOutput)) && <section className="task-details__drafts"><strong>{zh ? '生成记录 · 尚未核实' : 'Generated drafts · unverified'}</strong>{details.draftSegments?.map((draft, index) => <p key={index}>{draft}</p>)}{details.status !== 'completed' && !streamingReport && details.streamingOutput && <p>{details.streamingOutput}</p>}</section>}
           {details.assessment && <section className="task-evidence"><strong>{zh ? '证据分类' : 'Evidence classification'}</strong>
             <p>{zh ? '已验证工具结果' : 'Observed tool results'}: {details.assessment.facts?.length || 0}</p>
             {!!details.assessment.inferences?.length && <p>{zh ? '推断' : 'Inferences'}: {details.assessment.inferences.length}</p>}

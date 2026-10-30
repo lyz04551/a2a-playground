@@ -332,35 +332,8 @@ class HostOrchestrationEngine:
             }
 
             if decision.action != "delegate":
-                response = decision.response
-                if state.observations and decision.action in {"complete", "stop"}:
-                    yield {"type": "synthesis_started"}
-                    stream_synthesis = getattr(self._decisions, "synthesize_react_stream", None)
-                    if stream_synthesis is not None:
-                        emitted = False
-                        try:
-                            async for chunk in stream_synthesis(request, state, decision):
-                                if chunk:
-                                    emitted = True
-                                    yield {"type": "text", "text": chunk, "host_action": decision.action}
-                        except Exception:
-                            if emitted:
-                                raise
-                            yield {"type": "text", "text": response, "host_action": decision.action}
-                        yield {"type": "done", "session_id": run_id}
-                        return
-                    synthesize = getattr(self._decisions, "synthesize_react", None)
-                    if synthesize is not None:
-                        try:
-                            response = await synthesize(request, state, decision)
-                        except Exception:
-                            response = decision.response
-                yield {
-                    "type": "text",
-                    "text": response,
-                    "host_action": decision.action,
-                }
-                yield {"type": "done", "session_id": run_id}
+                async for event in self._synthesize_react(request, run_id, state, decision):
+                    yield event
                 return
 
             state.total_tasks += len(decision.tasks)
@@ -388,6 +361,13 @@ class HostOrchestrationEngine:
                     "agent_id": task.agent_id,
                 }
 
+            prior_evidence = {
+                json.dumps(item, sort_keys=True, ensure_ascii=False)
+                for observed in state.observations.values()
+                if observed.result.output
+                for item in observed.result.output.evidence
+            }
+            made_tool_progress = False
             progress: asyncio.Queue[dict] = asyncio.Queue()
             executions_task = asyncio.ensure_future(asyncio.gather(*(
                 self._run_task(
@@ -418,12 +398,16 @@ class HostOrchestrationEngine:
                     return_when=asyncio.FIRST_COMPLETED,
                 )
                 if progress_task in done:
-                    yield progress_task.result()
+                    progress_event = progress_task.result()
+                    made_tool_progress |= progress_event.get("type") == "tool_call"
+                    yield progress_event
                     progress_task = asyncio.create_task(progress.get())
             if progress_task and not progress_task.done():
                 progress_task.cancel()
             while not progress.empty():
-                yield progress.get_nowait()
+                progress_event = progress.get_nowait()
+                made_tool_progress |= progress_event.get("type") == "tool_call"
+                yield progress_event
 
             executions = await executions_task
             approval_encountered = False
@@ -490,7 +474,69 @@ class HostOrchestrationEngine:
             if approval_encountered:
                 return
 
-        raise RuntimeError("Host ReAct round budget exhausted")
+            new_evidence = {
+                json.dumps(item, sort_keys=True, ensure_ascii=False)
+                for result, _, _, _ in executions if result.output
+                for item in result.output.evidence
+            } - prior_evidence
+            if not made_tool_progress and not new_evidence and executions and all(
+                result.output is not None
+                and result.output.continuation.reason == "model context window exceeded"
+                for result, _, _, _ in executions
+            ):
+                async for event in self._finish_react(request, run_id, state, "本轮上下文超限且没有新增工具证据，不再重复派发。"):
+                    yield event
+                return
+
+        async for event in self._finish_react(request, run_id, state, "已达到配置的轮数上限，汇总全部轮次的检查结果。"):
+            yield event
+
+    async def _finish_react(self, request, run_id, state, reason):
+        notes = []
+        for observed in state.observations.values():
+            summary = observed.result.output.summary if observed.result.output else observed.result.text
+            notes.append(f"### {observed.task.objective}\n{summary or observed.evaluation.reason}")
+        decision = HostDecision(
+            action="complete",
+            reason=reason + "请输出最终总结，合并重复发现，区分已确认结论与未验证项，不要把未检查项写成已完成。",
+            response="# 最终总结\n\n" + "\n\n".join(notes),
+        )
+        state.decisions.append(decision)
+        yield {"type": "decision_created", "round": state.round, "action": decision.action,
+               "reason": decision.reason, "tasks": [], "checkpoint": state.model_dump(mode="json")}
+        async for event in self._synthesize_react(request, run_id, state, decision):
+            yield event
+
+    async def _synthesize_react(self, request, run_id, state, decision):
+        response = decision.response
+        if state.observations and decision.action in {"complete", "stop"}:
+            yield {"type": "synthesis_started"}
+            stream_synthesis = getattr(self._decisions, "synthesize_react_stream", None)
+            if stream_synthesis is not None:
+                emitted = False
+                try:
+                    async for chunk in stream_synthesis(request, state, decision):
+                        if chunk:
+                            emitted = True
+                            yield {"type": "text", "text": chunk, "host_action": decision.action}
+                except Exception:
+                    if emitted:
+                        raise
+                    yield {"type": "text", "text": response, "host_action": decision.action}
+                yield {"type": "done", "session_id": run_id}
+                return
+            synthesize = getattr(self._decisions, "synthesize_react", None)
+            if synthesize is not None:
+                try:
+                    response = await synthesize(request, state, decision)
+                except Exception:
+                    response = decision.response
+        yield {
+            "type": "text",
+            "text": response,
+            "host_action": decision.action,
+        }
+        yield {"type": "done", "session_id": run_id}
 
     @staticmethod
     def _react_task_prompt(
@@ -588,6 +634,12 @@ class HostOrchestrationEngine:
             + "\n- ".join(task.completion_criteria)
             + mutation_instruction
             + language_instruction
+            + "\n\nRound report scope: Report only this assigned task's work in the current round: "
+            "new checks, evidence, findings, and remaining gaps within this assignment. "
+            "Prior observations are context to reuse, not work performed this round. "
+            "Reference prior evidence briefly only when necessary and label it as prior-round evidence. "
+            "Do not repeat or merge earlier reports, write an overall final report, or claim the entire audit is finished. "
+            "The Host alone synthesizes all rounds. If no new checks were performed, say so explicitly."
             + "\n\nFor a finite multi-target audit, establish the target list before inspection. "
             "Prior tool evidence is a same-run excerpt, not a fresh tool result. "
             "Reuse a verified target enumeration and its expected_targets when the scope matches; "

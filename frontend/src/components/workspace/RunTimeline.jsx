@@ -9,9 +9,10 @@ import {
   PauseCircleOutlined,
   RobotOutlined,
 } from '@ant-design/icons'
-import { buildToolDetails, groupToolCalls, statusLabel } from './taskDetails'
+import { buildToolDetails, groupToolCalls, statusLabel, taskDurationMs } from './taskDetails'
 import { buildRoundTimeline, roundDisplayText } from './roundTimeline'
 import ApprovalCard from '../ApprovalCard'
+import { isStreamingReport } from '../../state/messageGrouping'
 
 function StatusIcon({ status }) {
   if (status === 'completed') return <CheckCircleFilled />
@@ -31,7 +32,7 @@ function AgentThinking({ task, zh, now }) {
   const lastAt = task.thinkingAt || task.startedAt
   const transcript = task.thinkingTranscript || task.thinkingExcerpt || ''
   const drafts = task.draftSegments || []
-  const currentDraft = active ? task.streamingOutput || '' : ''
+  const currentDraft = active && !isStreamingReport(task.streamingOutput) ? task.streamingOutput || '' : ''
   const scrollRef = useRef(null)
   const [following, setFollowing] = useState(true)
   useEffect(() => {
@@ -50,7 +51,7 @@ function AgentThinking({ task, zh, now }) {
       {active && !following && <button className="agent-thinking__latest" type="button" onClick={() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; setFollowing(true) }}>{zh ? '跳到最新' : 'Jump to latest'}</button>}
     </details>}
     {!transcript && active && <p className="agent-thinking__waiting">{zh ? '模型尚未返回分析文本；工具活动会显示在下方。' : 'No analysis text yet; tool activity appears below.'}</p>}
-    {(drafts.length > 0 || currentDraft) && <details className="agent-thinking__drafts" open={active || undefined}>
+    {(drafts.length > 0 || currentDraft) && <details className="agent-thinking__drafts">
       <summary>{zh ? '生成记录 · 尚未核实' : 'Generated drafts · unverified'}</summary>
       <div className="agent-thinking__scroll" role="region" aria-label={zh ? 'Agent 生成记录' : 'Agent generated drafts'}>
         {drafts.map((draft, index) => <p key={index}>{draft}</p>)}
@@ -137,7 +138,7 @@ export default function RunTimeline({ run = {}, tasks = [], rounds = [], approva
         <React.Fragment key={item.id}>
           <li className={`run-timeline__node is-agent status-${item.task.status || 'queued'}`}>
             <span className="run-timeline__rail"><RobotOutlined /></span>
-            <div className="run-timeline__agent-content"><button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {statusLabel(item.task.status || 'queued', zh)} · {formatDuration(item.task.durationMs)}</small>{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}<em>{zh ? '查看任务与报告' : 'View task and report'} <ArrowRightOutlined /></em></button><AgentThinking task={item.task} zh={zh} now={now} /></div>
+            <div className="run-timeline__agent-content"><button type="button" className={`run-timeline__task${selectedTaskId === item.task.id ? ' is-selected' : ''}`} onClick={() => onTaskSelect?.(item.task)} aria-label={`Open details for ${item.task.objective || item.task.label || item.task.id}`}><strong>{item.task.agentName || item.task.agentId || 'Agent task'}</strong><span>{item.task.objective || item.task.label || item.task.id}</span><small><StatusIcon status={item.task.status} /> {statusLabel(item.task.status || 'queued', zh)} · {formatDuration(taskDurationMs(item.task, now))}</small>{item.task.error && <code>{typeof item.task.error === 'string' ? item.task.error : item.task.error.message || JSON.stringify(item.task.error)}</code>}<em>{zh ? '查看任务与报告' : 'View task and report'} <ArrowRightOutlined /></em></button><AgentThinking task={item.task} zh={zh} now={now} /></div>
           </li>
           {(item.task.tools || []).length > 0 && <ToolActivity tools={item.task.tools} zh={zh} />}
           {approvals.filter(approval => (approval.taskId || approval.task_id) === item.task.id).map(approval => (

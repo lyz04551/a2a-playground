@@ -1,6 +1,18 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { groupAgentDrafts, visibleConversationMessages } from './messageGrouping.js'
+import { groupAgentDrafts, visibleConversationMessages, isStreamingReport } from './messageGrouping.js'
+
+test('streams reports from different Agents without exposing progress records', () => {
+  const messages = [
+    { id: 'security', completed: false, content: '# Kubernetes 集群只读安全审计报告\n\n## RBAC 发现' },
+    { id: 'ops', completed: false, content: '## Deployment inspection report\n\nEvidence' },
+    { id: 'progress', completed: false, content: '继续读取剩余 ClusterRole' },
+    { id: 'old', progress: true, content: '# 已被后续工具调用替代的报告' },
+  ]
+  assert.deepEqual(visibleConversationMessages(messages, true).map(message => message.id), ['security', 'ops'])
+  assert.equal(isStreamingReport('正在检查 Pod'), false)
+  assert.equal(isStreamingReport(), false)
+})
 
 test('keeps earlier tool-superseded drafts inside the current Agent card', () => {
   const messages = [
@@ -27,6 +39,6 @@ test('generated progress records stay out of the conversation while agent report
     { id: 'message:security', role: 'agent', taskId: 'security', content: '现在枚举 Service、NetworkP', completed: false },
     { id: 'message:ops', role: 'agent', taskId: 'ops', content: 'Ops 已完成', completed: true },
   ]
-  assert.deepEqual(visibleConversationMessages(messages, true).map(message => message.id), ['user', 'message:security', 'message:ops'])
-  assert.deepEqual(visibleConversationMessages(messages, false).map(message => message.id), ['user', 'message:security', 'message:ops'])
+  assert.deepEqual(visibleConversationMessages(messages, true).map(message => message.id), ['user', 'message:ops'])
+  assert.deepEqual(visibleConversationMessages(messages, false).map(message => message.id), ['user', 'message:ops'])
 })
